@@ -1,0 +1,19 @@
+{
+  "name": "@hin/db",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "private": true,
+  "scripts": {
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply hin-d1 --local -c ../../apps/api/wrangler.toml",
+    "db:migrate:prod": "wrangler d1 migrations apply hin-d1 --remote -c ../../apps/api/wrangler.toml"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.30.10"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.21.4",
+    "wrangler": "^3.57.1"
+  }
+}

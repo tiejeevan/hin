@@ -1,0 +1,18 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Built assets
+dist
+.turbo
+
+# Cloudflare Wrangler files
+.wrangler
+.dev.vars
+package-lock.json
+
+# IDE / OS files
+.DS_Store
+.vscode
+.idea
+*.log
