@@ -3,6 +3,7 @@ import { z } from 'zod';
 export interface User {
   id: number;
   username: string;
+  role: 'user' | 'admin';
   createdAt: string;
 }
 
@@ -61,6 +62,16 @@ export const CreateCommentSchema = z.object({
 
 export const CreateMessageSchema = z.object({
   content: z.string().min(1, 'Message cannot be empty').max(1000, 'Message is too long'),
+});
+
+export const RegisterSchema = z.object({
+  username: z.string().min(3, 'Username must be at least 3 characters').max(30, 'Username is too long'),
+  password: z.string().min(6, 'Password must be at least 6 characters').max(50, 'Password is too long'),
+});
+
+export const LoginSchema = z.object({
+  username: z.string().min(1, 'Username is required'),
+  password: z.string().min(1, 'Password is required'),
 });
 
 // WebSocket Message Types

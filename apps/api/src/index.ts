@@ -4,62 +4,179 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq, desc, and, count, sql } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import { Post, Comment, Message, Notification, User } from '@hin/types';
+import bcrypt from 'bcryptjs';
+import { sign, verify } from 'hono/jwt';
 
 interface Env {
   DB: D1Database;
   REALTIME_DO: DurableObjectNamespace;
 }
 
+const JWT_SECRET = 'hin-super-secret-key-12345';
+
 const app = new Hono<{ Bindings: Env }>();
 
 // Enable CORS
 app.use('*', cors({
   origin: '*',
-  allowHeaders: ['Content-Type', 'x-user-id'],
+  allowHeaders: ['Content-Type', 'Authorization'],
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 }));
+
+// Helper to get authenticated user from JWT token
+async function getAuthUser(c: any): Promise<any | null> {
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+  const token = authHeader.substring(7);
+  try {
+    const payload = await verify(token, JWT_SECRET, 'HS256');
+    const db = drizzle(c.env.DB, { schema });
+    const user = await db.select().from(schema.users).where(eq(schema.users.id, payload.id as number)).get();
+    return user || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Ensure Admin user is seeded in DB
+async function seedAdminUser(db: any) {
+  const username = 'admin';
+  const existing = await db.select().from(schema.users).where(eq(schema.users.username, username)).get();
+  if (!existing) {
+    const passwordHash = await bcrypt.hash('087425', 10);
+    await db.insert(schema.users).values({
+      username,
+      passwordHash,
+      role: 'admin',
+    }).run();
+  }
+}
 
 // Basic test endpoint
 app.get('/', (c) => c.text('Hin API is running!'));
 
-// Get all users (for mock login)
-app.get('/api/users', async (c) => {
-  const db = drizzle(c.env.DB, { schema });
-  const allUsers = await db.select().from(schema.users).all();
-  return c.json(allUsers);
-});
+// 1. AUTH ENDPOINTS
 
-// Create/Login user
-app.post('/api/users', async (c) => {
+// Register
+app.post('/api/auth/register', async (c) => {
   const db = drizzle(c.env.DB, { schema });
-  const { username } = await c.req.json<{ username: string }>();
+  await seedAdminUser(db); // Seed admin user if not exists
+
+  const { username, password } = await c.req.json<{ username?: string; password?: string }>();
   
   if (!username || username.trim() === '') {
     return c.json({ error: 'Username is required' }, 400);
   }
-
-  // Check if exists
-  let user = await db.select().from(schema.users).where(eq(schema.users.username, username.trim())).get();
-  
-  if (!user) {
-    // Create new
-    const [inserted] = await db.insert(schema.users).values({
-      username: username.trim(),
-    }).returning();
-    user = inserted;
+  if (!password || password.length < 6) {
+    return c.json({ error: 'Password must be at least 6 characters' }, 400);
   }
 
-  return c.json(user);
+  const normalizedUsername = username.trim().toLowerCase();
+
+  // Check if exists
+  const existing = await db.select().from(schema.users).where(eq(schema.users.username, normalizedUsername)).get();
+  if (existing) {
+    return c.json({ error: 'Username already taken' }, 400);
+  }
+
+  // Hash password
+  const passwordHash = await bcrypt.hash(password, 10);
+
+  // Insert user
+  const [inserted] = await db.insert(schema.users).values({
+    username: normalizedUsername,
+    passwordHash,
+    role: 'user',
+  }).returning();
+
+  // Generate JWT token
+  const token = await sign({ 
+    id: inserted.id, 
+    username: inserted.username, 
+    role: inserted.role,
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
+  }, JWT_SECRET, 'HS256');
+
+  return c.json({
+    token,
+    user: {
+      id: inserted.id,
+      username: inserted.username,
+      role: inserted.role,
+      createdAt: inserted.createdAt,
+    }
+  });
+});
+
+// Login
+app.post('/api/auth/login', async (c) => {
+  const db = drizzle(c.env.DB, { schema });
+  await seedAdminUser(db); // Seed admin user if not exists
+
+  const { username, password } = await c.req.json<{ username?: string; password?: string }>();
+  
+  if (!username || !password) {
+    return c.json({ error: 'Username and password are required' }, 400);
+  }
+
+  const normalizedUsername = username.trim().toLowerCase();
+
+  // Find user
+  const user = await db.select().from(schema.users).where(eq(schema.users.username, normalizedUsername)).get();
+  if (!user) {
+    return c.json({ error: 'Invalid username or password' }, 401);
+  }
+
+  // Compare passwords
+  const passwordMatch = await bcrypt.compare(password, user.passwordHash);
+  if (!passwordMatch) {
+    return c.json({ error: 'Invalid username or password' }, 401);
+  }
+
+  // Generate JWT token
+  const token = await sign({ 
+    id: user.id, 
+    username: user.username, 
+    role: user.role,
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
+  }, JWT_SECRET, 'HS256');
+
+  return c.json({
+    token,
+    user: {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      createdAt: user.createdAt,
+    }
+  });
+});
+
+// Get all users (for chat list and user details)
+app.get('/api/users', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const allUsers = await db.select({
+    id: schema.users.id,
+    username: schema.users.username,
+    role: schema.users.role,
+    createdAt: schema.users.createdAt,
+  }).from(schema.users).all();
+
+  return c.json(allUsers);
 });
 
 // Get posts
 app.get('/api/posts', async (c) => {
   const db = drizzle(c.env.DB, { schema });
-  const currentUserIdStr = c.req.header('x-user-id');
-  const currentUserId = currentUserIdStr ? parseInt(currentUserIdStr) : null;
+  const authUser = await getAuthUser(c);
+  const currentUserId = authUser ? authUser.id : null;
 
   // Let's fetch posts with author details, likes count, and comments count.
-  // Using direct select statements and subqueries/aggregations for SQLite
   const allPosts = await db.select({
     id: schema.posts.id,
     userId: schema.posts.userId,
@@ -73,7 +190,6 @@ app.get('/api/posts', async (c) => {
   .orderBy(desc(schema.posts.createdAt))
   .all();
 
-  // Map to include comments count, likes count, and hasLiked status
   const postsWithMetadata: Post[] = await Promise.all(
     allPosts.map(async (post) => {
       // Likes count
@@ -122,31 +238,25 @@ app.get('/api/posts', async (c) => {
 
 // Create post
 app.post('/api/posts', async (c) => {
-  const db = drizzle(c.env.DB, { schema });
-  const currentUserIdStr = c.req.header('x-user-id');
-  
-  if (!currentUserIdStr) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-  const currentUserId = parseInt(currentUserIdStr);
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
 
+  const db = drizzle(c.env.DB, { schema });
   const { content, mediaUrl } = await c.req.json<{ content: string; mediaUrl?: string }>();
   if (!content || content.trim() === '') {
     return c.json({ error: 'Content cannot be empty' }, 400);
   }
 
   const [inserted] = await db.insert(schema.posts).values({
-    userId: currentUserId,
+    userId: authUser.id,
     content: content,
     mediaUrl: mediaUrl || null,
   }).returning();
 
-  const author = await db.select().from(schema.users).where(eq(schema.users.id, currentUserId)).get();
-
   const responsePost: Post = {
     id: inserted.id,
-    userId: currentUserId,
-    username: author?.username || 'Unknown',
+    userId: authUser.id,
+    username: authUser.username,
     content: inserted.content,
     mediaUrl: inserted.mediaUrl,
     createdAt: inserted.createdAt,
@@ -160,10 +270,10 @@ app.post('/api/posts', async (c) => {
 
 // Toggle Like
 app.post('/api/posts/:id/like', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
   const db = drizzle(c.env.DB, { schema });
-  const currentUserIdStr = c.req.header('x-user-id');
-  if (!currentUserIdStr) return c.json({ error: 'Unauthorized' }, 401);
-  const currentUserId = parseInt(currentUserIdStr);
   const postId = parseInt(c.req.param('id'));
 
   // Get post details
@@ -174,7 +284,7 @@ app.post('/api/posts/:id/like', async (c) => {
   const existingLike = await db.select().from(schema.likes).where(
     and(
       eq(schema.likes.postId, postId),
-      eq(schema.likes.userId, currentUserId)
+      eq(schema.likes.userId, authUser.id)
     )
   ).get();
 
@@ -184,25 +294,24 @@ app.post('/api/posts/:id/like', async (c) => {
     await db.delete(schema.likes).where(
       and(
         eq(schema.likes.postId, postId),
-        eq(schema.likes.userId, currentUserId)
+        eq(schema.likes.userId, authUser.id)
       )
     ).run();
   } else {
     // Like
     await db.insert(schema.likes).values({
       postId,
-      userId: currentUserId,
+      userId: authUser.id,
     }).run();
     liked = true;
 
     // Send real-time notification to post owner if it's someone else
-    if (post.userId !== currentUserId) {
-      const actor = await db.select().from(schema.users).where(eq(schema.users.id, currentUserId)).get();
-      const notificationContent = `${actor?.username || 'Someone'} liked your post.`;
+    if (post.userId !== authUser.id) {
+      const notificationContent = `${authUser.username} liked your post.`;
       
       const [notif] = await db.insert(schema.notifications).values({
         userId: post.userId,
-        senderId: currentUserId,
+        senderId: authUser.id,
         type: 'like',
         entityId: postId,
         content: notificationContent,
@@ -212,8 +321,8 @@ app.post('/api/posts/:id/like', async (c) => {
       const notifPayload: Notification = {
         id: notif.id,
         userId: post.userId,
-        senderId: currentUserId,
-        senderUsername: actor?.username || 'Someone',
+        senderId: authUser.id,
+        senderUsername: authUser.username,
         type: 'like',
         entityId: postId,
         content: notificationContent,
@@ -263,10 +372,10 @@ app.get('/api/posts/:id/comments', async (c) => {
 
 // Create comment
 app.post('/api/posts/:id/comments', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
   const db = drizzle(c.env.DB, { schema });
-  const currentUserIdStr = c.req.header('x-user-id');
-  if (!currentUserIdStr) return c.json({ error: 'Unauthorized' }, 401);
-  const currentUserId = parseInt(currentUserIdStr);
   const postId = parseInt(c.req.param('id'));
 
   const { content } = await c.req.json<{ content: string }>();
@@ -279,27 +388,25 @@ app.post('/api/posts/:id/comments', async (c) => {
 
   const [inserted] = await db.insert(schema.comments).values({
     postId,
-    userId: currentUserId,
+    userId: authUser.id,
     content: content.trim(),
   }).returning();
-
-  const author = await db.select().from(schema.users).where(eq(schema.users.id, currentUserId)).get();
 
   const commentResponse: Comment = {
     id: inserted.id,
     postId: inserted.postId,
-    userId: currentUserId,
-    username: author?.username || 'Unknown',
+    userId: authUser.id,
+    username: authUser.username,
     content: inserted.content,
     createdAt: inserted.createdAt,
   };
 
   // Send real-time notification to post owner if it's someone else
-  if (post.userId !== currentUserId) {
-    const notificationContent = `${author?.username || 'Someone'} commented on your post: "${content.substring(0, 20)}${content.length > 20 ? '...' : ''}"`;
+  if (post.userId !== authUser.id) {
+    const notificationContent = `${authUser.username} commented on your post: "${content.substring(0, 20)}${content.length > 20 ? '...' : ''}"`;
     const [notif] = await db.insert(schema.notifications).values({
       userId: post.userId,
-      senderId: currentUserId,
+      senderId: authUser.id,
       type: 'comment',
       entityId: postId,
       content: notificationContent,
@@ -309,8 +416,8 @@ app.post('/api/posts/:id/comments', async (c) => {
     const notifPayload: Notification = {
       id: notif.id,
       userId: post.userId,
-      senderId: currentUserId,
-      senderUsername: author?.username || 'Someone',
+      senderId: authUser.id,
+      senderUsername: authUser.username,
       type: 'comment',
       entityId: postId,
       content: notificationContent,
@@ -333,14 +440,12 @@ app.post('/api/posts/:id/comments', async (c) => {
 
 // Get direct messages history
 app.get('/api/messages/:otherUserId', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
   const db = drizzle(c.env.DB, { schema });
-  const currentUserIdStr = c.req.header('x-user-id');
-  if (!currentUserIdStr) return c.json({ error: 'Unauthorized' }, 401);
-  const currentUserId = parseInt(currentUserIdStr);
   const otherUserId = parseInt(c.req.param('otherUserId'));
 
-  // Fetch messages between sender and receiver
-  // WHERE (sender = userA AND receiver = userB) OR (sender = userB AND receiver = userA)
   const chatMessages = await db
     .select({
       id: schema.messages.id,
@@ -351,8 +456,8 @@ app.get('/api/messages/:otherUserId', async (c) => {
     })
     .from(schema.messages)
     .where(
-      sql`(${schema.messages.senderId} = ${currentUserId} AND ${schema.messages.receiverId} = ${otherUserId}) OR 
-          (${schema.messages.senderId} = ${otherUserId} AND ${schema.messages.receiverId} = ${currentUserId})`
+      sql`(${schema.messages.senderId} = ${authUser.id} AND ${schema.messages.receiverId} = ${otherUserId}) OR 
+          (${schema.messages.senderId} = ${otherUserId} AND ${schema.messages.receiverId} = ${authUser.id})`
     )
     .orderBy(schema.messages.createdAt)
     .all();
@@ -380,10 +485,10 @@ app.get('/api/messages/:otherUserId', async (c) => {
 
 // Get notifications
 app.get('/api/notifications', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
   const db = drizzle(c.env.DB, { schema });
-  const currentUserIdStr = c.req.header('x-user-id');
-  if (!currentUserIdStr) return c.json({ error: 'Unauthorized' }, 401);
-  const currentUserId = parseInt(currentUserIdStr);
 
   const rawNotifs = await db
     .select({
@@ -397,7 +502,7 @@ app.get('/api/notifications', async (c) => {
       createdAt: schema.notifications.createdAt,
     })
     .from(schema.notifications)
-    .where(eq(schema.notifications.userId, currentUserId))
+    .where(eq(schema.notifications.userId, authUser.id))
     .orderBy(desc(schema.notifications.createdAt))
     .all();
 
@@ -423,10 +528,10 @@ app.get('/api/notifications', async (c) => {
 
 // Mark notification as read
 app.post('/api/notifications/:id/read', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
   const db = drizzle(c.env.DB, { schema });
-  const currentUserIdStr = c.req.header('x-user-id');
-  if (!currentUserIdStr) return c.json({ error: 'Unauthorized' }, 401);
-  const currentUserId = parseInt(currentUserIdStr);
   const notifId = parseInt(c.req.param('id'));
 
   await db
@@ -435,10 +540,74 @@ app.post('/api/notifications/:id/read', async (c) => {
     .where(
       and(
         eq(schema.notifications.id, notifId),
-        eq(schema.notifications.userId, currentUserId)
+        eq(schema.notifications.userId, authUser.id)
       )
     )
     .run();
+
+  return c.json({ success: true });
+});
+
+// 2. ADMIN ENDPOINTS
+
+// Admin stats & user list
+app.get('/api/admin/stats', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+
+  const totalUsers = await db.select({ value: count() }).from(schema.users).get();
+  const totalPosts = await db.select({ value: count() }).from(schema.posts).get();
+  const totalComments = await db.select({ value: count() }).from(schema.comments).get();
+  const totalMessages = await db.select({ value: count() }).from(schema.messages).get();
+
+  const allUsers = await db.select({
+    id: schema.users.id,
+    username: schema.users.username,
+    role: schema.users.role,
+    createdAt: schema.users.createdAt,
+  }).from(schema.users).all();
+
+  return c.json({
+    stats: {
+      users: totalUsers?.value || 0,
+      posts: totalPosts?.value || 0,
+      comments: totalComments?.value || 0,
+      messages: totalMessages?.value || 0,
+    },
+    users: allUsers,
+  });
+});
+
+// Admin Delete Post
+app.delete('/api/posts/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const postId = parseInt(c.req.param('id'));
+
+  await db.delete(schema.posts).where(eq(schema.posts.id, postId)).run();
+
+  return c.json({ success: true });
+});
+
+// Admin Delete Comment
+app.delete('/api/comments/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const commentId = parseInt(c.req.param('id'));
+
+  await db.delete(schema.comments).where(eq(schema.comments.id, commentId)).run();
 
   return c.json({ success: true });
 });
@@ -529,9 +698,17 @@ export class RealtimeDO implements DurableObject {
     const db = drizzle(this.env.DB, { schema });
 
     if (message.type === 'join') {
-      const { userId, username } = message.payload;
-      this.sessions.set(ws, { userId, username });
-      this.broadcastOnlineUsers();
+      const { token } = message.payload;
+      try {
+        const payload = await verify(token, JWT_SECRET, 'HS256');
+        const userId = payload.id as number;
+        const username = payload.username as string;
+
+        this.sessions.set(ws, { userId, username });
+        this.broadcastOnlineUsers();
+      } catch (e) {
+        console.error('WebSocket token authentication failed:', e);
+      }
     } 
     
     else if (message.type === 'send_message') {

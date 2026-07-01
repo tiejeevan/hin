@@ -8,6 +8,13 @@
       "when": 1782925072872,
       "tag": "0000_slow_malice",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1782927869076,
+      "tag": "0001_reflective_hydra",
+      "breakpoints": true
     }
   ]
 }
