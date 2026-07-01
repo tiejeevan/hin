@@ -17,8 +17,8 @@ import {
 } from 'lucide-react';
 import { Post, Comment, Message, Notification, User as UserType } from '@hin/types';
 
-const API_URL = 'http://localhost:8787';
-const WS_URL = 'ws://localhost:8787/ws';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8787/ws';
 
 interface Toast {
   id: string;

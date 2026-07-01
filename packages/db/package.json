@@ -7,7 +7,8 @@
   "scripts": {
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply hin-d1 --local -c ../../apps/api/wrangler.toml",
-    "db:migrate:prod": "wrangler d1 migrations apply hin-d1 --remote -c ../../apps/api/wrangler.toml"
+    "db:migrate:prod": "wrangler d1 migrations apply hin-d1 --remote -c ../../apps/api/wrangler.toml",
+    "build": "echo 'No build step required'"
   },
   "dependencies": {
     "drizzle-orm": "^0.30.10"
