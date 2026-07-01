@@ -15,6 +15,13 @@
       "when": 1782927869076,
       "tag": "0001_reflective_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1782928683452,
+      "tag": "0002_low_reaper",
+      "breakpoints": true
     }
   ]
 }

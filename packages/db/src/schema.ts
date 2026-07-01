@@ -1,4 +1,4 @@
-import { sqliteTable, integer, text, primaryKey } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, integer, text, primaryKey, index } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 export const users = sqliteTable('users', {
@@ -15,15 +15,27 @@ export const posts = sqliteTable('posts', {
   content: text('content').notNull(),
   mediaUrl: text('media_url'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+  deletedAt: text('deleted_at'), // Soft delete
+}, (table) => ({
+  userIdIdx: index('posts_user_id_idx').on(table.userId),
+  createdAtIdx: index('posts_created_at_idx').on(table.createdAt),
+  deletedAtIdx: index('posts_deleted_at_idx').on(table.deletedAt),
+}));
 
 export const comments = sqliteTable('comments', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
   userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  parentId: integer('parent_id').references((): any => comments.id, { onDelete: 'cascade' }), // Self reference for nesting
   content: text('content').notNull(),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+  deletedAt: text('deleted_at'), // Soft delete
+}, (table) => ({
+  postIdIdx: index('comments_post_id_idx').on(table.postId),
+  parentIdIdx: index('comments_parent_id_idx').on(table.parentId),
+  userIdIdx: index('comments_user_id_idx').on(table.userId),
+  deletedAtIdx: index('comments_deleted_at_idx').on(table.deletedAt),
+}));
 
 export const likes = sqliteTable('likes', {
   userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -31,6 +43,7 @@ export const likes = sqliteTable('likes', {
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.userId, table.postId] }),
+  postIdIdx: index('likes_post_id_idx').on(table.postId),
 }));
 
 export const messages = sqliteTable('messages', {
@@ -39,7 +52,12 @@ export const messages = sqliteTable('messages', {
   receiverId: integer('receiver_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   content: text('content').notNull(),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+  deletedAt: text('deleted_at'), // Soft delete
+}, (table) => ({
+  senderIdIdx: index('messages_sender_id_idx').on(table.senderId),
+  receiverIdIdx: index('messages_receiver_id_idx').on(table.receiverId),
+  deletedAtIdx: index('messages_deleted_at_idx').on(table.deletedAt),
+}));
 
 export const notifications = sqliteTable('notifications', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -50,4 +68,7 @@ export const notifications = sqliteTable('notifications', {
   content: text('content').notNull(),
   read: integer('read').default(0).notNull(), // 0 = unread, 1 = read
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+}, (table) => ({
+  userIdIdx: index('notifications_user_id_idx').on(table.userId),
+  createdAtIdx: index('notifications_created_at_idx').on(table.createdAt),
+}));

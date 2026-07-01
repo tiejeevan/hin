@@ -187,6 +187,7 @@ app.get('/api/posts', async (c) => {
   })
   .from(schema.posts)
   .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
+  .where(sql`${schema.posts.deletedAt} IS NULL`) // Soft delete check
   .orderBy(desc(schema.posts.createdAt))
   .all();
 
@@ -200,11 +201,16 @@ app.get('/api/posts', async (c) => {
         .get();
       const likesCount = likesRes?.value || 0;
 
-      // Comments count
+      // Comments count (excluding soft deleted comments that have no replies)
       const commentsRes = await db
         .select({ value: count() })
         .from(schema.comments)
-        .where(eq(schema.comments.postId, post.id))
+        .where(
+          and(
+            eq(schema.comments.postId, post.id),
+            sql`${schema.comments.deletedAt} IS NULL`
+          )
+        )
         .get();
       const commentsCount = commentsRes?.value || 0;
 
@@ -264,6 +270,17 @@ app.post('/api/posts', async (c) => {
     commentsCount: 0,
     hasLiked: false,
   };
+
+  // Broadcast new post in real-time to all online users
+  try {
+    const doId = c.env.REALTIME_DO.idFromName('global');
+    const doStub = c.env.REALTIME_DO.get(doId);
+    await doStub.fetch(new Request('http://realtime/broadcast-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'post_created', payload: { post: responsePost } }),
+    }));
+  } catch (e) {}
 
   return c.json(responsePost);
 });
@@ -331,23 +348,40 @@ app.post('/api/posts/:id/like', async (c) => {
       };
 
       // Call Durable Object to send real-time update
-      const doId = c.env.REALTIME_DO.idFromName('global');
-      const doStub = c.env.REALTIME_DO.get(doId);
-      await doStub.fetch(new Request('http://realtime/broadcast-notification', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipientId: post.userId, notification: notifPayload }),
-      }));
+      try {
+        const doId = c.env.REALTIME_DO.idFromName('global');
+        const doStub = c.env.REALTIME_DO.get(doId);
+        await doStub.fetch(new Request('http://realtime/broadcast-notification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recipientId: post.userId, notification: notifPayload }),
+        }));
+      } catch (e) {}
     }
   }
 
   // Count total likes
   const likesCountRes = await db.select({ value: count() }).from(schema.likes).where(eq(schema.likes.postId, postId)).get();
+  const likesCount = likesCountRes?.value || 0;
 
-  return c.json({ liked, likesCount: likesCountRes?.value || 0 });
+  // Broadcast like update to ALL online users
+  try {
+    const doId = c.env.REALTIME_DO.idFromName('global');
+    const doStub = c.env.REALTIME_DO.get(doId);
+    await doStub.fetch(new Request('http://realtime/broadcast-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'like_update',
+        payload: { postId, likesCount, userId: authUser.id, liked }
+      }),
+    }));
+  } catch (e) {}
+
+  return c.json({ liked, likesCount });
 });
 
-// Get post comments
+// Get post comments (including soft-deleted and parent information)
 app.get('/api/posts/:id/comments', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const postId = parseInt(c.req.param('id'));
@@ -357,8 +391,10 @@ app.get('/api/posts/:id/comments', async (c) => {
       id: schema.comments.id,
       postId: schema.comments.postId,
       userId: schema.comments.userId,
+      parentId: schema.comments.parentId,
       content: schema.comments.content,
       createdAt: schema.comments.createdAt,
+      deletedAt: schema.comments.deletedAt,
       username: schema.users.username,
     })
     .from(schema.comments)
@@ -367,10 +403,22 @@ app.get('/api/posts/:id/comments', async (c) => {
     .orderBy(desc(schema.comments.createdAt))
     .all();
 
-  return c.json(postComments);
+  // Redact soft deleted comments content
+  const redactedComments = postComments.map(comment => {
+    if (comment.deletedAt) {
+      return {
+        ...comment,
+        content: '[Comment deleted]',
+        username: 'deleted',
+      };
+    }
+    return comment;
+  });
+
+  return c.json(redactedComments);
 });
 
-// Create comment
+// Create comment (allows parentId for loops)
 app.post('/api/posts/:id/comments', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
@@ -378,7 +426,7 @@ app.post('/api/posts/:id/comments', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const postId = parseInt(c.req.param('id'));
 
-  const { content } = await c.req.json<{ content: string }>();
+  const { content, parentId } = await c.req.json<{ content: string; parentId?: number | null }>();
   if (!content || content.trim() === '') {
     return c.json({ error: 'Content cannot be empty' }, 400);
   }
@@ -386,9 +434,11 @@ app.post('/api/posts/:id/comments', async (c) => {
   const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
   if (!post) return c.json({ error: 'Post not found' }, 404);
 
+  // Insert comments (including optional parentId link)
   const [inserted] = await db.insert(schema.comments).values({
     postId,
     userId: authUser.id,
+    parentId: parentId || null,
     content: content.trim(),
   }).returning();
 
@@ -397,15 +447,28 @@ app.post('/api/posts/:id/comments', async (c) => {
     postId: inserted.postId,
     userId: authUser.id,
     username: authUser.username,
+    parentId: inserted.parentId,
     content: inserted.content,
     createdAt: inserted.createdAt,
+    deletedAt: inserted.deletedAt,
   };
 
-  // Send real-time notification to post owner if it's someone else
-  if (post.userId !== authUser.id) {
-    const notificationContent = `${authUser.username} commented on your post: "${content.substring(0, 20)}${content.length > 20 ? '...' : ''}"`;
+  // Determine notification recipient: parent comment owner if a reply, else post owner
+  let recipientId = post.userId;
+  let notificationContent = `${authUser.username} commented on your post: "${content.substring(0, 20)}${content.length > 20 ? '...' : ''}"`;
+
+  if (parentId) {
+    const parentComment = await db.select().from(schema.comments).where(eq(schema.comments.id, parentId)).get();
+    if (parentComment && parentComment.userId !== authUser.id) {
+      recipientId = parentComment.userId;
+      notificationContent = `${authUser.username} replied to your comment: "${content.substring(0, 20)}${content.length > 20 ? '...' : ''}"`;
+    }
+  }
+
+  // Send real-time notification to recipient if it's someone else
+  if (recipientId !== authUser.id) {
     const [notif] = await db.insert(schema.notifications).values({
-      userId: post.userId,
+      userId: recipientId,
       senderId: authUser.id,
       type: 'comment',
       entityId: postId,
@@ -415,7 +478,7 @@ app.post('/api/posts/:id/comments', async (c) => {
 
     const notifPayload: Notification = {
       id: notif.id,
-      userId: post.userId,
+      userId: recipientId,
       senderId: authUser.id,
       senderUsername: authUser.username,
       type: 'comment',
@@ -426,19 +489,35 @@ app.post('/api/posts/:id/comments', async (c) => {
     };
 
     // Call Durable Object to send real-time update
+    try {
+      const doId = c.env.REALTIME_DO.idFromName('global');
+      const doStub = c.env.REALTIME_DO.get(doId);
+      await doStub.fetch(new Request('http://realtime/broadcast-notification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipientId, notification: notifPayload }),
+      }));
+    } catch (e) {}
+  }
+
+  // Broadcast comment creation to ALL online users
+  try {
     const doId = c.env.REALTIME_DO.idFromName('global');
     const doStub = c.env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-notification', {
+    await doStub.fetch(new Request('http://realtime/broadcast-event', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipientId: post.userId, notification: notifPayload }),
+      body: JSON.stringify({
+        type: 'comment_created',
+        payload: { comment: commentResponse }
+      }),
     }));
-  }
+  } catch (e) {}
 
   return c.json(commentResponse);
 });
 
-// Get direct messages history
+// Get direct messages history (filtering out soft deleted ones)
 app.get('/api/messages/:otherUserId', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
@@ -456,8 +535,11 @@ app.get('/api/messages/:otherUserId', async (c) => {
     })
     .from(schema.messages)
     .where(
-      sql`(${schema.messages.senderId} = ${authUser.id} AND ${schema.messages.receiverId} = ${otherUserId}) OR 
-          (${schema.messages.senderId} = ${otherUserId} AND ${schema.messages.receiverId} = ${authUser.id})`
+      and(
+        sql`(${schema.messages.senderId} = ${authUser.id} AND ${schema.messages.receiverId} = ${otherUserId}) OR 
+            (${schema.messages.senderId} = ${otherUserId} AND ${schema.messages.receiverId} = ${authUser.id})`,
+        sql`${schema.messages.deletedAt} IS NULL` // filter soft deleted messages
+      )
     )
     .orderBy(schema.messages.createdAt)
     .all();
@@ -560,9 +642,9 @@ app.get('/api/admin/stats', async (c) => {
   const db = drizzle(c.env.DB, { schema });
 
   const totalUsers = await db.select({ value: count() }).from(schema.users).get();
-  const totalPosts = await db.select({ value: count() }).from(schema.posts).get();
-  const totalComments = await db.select({ value: count() }).from(schema.comments).get();
-  const totalMessages = await db.select({ value: count() }).from(schema.messages).get();
+  const totalPosts = await db.select({ value: count() }).from(schema.posts).where(sql`${schema.posts.deletedAt} IS NULL`).get();
+  const totalComments = await db.select({ value: count() }).from(schema.comments).where(sql`${schema.comments.deletedAt} IS NULL`).get();
+  const totalMessages = await db.select({ value: count() }).from(schema.messages).where(sql`${schema.messages.deletedAt} IS NULL`).get();
 
   const allUsers = await db.select({
     id: schema.users.id,
@@ -582,32 +664,74 @@ app.get('/api/admin/stats', async (c) => {
   });
 });
 
-// Admin Delete Post
+// Delete Post (Owner or Admin) - Soft Delete
 app.delete('/api/posts/:id', async (c) => {
   const authUser = await getAuthUser(c);
-  if (!authUser || authUser.role !== 'admin') {
-    return c.json({ error: 'Forbidden' }, 403);
-  }
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
 
   const db = drizzle(c.env.DB, { schema });
   const postId = parseInt(c.req.param('id'));
 
-  await db.delete(schema.posts).where(eq(schema.posts.id, postId)).run();
+  // Fetch post details to authorize owner
+  const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
+  if (!post) return c.json({ error: 'Post not found' }, 404);
+
+  if (authUser.role !== 'admin' && authUser.id !== post.userId) {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  // Soft delete post
+  await db.update(schema.posts)
+    .set({ deletedAt: sql`CURRENT_TIMESTAMP` })
+    .where(eq(schema.posts.id, postId))
+    .run();
+
+  // Broadcast deletion in real-time
+  try {
+    const doId = c.env.REALTIME_DO.idFromName('global');
+    const doStub = c.env.REALTIME_DO.get(doId);
+    await doStub.fetch(new Request('http://realtime/broadcast-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'post_deleted', payload: { postId } }),
+    }));
+  } catch (e) {}
 
   return c.json({ success: true });
 });
 
-// Admin Delete Comment
+// Delete Comment (Owner or Admin) - Soft Delete
 app.delete('/api/comments/:id', async (c) => {
   const authUser = await getAuthUser(c);
-  if (!authUser || authUser.role !== 'admin') {
-    return c.json({ error: 'Forbidden' }, 403);
-  }
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
 
   const db = drizzle(c.env.DB, { schema });
   const commentId = parseInt(c.req.param('id'));
 
-  await db.delete(schema.comments).where(eq(schema.comments.id, commentId)).run();
+  // Fetch comment details to authorize owner
+  const comment = await db.select().from(schema.comments).where(eq(schema.comments.id, commentId)).get();
+  if (!comment) return c.json({ error: 'Comment not found' }, 404);
+
+  if (authUser.role !== 'admin' && authUser.id !== comment.userId) {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  // Soft delete comment
+  await db.update(schema.comments)
+    .set({ deletedAt: sql`CURRENT_TIMESTAMP` })
+    .where(eq(schema.comments.id, commentId))
+    .run();
+
+  // Broadcast comment deletion in real-time to update client states
+  try {
+    const doId = c.env.REALTIME_DO.idFromName('global');
+    const doStub = c.env.REALTIME_DO.get(doId);
+    await doStub.fetch(new Request('http://realtime/broadcast-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'comment_deleted', payload: { commentId, postId: comment.postId } }),
+    }));
+  } catch (e) {}
 
   return c.json({ success: true });
 });
@@ -627,8 +751,8 @@ export default app;
 export class RealtimeDO implements DurableObject {
   state: DurableObjectState;
   env: Env;
-  // Map connected WebSockets to user details
-  sessions = new Map<WebSocket, { userId: number; username: string }>();
+  // Map connected WebSockets to user details, and track their active chat recipient ID
+  sessions = new Map<WebSocket, { userId: number; username: string; activeChatId?: number | null }>();
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
@@ -638,7 +762,7 @@ export class RealtimeDO implements DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    // Endpoint for HTTP push notification broadcast from API worker
+    // Endpoint for HTTP push notification broadcast from API worker (for targeted user notification)
     if (url.pathname === '/broadcast-notification') {
       if (request.method !== 'POST') {
         return new Response('Method Not Allowed', { status: 405 });
@@ -654,6 +778,21 @@ export class RealtimeDO implements DurableObject {
             // Socket is closed or errored, session will be cleaned up
           }
         }
+      }
+      return new Response('OK');
+    }
+
+    // Endpoint for HTTP event broadcast to ALL online users (feed changes, likes, comments)
+    if (url.pathname === '/broadcast-event') {
+      if (request.method !== 'POST') {
+        return new Response('Method Not Allowed', { status: 405 });
+      }
+      const payload = await request.json();
+      const msg = JSON.stringify(payload);
+      for (const ws of this.sessions.keys()) {
+        try {
+          ws.send(msg);
+        } catch (e) {}
       }
       return new Response('OK');
     }
@@ -711,6 +850,14 @@ export class RealtimeDO implements DurableObject {
       }
     } 
     
+    // Set the user's active chat context to suppress repeating alerts
+    else if (message.type === 'active_chat') {
+      const session = this.sessions.get(ws);
+      if (session) {
+        session.activeChatId = message.payload.recipientId;
+      }
+    }
+    
     else if (message.type === 'send_message') {
       const session = this.sessions.get(ws);
       if (!session) return;
@@ -742,45 +889,51 @@ export class RealtimeDO implements DurableObject {
         ws.send(JSON.stringify({ type: 'message', payload: messagePayload }));
       } catch (e) {}
 
-      // Send message to receiver if online
+      // Send message to receiver if online, and check if they are viewing the chat
+      let receiverIsViewingChat = false;
       for (const [targetWs, targetSession] of this.sessions.entries()) {
         if (targetSession.userId === receiverId) {
           try {
             targetWs.send(JSON.stringify({ type: 'message', payload: messagePayload }));
+            if (targetSession.activeChatId === session.userId) {
+              receiverIsViewingChat = true;
+            }
           } catch (e) {}
         }
       }
 
-      // Also trigger a real-time notification for the messaging
-      const notificationContent = `${session.username} sent you a message: "${content.substring(0, 20)}${content.length > 20 ? '...' : ''}"`;
-      
-      const [notif] = await db.insert(schema.notifications).values({
-        userId: receiverId,
-        senderId: session.userId,
-        type: 'message',
-        entityId: inserted.id,
-        content: notificationContent,
-        read: 0,
-      }).returning();
+      // Trigger notification records/events ONLY if recipient is not actively viewing the chat
+      if (!receiverIsViewingChat) {
+        const notificationContent = `${session.username} sent you a message: "${content.substring(0, 20)}${content.length > 20 ? '...' : ''}"`;
+        
+        const [notif] = await db.insert(schema.notifications).values({
+          userId: receiverId,
+          senderId: session.userId,
+          type: 'message',
+          entityId: inserted.id,
+          content: notificationContent,
+          read: 0,
+        }).returning();
 
-      const notificationPayload: Notification = {
-        id: notif.id,
-        userId: receiverId,
-        senderId: session.userId,
-        senderUsername: session.username,
-        type: 'message',
-        entityId: inserted.id,
-        content: notificationContent,
-        read: false,
-        createdAt: notif.createdAt,
-      };
+        const notificationPayload: Notification = {
+          id: notif.id,
+          userId: receiverId,
+          senderId: session.userId,
+          senderUsername: session.username,
+          type: 'message',
+          entityId: inserted.id,
+          content: notificationContent,
+          read: false,
+          createdAt: notif.createdAt,
+        };
 
-      // Dispatch notification
-      for (const [targetWs, targetSession] of this.sessions.entries()) {
-        if (targetSession.userId === receiverId) {
-          try {
-            targetWs.send(JSON.stringify({ type: 'notification', payload: notificationPayload }));
-          } catch (e) {}
+        // Dispatch notifications only to clients who are not viewing the chat
+        for (const [targetWs, targetSession] of this.sessions.entries()) {
+          if (targetSession.userId === receiverId && targetSession.activeChatId !== session.userId) {
+            try {
+              targetWs.send(JSON.stringify({ type: 'notification', payload: notificationPayload }));
+            } catch (e) {}
+          }
         }
       }
     }

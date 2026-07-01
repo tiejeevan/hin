@@ -17,6 +17,7 @@ export interface Post {
   likesCount: number;
   commentsCount: number;
   hasLiked?: boolean;
+  deletedAt?: string | null;
 }
 
 export interface Comment {
@@ -25,7 +26,9 @@ export interface Comment {
   userId: number;
   username: string;
   content: string;
+  parentId: number | null; // For nesting comment replies
   createdAt: string;
+  deletedAt?: string | null;
 }
 
 export interface Message {
@@ -36,6 +39,7 @@ export interface Message {
   receiverUsername: string;
   content: string;
   createdAt: string;
+  deletedAt?: string | null;
 }
 
 export interface Notification {
@@ -58,6 +62,7 @@ export const CreatePostSchema = z.object({
 
 export const CreateCommentSchema = z.object({
   content: z.string().min(1, 'Comment cannot be empty').max(500, 'Comment is too long'),
+  parentId: z.number().nullable().optional(),
 });
 
 export const CreateMessageSchema = z.object({
@@ -77,9 +82,15 @@ export const LoginSchema = z.object({
 // WebSocket Message Types
 export type ClientMessage =
   | { type: 'join'; payload: { userId: number; username: string } }
+  | { type: 'active_chat'; payload: { recipientId: number | null } }
   | { type: 'send_message'; payload: { receiverId: number; content: string } };
 
 export type ServerMessage =
   | { type: 'message'; payload: Message }
   | { type: 'notification'; payload: Notification }
-  | { type: 'online_users'; payload: { userIds: number[] } };
+  | { type: 'online_users'; payload: { userIds: number[] } }
+  | { type: 'post_created'; payload: { post: Post } }
+  | { type: 'post_deleted'; payload: { postId: number } }
+  | { type: 'like_update'; payload: { postId: number; likesCount: number; userId: number; liked: boolean } }
+  | { type: 'comment_created'; payload: { comment: Comment } }
+  | { type: 'comment_deleted'; payload: { commentId: number; postId: number } };
