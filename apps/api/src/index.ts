@@ -33,7 +33,14 @@ async function getAuthUser(c: any): Promise<any | null> {
   try {
     const payload = await verify(token, JWT_SECRET, 'HS256');
     const db = drizzle(c.env.DB, { schema });
-    const user = await db.select().from(schema.users).where(eq(schema.users.id, payload.id as number)).get();
+    const user = await db.select().from(schema.users)
+      .where(
+        and(
+          eq(schema.users.id, payload.id as number),
+          sql`${schema.users.deletedAt} IS NULL`
+        )
+      )
+      .get();
     return user || null;
   } catch (e) {
     return null;
@@ -123,8 +130,16 @@ app.post('/api/auth/login', async (c) => {
 
   const normalizedUsername = username.trim().toLowerCase();
 
-  // Find user
-  const user = await db.select().from(schema.users).where(eq(schema.users.username, normalizedUsername)).get();
+  // Find user (filtering out soft deleted ones)
+  const user = await db.select().from(schema.users)
+    .where(
+      and(
+        eq(schema.users.username, normalizedUsername),
+        sql`${schema.users.deletedAt} IS NULL`
+      )
+    )
+    .get();
+
   if (!user) {
     return c.json({ error: 'Invalid username or password' }, 401);
   }
@@ -165,7 +180,10 @@ app.get('/api/users', async (c) => {
     username: schema.users.username,
     role: schema.users.role,
     createdAt: schema.users.createdAt,
-  }).from(schema.users).all();
+  })
+  .from(schema.users)
+  .where(sql`${schema.users.deletedAt} IS NULL`) // Skip soft deleted users
+  .all();
 
   return c.json(allUsers);
 });
@@ -187,7 +205,12 @@ app.get('/api/posts', async (c) => {
   })
   .from(schema.posts)
   .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
-  .where(sql`${schema.posts.deletedAt} IS NULL`) // Soft delete check
+  .where(
+    and(
+      sql`${schema.posts.deletedAt} IS NULL`,
+      sql`${schema.users.deletedAt} IS NULL` // Skip posts from deleted users
+    )
+  )
   .orderBy(desc(schema.posts.createdAt))
   .all();
 
@@ -201,7 +224,7 @@ app.get('/api/posts', async (c) => {
         .get();
       const likesCount = likesRes?.value || 0;
 
-      // Comments count (excluding soft deleted comments that have no replies)
+      // Comments count
       const commentsRes = await db
         .select({ value: count() })
         .from(schema.comments)
@@ -271,7 +294,7 @@ app.post('/api/posts', async (c) => {
     hasLiked: false,
   };
 
-  // Broadcast new post in real-time to all online users
+  // Broadcast new post in real-time
   try {
     const doId = c.env.REALTIME_DO.idFromName('global');
     const doStub = c.env.REALTIME_DO.get(doId);
@@ -279,6 +302,63 @@ app.post('/api/posts', async (c) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: 'post_created', payload: { post: responsePost } }),
+    }));
+  } catch (e) {}
+
+  return c.json(responsePost);
+});
+
+// Edit Post (Owner or Admin)
+app.put('/api/posts/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const postId = parseInt(c.req.param('id'));
+
+  const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
+  if (!post) return c.json({ error: 'Post not found' }, 404);
+
+  if (authUser.role !== 'admin' && authUser.id !== post.userId) {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const { content } = await c.req.json<{ content: string }>();
+  if (!content || content.trim() === '') {
+    return c.json({ error: 'Content cannot be empty' }, 400);
+  }
+
+  const [updated] = await db.update(schema.posts)
+    .set({ content: content.trim() })
+    .where(eq(schema.posts.id, postId))
+    .returning();
+
+  const likesRes = await db.select({ value: count() }).from(schema.likes).where(eq(schema.likes.postId, postId)).get();
+  const commentsRes = await db.select({ value: count() }).from(schema.comments).where(and(eq(schema.comments.postId, postId), sql`${schema.comments.deletedAt} IS NULL`)).get();
+
+  const likeRecord = await db.select().from(schema.likes).where(and(eq(schema.likes.postId, postId), eq(schema.likes.userId, authUser.id))).get();
+  const author = await db.select({ username: schema.users.username }).from(schema.users).where(eq(schema.users.id, updated.userId)).get();
+
+  const responsePost: Post = {
+    id: updated.id,
+    userId: updated.userId,
+    username: author?.username || 'Unknown',
+    content: updated.content,
+    mediaUrl: updated.mediaUrl,
+    createdAt: updated.createdAt,
+    likesCount: likesRes?.value || 0,
+    commentsCount: commentsRes?.value || 0,
+    hasLiked: !!likeRecord,
+  };
+
+  // Broadcast post edit
+  try {
+    const doId = c.env.REALTIME_DO.idFromName('global');
+    const doStub = c.env.REALTIME_DO.get(doId);
+    await doStub.fetch(new Request('http://realtime/broadcast-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'post_updated', payload: { post: responsePost } }),
     }));
   } catch (e) {}
 
@@ -381,7 +461,7 @@ app.post('/api/posts/:id/like', async (c) => {
   return c.json({ liked, likesCount });
 });
 
-// Get post comments (including soft-deleted and parent information)
+// Get post comments
 app.get('/api/posts/:id/comments', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const postId = parseInt(c.req.param('id'));
@@ -418,7 +498,7 @@ app.get('/api/posts/:id/comments', async (c) => {
   return c.json(redactedComments);
 });
 
-// Create comment (allows parentId for loops)
+// Create comment
 app.post('/api/posts/:id/comments', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
@@ -434,7 +514,7 @@ app.post('/api/posts/:id/comments', async (c) => {
   const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
   if (!post) return c.json({ error: 'Post not found' }, 404);
 
-  // Insert comments (including optional parentId link)
+  // Insert comment
   const [inserted] = await db.insert(schema.comments).values({
     postId,
     userId: authUser.id,
@@ -453,7 +533,7 @@ app.post('/api/posts/:id/comments', async (c) => {
     deletedAt: inserted.deletedAt,
   };
 
-  // Determine notification recipient: parent comment owner if a reply, else post owner
+  // Determine recipient
   let recipientId = post.userId;
   let notificationContent = `${authUser.username} commented on your post: "${content.substring(0, 20)}${content.length > 20 ? '...' : ''}"`;
 
@@ -488,7 +568,6 @@ app.post('/api/posts/:id/comments', async (c) => {
       createdAt: notif.createdAt,
     };
 
-    // Call Durable Object to send real-time update
     try {
       const doId = c.env.REALTIME_DO.idFromName('global');
       const doStub = c.env.REALTIME_DO.get(doId);
@@ -500,7 +579,7 @@ app.post('/api/posts/:id/comments', async (c) => {
     } catch (e) {}
   }
 
-  // Broadcast comment creation to ALL online users
+  // Broadcast comment creation
   try {
     const doId = c.env.REALTIME_DO.idFromName('global');
     const doStub = c.env.REALTIME_DO.get(doId);
@@ -517,7 +596,59 @@ app.post('/api/posts/:id/comments', async (c) => {
   return c.json(commentResponse);
 });
 
-// Get direct messages history (filtering out soft deleted ones)
+// Edit Comment (Owner or Admin)
+app.put('/api/comments/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const commentId = parseInt(c.req.param('id'));
+
+  const comment = await db.select().from(schema.comments).where(eq(schema.comments.id, commentId)).get();
+  if (!comment) return c.json({ error: 'Comment not found' }, 404);
+
+  if (authUser.role !== 'admin' && authUser.id !== comment.userId) {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const { content } = await c.req.json<{ content: string }>();
+  if (!content || content.trim() === '') {
+    return c.json({ error: 'Content cannot be empty' }, 400);
+  }
+
+  const [updated] = await db.update(schema.comments)
+    .set({ content: content.trim() })
+    .where(eq(schema.comments.id, commentId))
+    .returning();
+
+  const author = await db.select({ username: schema.users.username }).from(schema.users).where(eq(schema.users.id, updated.userId)).get();
+
+  const commentResponse: Comment = {
+    id: updated.id,
+    postId: updated.postId,
+    userId: updated.userId,
+    username: author?.username || 'Unknown',
+    parentId: updated.parentId,
+    content: updated.content,
+    createdAt: updated.createdAt,
+    deletedAt: updated.deletedAt,
+  };
+
+  // Broadcast comment update
+  try {
+    const doId = c.env.REALTIME_DO.idFromName('global');
+    const doStub = c.env.REALTIME_DO.get(doId);
+    await doStub.fetch(new Request('http://realtime/broadcast-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'comment_updated', payload: { comment: commentResponse } }),
+    }));
+  } catch (e) {}
+
+  return c.json(commentResponse);
+});
+
+// Get direct messages history
 app.get('/api/messages/:otherUserId', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
@@ -538,7 +669,7 @@ app.get('/api/messages/:otherUserId', async (c) => {
       and(
         sql`(${schema.messages.senderId} = ${authUser.id} AND ${schema.messages.receiverId} = ${otherUserId}) OR 
             (${schema.messages.senderId} = ${otherUserId} AND ${schema.messages.receiverId} = ${authUser.id})`,
-        sql`${schema.messages.deletedAt} IS NULL` // filter soft deleted messages
+        sql`${schema.messages.deletedAt} IS NULL`
       )
     )
     .orderBy(schema.messages.createdAt)
@@ -632,7 +763,7 @@ app.post('/api/notifications/:id/read', async (c) => {
 
 // 2. ADMIN ENDPOINTS
 
-// Admin stats & user list
+// Admin stats & user list (filtering out deleted users)
 app.get('/api/admin/stats', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser || authUser.role !== 'admin') {
@@ -641,7 +772,7 @@ app.get('/api/admin/stats', async (c) => {
 
   const db = drizzle(c.env.DB, { schema });
 
-  const totalUsers = await db.select({ value: count() }).from(schema.users).get();
+  const totalUsers = await db.select({ value: count() }).from(schema.users).where(sql`${schema.users.deletedAt} IS NULL`).get();
   const totalPosts = await db.select({ value: count() }).from(schema.posts).where(sql`${schema.posts.deletedAt} IS NULL`).get();
   const totalComments = await db.select({ value: count() }).from(schema.comments).where(sql`${schema.comments.deletedAt} IS NULL`).get();
   const totalMessages = await db.select({ value: count() }).from(schema.messages).where(sql`${schema.messages.deletedAt} IS NULL`).get();
@@ -651,7 +782,10 @@ app.get('/api/admin/stats', async (c) => {
     username: schema.users.username,
     role: schema.users.role,
     createdAt: schema.users.createdAt,
-  }).from(schema.users).all();
+  })
+  .from(schema.users)
+  .where(sql`${schema.users.deletedAt} IS NULL`)
+  .all();
 
   return c.json({
     stats: {
@@ -664,6 +798,100 @@ app.get('/api/admin/stats', async (c) => {
   });
 });
 
+// Admin Impersonation Endpoint
+app.post('/api/admin/impersonate', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const { userId } = await c.req.json<{ userId: number }>();
+  if (!userId) {
+    return c.json({ error: 'User ID is required' }, 400);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const targetUser = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+  if (!targetUser) {
+    return c.json({ error: 'User not found' }, 404);
+  }
+  if (targetUser.deletedAt) {
+    return c.json({ error: 'Cannot impersonate a deleted user' }, 400);
+  }
+
+  // Generate delegation token for target user
+  const token = await sign({ 
+    id: targetUser.id, 
+    username: targetUser.username, 
+    role: targetUser.role,
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
+  }, JWT_SECRET, 'HS256');
+
+  return c.json({
+    token,
+    user: {
+      id: targetUser.id,
+      username: targetUser.username,
+      role: targetUser.role,
+      createdAt: targetUser.createdAt,
+    }
+  });
+});
+
+// Admin User Role Update
+app.put('/api/admin/users/:id/role', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const userId = parseInt(c.req.param('id'));
+  if (userId === authUser.id) {
+    return c.json({ error: 'Cannot change your own role' }, 400);
+  }
+
+  const { role } = await c.req.json<{ role: 'user' | 'admin' }>();
+  if (role !== 'user' && role !== 'admin') {
+    return c.json({ error: 'Invalid role' }, 400);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+  if (!user) return c.json({ error: 'User not found' }, 404);
+
+  await db.update(schema.users)
+    .set({ role })
+    .where(eq(schema.users.id, userId))
+    .run();
+
+  return c.json({ success: true });
+});
+
+// Admin User Soft Delete
+app.delete('/api/admin/users/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const userId = parseInt(c.req.param('id'));
+  if (userId === authUser.id) {
+    return c.json({ error: 'Cannot delete your own admin account' }, 400);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
+  if (!user) return c.json({ error: 'User not found' }, 404);
+
+  // Soft delete user
+  await db.update(schema.users)
+    .set({ deletedAt: sql`CURRENT_TIMESTAMP` })
+    .where(eq(schema.users.id, userId))
+    .run();
+
+  return c.json({ success: true });
+});
+
 // Delete Post (Owner or Admin) - Soft Delete
 app.delete('/api/posts/:id', async (c) => {
   const authUser = await getAuthUser(c);
@@ -672,7 +900,6 @@ app.delete('/api/posts/:id', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const postId = parseInt(c.req.param('id'));
 
-  // Fetch post details to authorize owner
   const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
   if (!post) return c.json({ error: 'Post not found' }, 404);
 
@@ -680,13 +907,11 @@ app.delete('/api/posts/:id', async (c) => {
     return c.json({ error: 'Forbidden' }, 403);
   }
 
-  // Soft delete post
   await db.update(schema.posts)
     .set({ deletedAt: sql`CURRENT_TIMESTAMP` })
     .where(eq(schema.posts.id, postId))
     .run();
 
-  // Broadcast deletion in real-time
   try {
     const doId = c.env.REALTIME_DO.idFromName('global');
     const doStub = c.env.REALTIME_DO.get(doId);
@@ -708,7 +933,6 @@ app.delete('/api/comments/:id', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const commentId = parseInt(c.req.param('id'));
 
-  // Fetch comment details to authorize owner
   const comment = await db.select().from(schema.comments).where(eq(schema.comments.id, commentId)).get();
   if (!comment) return c.json({ error: 'Comment not found' }, 404);
 
@@ -716,13 +940,11 @@ app.delete('/api/comments/:id', async (c) => {
     return c.json({ error: 'Forbidden' }, 403);
   }
 
-  // Soft delete comment
   await db.update(schema.comments)
     .set({ deletedAt: sql`CURRENT_TIMESTAMP` })
     .where(eq(schema.comments.id, commentId))
     .run();
 
-  // Broadcast comment deletion in real-time to update client states
   try {
     const doId = c.env.REALTIME_DO.idFromName('global');
     const doStub = c.env.REALTIME_DO.get(doId);
@@ -751,7 +973,6 @@ export default app;
 export class RealtimeDO implements DurableObject {
   state: DurableObjectState;
   env: Env;
-  // Map connected WebSockets to user details, and track their active chat recipient ID
   sessions = new Map<WebSocket, { userId: number; username: string; activeChatId?: number | null }>();
 
   constructor(state: DurableObjectState, env: Env) {
@@ -762,27 +983,22 @@ export class RealtimeDO implements DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    // Endpoint for HTTP push notification broadcast from API worker (for targeted user notification)
     if (url.pathname === '/broadcast-notification') {
       if (request.method !== 'POST') {
         return new Response('Method Not Allowed', { status: 405 });
       }
       const { recipientId, notification } = await request.json() as { recipientId: number; notification: Notification };
       
-      // Dispatch notification to user's web sockets
       for (const [ws, session] of this.sessions.entries()) {
         if (session.userId === recipientId) {
           try {
             ws.send(JSON.stringify({ type: 'notification', payload: notification }));
-          } catch (e) {
-            // Socket is closed or errored, session will be cleaned up
-          }
+          } catch (e) {}
         }
       }
       return new Response('OK');
     }
 
-    // Endpoint for HTTP event broadcast to ALL online users (feed changes, likes, comments)
     if (url.pathname === '/broadcast-event') {
       if (request.method !== 'POST') {
         return new Response('Method Not Allowed', { status: 405 });
@@ -797,7 +1013,6 @@ export class RealtimeDO implements DurableObject {
       return new Response('OK');
     }
 
-    // Otherwise, upgrade to WebSocket
     const upgradeHeader = request.headers.get('Upgrade');
     if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
       return new Response('Expected WebSocket upgrade', { status: 426 });
@@ -806,10 +1021,8 @@ export class RealtimeDO implements DurableObject {
     const webSocketPair = new WebSocketPair();
     const [client, server] = Object.values(webSocketPair);
 
-    // Accept server-side web socket
     server.accept();
 
-    // Set up message handlers
     server.addEventListener('message', async (event) => {
       try {
         const data = JSON.parse(event.data as string);
@@ -850,7 +1063,6 @@ export class RealtimeDO implements DurableObject {
       }
     } 
     
-    // Set the user's active chat context to suppress repeating alerts
     else if (message.type === 'active_chat') {
       const session = this.sessions.get(ws);
       if (session) {
@@ -864,14 +1076,12 @@ export class RealtimeDO implements DurableObject {
 
       const { receiverId, content } = message.payload;
       
-      // Save message to D1
       const [inserted] = await db.insert(schema.messages).values({
         senderId: session.userId,
         receiverId,
         content,
       }).returning();
 
-      // Fetch recipient details
       const receiverUser = await db.select().from(schema.users).where(eq(schema.users.id, receiverId)).get();
 
       const messagePayload: Message = {
@@ -884,12 +1094,10 @@ export class RealtimeDO implements DurableObject {
         createdAt: inserted.createdAt,
       };
 
-      // Send message response to sender
       try {
         ws.send(JSON.stringify({ type: 'message', payload: messagePayload }));
       } catch (e) {}
 
-      // Send message to receiver if online, and check if they are viewing the chat
       let receiverIsViewingChat = false;
       for (const [targetWs, targetSession] of this.sessions.entries()) {
         if (targetSession.userId === receiverId) {
@@ -902,7 +1110,6 @@ export class RealtimeDO implements DurableObject {
         }
       }
 
-      // Trigger notification records/events ONLY if recipient is not actively viewing the chat
       if (!receiverIsViewingChat) {
         const notificationContent = `${session.username} sent you a message: "${content.substring(0, 20)}${content.length > 20 ? '...' : ''}"`;
         
@@ -927,7 +1134,6 @@ export class RealtimeDO implements DurableObject {
           createdAt: notif.createdAt,
         };
 
-        // Dispatch notifications only to clients who are not viewing the chat
         for (const [targetWs, targetSession] of this.sessions.entries()) {
           if (targetSession.userId === receiverId && targetSession.activeChatId !== session.userId) {
             try {

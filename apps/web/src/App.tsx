@@ -53,6 +53,13 @@ export default function App() {
   const [users, setUsers] = useState<UserType[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [activeTab, setActiveTab] = useState<'feed' | 'messages' | 'admin'>('feed');
+
+  // Admin Delegation Backup states
+  const [adminToken, setAdminToken] = useState<string | null>(() => localStorage.getItem('hin_admin_token'));
+  const [adminUser, setAdminUser] = useState<UserType | null>(() => {
+    const saved = localStorage.getItem('hin_admin_user');
+    return saved ? JSON.parse(saved) : null;
+  });
   
   // Auth Form States
   const [isRegisterMode, setIsRegisterMode] = useState(false);
@@ -69,6 +76,12 @@ export default function App() {
   const [postComments, setPostComments] = useState<Record<number, Comment[]>>({});
   const [newCommentText, setNewCommentText] = useState<Record<number, string>>({});
   const [replyingTo, setReplyingTo] = useState<Record<number, Comment | null>>({});
+
+  // Inline editing states for posts and comments
+  const [editingPostId, setEditingPostId] = useState<number | null>(null);
+  const [editingPostContent, setEditingPostContent] = useState('');
+  const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
+  const [editingCommentContent, setEditingCommentContent] = useState('');
   
   // Chat States
   const [chatRecipient, setChatRecipient] = useState<UserType | null>(null);
@@ -326,6 +339,12 @@ export default function App() {
               break;
             }
 
+            case 'post_updated': {
+              const { post } = message.payload;
+              setPosts(prev => prev.map(p => p.id === post.id ? { ...p, content: post.content } : p));
+              break;
+            }
+
             case 'like_update': {
               const { postId, likesCount, userId, liked } = message.payload;
               setPosts(prev => prev.map(p => {
@@ -379,6 +398,18 @@ export default function App() {
                 }
                 return p;
               }));
+              break;
+            }
+
+            case 'comment_updated': {
+              const { comment } = message.payload;
+              setPostComments(prev => {
+                const currentList = prev[comment.postId] || [];
+                return {
+                  ...prev,
+                  [comment.postId]: currentList.map(c => c.id === comment.id ? comment : c)
+                };
+              });
               break;
             }
           }
@@ -465,6 +496,10 @@ export default function App() {
     setCurrentUser(null);
     localStorage.removeItem('hin_token');
     localStorage.removeItem('hin_user');
+    localStorage.removeItem('hin_admin_token');
+    localStorage.removeItem('hin_admin_user');
+    setAdminToken(null);
+    setAdminUser(null);
     setChatRecipient(null);
     setChatMessages([]);
     setNotifications([]);
@@ -498,6 +533,26 @@ export default function App() {
         setNewPostMedia('');
         setShowNewPostForm(false);
         addToast('Post published successfully!', 'system');
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Save edited post to backend
+  const handleSavePostEdit = async (postId: number) => {
+    if (!editingPostContent.trim()) return;
+    try {
+      const res = await fetch(`${API_URL}/api/posts/${postId}`, {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify({ content: editingPostContent })
+      });
+      if (res.ok) {
+        const updatedPost = await res.json();
+        setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
+        setEditingPostId(null);
+        addToast('Post updated successfully', 'system');
       }
     } catch (e) {
       console.error(e);
@@ -598,6 +653,29 @@ export default function App() {
     }
   };
 
+  // Save edited comment to backend
+  const handleSaveCommentEdit = async (postId: number, commentId: number) => {
+    if (!editingCommentContent.trim()) return;
+    try {
+      const res = await fetch(`${API_URL}/api/comments/${commentId}`, {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify({ content: editingCommentContent })
+      });
+      if (res.ok) {
+        const updatedComment = await res.json();
+        setPostComments(prev => ({
+          ...prev,
+          [postId]: (prev[postId] || []).map(c => c.id === commentId ? updatedComment : c)
+        }));
+        setEditingCommentId(null);
+        addToast('Comment updated successfully', 'system');
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   // Delete Comment (Owner or Admin)
   const handleDeleteComment = async (postId: number, commentId: number) => {
     if (!currentUser) return;
@@ -677,7 +755,112 @@ export default function App() {
     }
   };
 
-  // Constructs a nested tree of CommentNodes from a flat comments list
+  // --- ADMIN DELEGATION & ACTION HANDLERS ---
+
+  // Act As (impersonate) target user
+  const handleImpersonateUser = async (userId: number) => {
+    if (!currentUser || currentUser.role !== 'admin' || !token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/impersonate`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ userId })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        
+        // Backup active admin session
+        localStorage.setItem('hin_admin_token', token);
+        localStorage.setItem('hin_admin_user', JSON.stringify(currentUser));
+        setAdminToken(token);
+        setAdminUser(currentUser);
+
+        // Switch to target user active session
+        localStorage.setItem('hin_token', data.token);
+        localStorage.setItem('hin_user', JSON.stringify(data.user));
+        setToken(data.token);
+        setCurrentUser(data.user);
+        
+        setActiveTab('feed');
+        setShowChatMobile(false);
+        setChatRecipient(null);
+        
+        addToast(`Now acting as @${data.user.username}`, 'system');
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Failed to impersonate');
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Return to Admin session
+  const handleStopImpersonating = () => {
+    const savedToken = localStorage.getItem('hin_admin_token');
+    const savedUser = localStorage.getItem('hin_admin_user');
+    if (savedToken && savedUser) {
+      localStorage.setItem('hin_token', savedToken);
+      localStorage.setItem('hin_user', savedUser);
+      setToken(savedToken);
+      setCurrentUser(JSON.parse(savedUser));
+      
+      localStorage.removeItem('hin_admin_token');
+      localStorage.removeItem('hin_admin_user');
+      setAdminToken(null);
+      setAdminUser(null);
+      
+      setActiveTab('admin');
+      setShowChatMobile(false);
+      setChatRecipient(null);
+      
+      addToast('Returned to Admin session', 'system');
+    }
+  };
+
+  // Toggle user's role between user and admin
+  const handleUpdateUserRole = async (userId: number, currentRole: 'user' | 'admin') => {
+    if (!currentUser || currentUser.role !== 'admin' || !token) return;
+    const nextRole = currentRole === 'admin' ? 'user' : 'admin';
+    if (!confirm(`Are you sure you want to change this user's role to ${nextRole}?`)) return;
+
+    try {
+      const res = await fetch(`${API_URL}/api/admin/users/${userId}/role`, {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify({ role: nextRole })
+      });
+      if (res.ok) {
+        addToast('User role updated successfully', 'system');
+        fetchAdminStats();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Soft Delete a user account (admin only)
+  const handleAdminDeleteUser = async (userId: number, targetUsername: string) => {
+    if (!currentUser || currentUser.role !== 'admin' || !token) return;
+    if (!confirm(`WARNING: Are you sure you want to soft-delete @${targetUsername}? This user will be immediately logged out and disabled.`)) return;
+
+    try {
+      const res = await fetch(`${API_URL}/api/admin/users/${userId}`, {
+        method: 'DELETE',
+        headers: getHeaders()
+      });
+      if (res.ok) {
+        addToast(`Account @${targetUsername} has been soft-deleted`, 'system');
+        fetchAdminStats();
+        fetchUsers(); // Refresh active sidebar list
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // --- RECURSIVE COMMENTS (LOOPS) TREE BUILDER ---
+
   const buildCommentTree = (flatComments: Comment[]): CommentNode[] => {
     const map: Record<number, CommentNode> = {};
     const roots: CommentNode[] = [];
@@ -695,7 +878,7 @@ export default function App() {
         if (parent) {
           parent.replies.push(node);
         } else {
-          // If parent is missing, treat as root node
+          // If parent is missing (or deleted and pruned), treat as root node
           roots.push(node);
         }
       } else {
@@ -715,7 +898,7 @@ export default function App() {
     return pruneTree(roots);
   };
 
-  // Recursive Comment Rendering Component
+  // Recursive Comment Component
   const CommentItem = ({ 
     comment, 
     depth = 0, 
@@ -726,6 +909,7 @@ export default function App() {
     postId: number;
   }) => {
     const isDeleted = !!comment.deletedAt || comment.username === 'deleted';
+    const isEditing = editingCommentId === comment.id;
     
     return (
       <div 
@@ -740,7 +924,7 @@ export default function App() {
           {!isDeleted && currentUser && (currentUser.role === 'admin' || currentUser.id === comment.userId) && (
             <button
               onClick={() => handleDeleteComment(postId, comment.id)}
-              className="absolute right-0 top-0.5 text-slate-500 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-1"
+              className="absolute right-0 top-0.5 text-slate-550 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-1"
               title="Delete Comment"
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -761,18 +945,56 @@ export default function App() {
               </span>
             </div>
             
-            <p className={`${isDeleted ? 'text-slate-500 italic mt-1' : 'text-slate-300'} text-xs mt-0.5 leading-relaxed break-words`}>
-              {comment.content}
-            </p>
+            {isEditing ? (
+              <div className="space-y-2 mt-1.5">
+                <input
+                  type="text"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 transition-colors"
+                  value={editingCommentContent}
+                  onChange={e => setEditingCommentContent(e.target.value)}
+                />
+                <div className="flex justify-end gap-1.5">
+                  <button
+                    onClick={() => setEditingCommentId(null)}
+                    className="px-2.5 py-1 rounded-lg text-[10px] text-slate-400 hover:bg-slate-850 hover:text-white transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleSaveCommentEdit(postId, comment.id)}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-semibold px-3 py-1 rounded-lg transition-all shadow-md cursor-pointer"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className={`${isDeleted ? 'text-slate-500 italic mt-1' : 'text-slate-300'} text-xs mt-0.5 leading-relaxed break-words`}>
+                {comment.content}
+              </p>
+            )}
             
-            {/* Reply toggle */}
-            {!isDeleted && currentUser && (
-              <button
-                onClick={() => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
-                className="text-[10px] text-indigo-400 hover:text-indigo-300 font-semibold mt-1 transition-colors cursor-pointer block"
-              >
-                Reply
-              </button>
+            {/* Reply / Edit buttons */}
+            {!isDeleted && !isEditing && currentUser && (
+              <div className="flex items-center gap-2 mt-1.5">
+                <button
+                  onClick={() => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
+                  className="text-[10px] text-indigo-400 hover:text-indigo-300 font-semibold transition-colors cursor-pointer"
+                >
+                  Reply
+                </button>
+                {(currentUser.role === 'admin' || currentUser.id === comment.userId) && (
+                  <button
+                    onClick={() => {
+                      setEditingCommentId(comment.id);
+                      setEditingCommentContent(comment.content);
+                    }}
+                    className="text-[10px] text-slate-450 hover:text-slate-350 transition-colors cursor-pointer"
+                  >
+                    Edit
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -792,6 +1014,22 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col font-sans select-none text-slate-100">
+      {/* Admin Impersonation Active Banner */}
+      {adminToken && adminUser && (
+        <div className="bg-amber-600 text-slate-950 font-bold px-4 py-2.5 text-center text-xs flex items-center justify-center gap-3 shrink-0 select-none shadow-md z-50">
+          <span className="flex items-center gap-1.5">
+            <Shield className="h-4 w-4 fill-slate-950" />
+            You are currently acting as <strong className="underline font-mono">@{currentUser?.username}</strong> (Delegated by @{adminUser.username})
+          </span>
+          <button 
+            onClick={handleStopImpersonating}
+            className="bg-slate-950 text-amber-500 hover:text-amber-400 font-bold px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wider transition-colors cursor-pointer"
+          >
+            Return to Admin
+          </button>
+        </div>
+      )}
+
       {/* Top Header */}
       <header className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -1102,7 +1340,6 @@ export default function App() {
                       : "Don't have an account? Register"}
                   </button>
                 </div>
-
               </div>
             </div>
           ) : activeTab === 'feed' && !showNotifications ? (
@@ -1160,7 +1397,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => setShowNewPostForm(false)}
-                        className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer"
+                        className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:bg-slate-850 hover:text-white transition-colors cursor-pointer"
                       >
                         Cancel
                       </button>
@@ -1190,15 +1427,29 @@ export default function App() {
                     return (
                       <article key={post.id} className="bg-slate-900 border border-slate-900/60 rounded-2xl p-4 space-y-4 shadow-sm hover:border-slate-800/50 transition-colors relative">
                         
-                        {/* Delete Action (Owner or Admin) */}
+                        {/* Actions (Owner or Admin) */}
                         {currentUser && (currentUser.role === 'admin' || currentUser.id === post.userId) && (
-                          <button
-                            onClick={() => handleDeletePost(post.id)}
-                            className="absolute top-4 right-4 p-1.5 bg-rose-500/10 border border-rose-500/25 hover:bg-rose-500/20 text-rose-550 rounded-lg transition-colors cursor-pointer"
-                            title="Delete Post"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          <div className="absolute top-4 right-4 flex items-center gap-1.5">
+                            <button
+                              onClick={() => {
+                                setEditingPostId(post.id);
+                                setEditingPostContent(post.content);
+                              }}
+                              className="p-1.5 bg-indigo-500/10 border border-indigo-500/25 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Post"
+                            >
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleDeletePost(post.id)}
+                              className="p-1.5 bg-rose-500/10 border border-rose-500/25 hover:bg-rose-500/20 text-rose-550 rounded-lg transition-colors cursor-pointer"
+                              title="Delete Post"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         )}
 
                         {/* Post Header */}
@@ -1235,11 +1486,37 @@ export default function App() {
                           )}
                         </div>
 
-                        {/* Post Content */}
+                        {/* Post Content / Editor */}
                         <div className="space-y-3">
-                          <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-line text-left">
-                            {post.content}
-                          </p>
+                          {editingPostId === post.id ? (
+                            <div className="space-y-2.5 mt-2">
+                              <textarea
+                                rows={3}
+                                className="w-full bg-slate-950 border border-slate-800/80 rounded-xl p-3 text-sm text-slate-100 placeholder-slate-650 focus:outline-none focus:border-indigo-500 transition-colors resize-none"
+                                value={editingPostContent}
+                                onChange={e => setEditingPostContent(e.target.value)}
+                              />
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  onClick={() => setEditingPostId(null)}
+                                  className="px-3.5 py-1.5 rounded-xl text-xs text-slate-400 hover:bg-slate-850 hover:text-white transition-colors cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={() => handleSavePostEdit(post.id)}
+                                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-1.5 rounded-xl transition-all shadow-md cursor-pointer"
+                                >
+                                  Save Edit
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-line text-left">
+                              {post.content}
+                            </p>
+                          )}
+                          
                           {post.mediaUrl && (
                             <div className="rounded-xl overflow-hidden border border-slate-800/50 bg-slate-950 max-h-80 flex items-center justify-center">
                               <img 
@@ -1318,7 +1595,7 @@ export default function App() {
                               </button>
                             </form>
 
-                            {/* Comment Thread List (Rendered Hierarchically) */}
+                            {/* Comment Thread List */}
                             <div className="space-y-3.5 max-h-80 overflow-y-auto pr-1">
                               {nestedComments.length === 0 ? (
                                 <p className="text-[11px] text-slate-500 text-center py-2">
@@ -1346,7 +1623,7 @@ export default function App() {
           ) : activeTab === 'messages' && !showNotifications ? (
             /* DIRECT MESSAGES VIEW */
             <div className="flex-grow flex flex-col md:flex-row overflow-hidden h-[calc(100vh-65px)]">
-              {/* User Selection column (Hidden on mobile when chat open) */}
+              {/* User Selection column */}
               <div className={`w-full md:w-64 border-r border-slate-900/60 flex flex-col shrink-0 md:bg-slate-950/20 ${
                 chatRecipient && showChatMobile ? 'hidden md:flex' : 'flex'
               }`}>
@@ -1394,7 +1671,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Chat Conversation Column (Hidden on mobile when threads list is active) */}
+              {/* Chat Conversation Column */}
               <div className={`flex-grow flex flex-col min-w-0 bg-slate-900/10 ${
                 !chatRecipient || !showChatMobile ? 'hidden md:flex' : 'flex'
               }`}>
@@ -1403,11 +1680,10 @@ export default function App() {
                     {/* Chat Header */}
                     <div className="p-4 border-b border-slate-900/60 bg-slate-950/60 flex items-center justify-between shrink-0">
                       <div className="flex items-center gap-2.5">
-                        {/* Mobile Back Button */}
                         <button 
                           onClick={() => {
                             setShowChatMobile(false);
-                            setChatRecipient(null); // Deselect so they can click other chats
+                            setChatRecipient(null);
                           }}
                           className="p-1 text-slate-400 hover:text-white md:hidden mr-1 cursor-pointer"
                           title="Back to threads"
@@ -1450,7 +1726,7 @@ export default function App() {
                               <div className={`max-w-[70%] rounded-2xl px-4 py-2.5 text-xs shadow-sm ${
                                 isMe 
                                   ? 'bg-indigo-600 text-white rounded-br-none text-right' 
-                                  : 'bg-slate-900 text-slate-100 rounded-bl-none text-left border border-slate-800'
+                                  : 'bg-slate-900 text-slate-100 rounded-bl-none text-left border border-slate-880'
                               }`}>
                                 <p className="leading-relaxed break-words">{msg.content}</p>
                                 <span className={`text-[8px] mt-1 block ${isMe ? 'text-indigo-200' : 'text-slate-500'}`}>
@@ -1536,12 +1812,13 @@ export default function App() {
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs text-left text-slate-300">
-                        <thead className="bg-slate-950/30 text-slate-500 border-b border-slate-900">
+                        <thead className="bg-slate-950/30 text-slate-550 border-b border-slate-900">
                           <tr>
                             <th className="p-3">User ID</th>
                             <th className="p-3">Username</th>
                             <th className="p-3">Role</th>
                             <th className="p-3">Created Date</th>
+                            <th className="p-3 text-center">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-850">
@@ -1560,6 +1837,31 @@ export default function App() {
                               </td>
                               <td className="p-3 text-slate-500">
                                 {new Date(u.createdAt).toLocaleDateString()} {new Date(u.createdAt).toLocaleTimeString()}
+                              </td>
+                              <td className="p-3 flex items-center justify-center gap-2">
+                                {u.id !== currentUser.id && (
+                                  <>
+                                    <button
+                                      onClick={() => handleImpersonateUser(u.id)}
+                                      className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-semibold transition-colors cursor-pointer"
+                                      title={`Act as @${u.username}`}
+                                    >
+                                      Act As
+                                    </button>
+                                    <button
+                                      onClick={() => handleUpdateUserRole(u.id, u.role)}
+                                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-705 text-slate-300 border border-slate-700 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer"
+                                    >
+                                      Toggle Role
+                                    </button>
+                                    <button
+                                      onClick={() => handleAdminDeleteUser(u.id, u.username)}
+                                      className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-550 border border-rose-500/25 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer"
+                                    >
+                                      Delete
+                                    </button>
+                                  </>
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -1639,7 +1941,7 @@ export default function App() {
             </div>
           )}
 
-          {/* Toast Notification Container (Live toasting for non-focused tabs) */}
+          {/* Toast Notification Container */}
           <div className="fixed bottom-16 md:bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
             {toasts.map(t => (
               <div 
@@ -1670,7 +1972,7 @@ export default function App() {
                 </div>
                 <div className="flex-grow text-left">
                   <p className="text-xs font-semibold">Real-Time Event</p>
-                  <p className="text-[11px] text-slate-350 mt-0.5 leading-relaxed">{t.content}</p>
+                  <p className="text-[11px] text-slate-355 mt-0.5 leading-relaxed">{t.content}</p>
                 </div>
               </div>
             ))}
@@ -1689,7 +1991,7 @@ export default function App() {
               setShowNotifications(false);
             }}
             className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all cursor-pointer ${
-              activeTab === 'feed' && !showNotifications ? 'text-indigo-400' : 'text-slate-550'
+              activeTab === 'feed' && !showNotifications ? 'text-indigo-400' : 'text-slate-555'
             }`}
           >
             <Compass className="h-5 w-5" />
@@ -1701,7 +2003,7 @@ export default function App() {
               setShowNotifications(true);
             }}
             className={`flex flex-col items-center gap-1 p-2 rounded-xl relative transition-all cursor-pointer ${
-              showNotifications ? 'text-indigo-400' : 'text-slate-550'
+              showNotifications ? 'text-indigo-400' : 'text-slate-555'
             }`}
           >
             <Bell className="h-5 w-5" />
@@ -1725,7 +2027,7 @@ export default function App() {
               }
             }}
             className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all cursor-pointer ${
-              activeTab === 'messages' && !showNotifications ? 'text-indigo-400' : 'text-slate-550'
+              activeTab === 'messages' && !showNotifications ? 'text-indigo-400' : 'text-slate-555'
             }`}
           >
             <MessageSquare className="h-5 w-5" />

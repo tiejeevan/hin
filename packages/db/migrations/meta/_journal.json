@@ -22,6 +22,13 @@
       "when": 1782928683452,
       "tag": "0002_low_reaper",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1782928917430,
+      "tag": "0003_closed_wallop",
+      "breakpoints": true
     }
   ]
 }

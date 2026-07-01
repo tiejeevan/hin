@@ -7,7 +7,10 @@ export const users = sqliteTable('users', {
   passwordHash: text('password_hash').default('').notNull(),
   role: text('role').default('user').notNull(),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+  deletedAt: text('deleted_at'), // Soft delete for users
+}, (table) => ({
+  deletedAtIdx: index('users_deleted_at_idx').on(table.deletedAt),
+}));
 
 export const posts = sqliteTable('posts', {
   id: integer('id').primaryKey({ autoIncrement: true }),

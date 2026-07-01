@@ -5,6 +5,7 @@ export interface User {
   username: string;
   role: 'user' | 'admin';
   createdAt: string;
+  deletedAt?: string | null;
 }
 
 export interface Post {
@@ -93,4 +94,6 @@ export type ServerMessage =
   | { type: 'post_deleted'; payload: { postId: number } }
   | { type: 'like_update'; payload: { postId: number; likesCount: number; userId: number; liked: boolean } }
   | { type: 'comment_created'; payload: { comment: Comment } }
-  | { type: 'comment_deleted'; payload: { commentId: number; postId: number } };
+  | { type: 'comment_deleted'; payload: { commentId: number; postId: number } }
+  | { type: 'post_updated'; payload: { post: Post } }
+  | { type: 'comment_updated'; payload: { comment: Comment } };
