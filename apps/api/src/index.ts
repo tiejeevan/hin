@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, desc, and, count, sql } from 'drizzle-orm';
+import { eq, desc, and, count, sql, inArray, isNull } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import { Post, Comment, Message, Notification, User } from '@hin/types';
 import bcrypt from 'bcryptjs';
@@ -220,7 +220,12 @@ app.get('/api/posts', async (c) => {
       const likesRes = await db
         .select({ value: count() })
         .from(schema.likes)
-        .where(eq(schema.likes.postId, post.id))
+        .where(
+          and(
+            eq(schema.likes.postId, post.id),
+            isNull(schema.likes.deletedAt)
+          )
+        )
         .get();
       const likesCount = likesRes?.value || 0;
 
@@ -246,7 +251,8 @@ app.get('/api/posts', async (c) => {
           .where(
             and(
               eq(schema.likes.postId, post.id),
-              eq(schema.likes.userId, currentUserId)
+              eq(schema.likes.userId, currentUserId),
+              isNull(schema.likes.deletedAt)
             )
           )
           .get();
@@ -333,10 +339,10 @@ app.put('/api/posts/:id', async (c) => {
     .where(eq(schema.posts.id, postId))
     .returning();
 
-  const likesRes = await db.select({ value: count() }).from(schema.likes).where(eq(schema.likes.postId, postId)).get();
+  const likesRes = await db.select({ value: count() }).from(schema.likes).where(and(eq(schema.likes.postId, postId), isNull(schema.likes.deletedAt))).get();
   const commentsRes = await db.select({ value: count() }).from(schema.comments).where(and(eq(schema.comments.postId, postId), sql`${schema.comments.deletedAt} IS NULL`)).get();
 
-  const likeRecord = await db.select().from(schema.likes).where(and(eq(schema.likes.postId, postId), eq(schema.likes.userId, authUser.id))).get();
+  const likeRecord = await db.select().from(schema.likes).where(and(eq(schema.likes.postId, postId), eq(schema.likes.userId, authUser.id), isNull(schema.likes.deletedAt))).get();
   const author = await db.select({ username: schema.users.username }).from(schema.users).where(eq(schema.users.id, updated.userId)).get();
 
   const responsePost: Post = {
@@ -387,15 +393,31 @@ app.post('/api/posts/:id/like', async (c) => {
 
   let liked = false;
   if (existingLike) {
-    // Unlike
-    await db.delete(schema.likes).where(
-      and(
-        eq(schema.likes.postId, postId),
-        eq(schema.likes.userId, authUser.id)
-      )
-    ).run();
+    if (!existingLike.deletedAt) {
+      // Unlike: Soft delete the existing active like record
+      await db.update(schema.likes)
+        .set({ deletedAt: new Date().toISOString() })
+        .where(
+          and(
+            eq(schema.likes.postId, postId),
+            eq(schema.likes.userId, authUser.id)
+          )
+        ).run();
+    } else {
+      // Like: Re-activate the existing soft-deleted like record
+      await db.update(schema.likes)
+        .set({ deletedAt: null })
+        .where(
+          and(
+            eq(schema.likes.postId, postId),
+            eq(schema.likes.userId, authUser.id)
+          )
+        ).run();
+      liked = true;
+      // Do NOT notify again since the user has already liked this post before!
+    }
   } else {
-    // Like
+    // First time like: Insert a new like record
     await db.insert(schema.likes).values({
       postId,
       userId: authUser.id,
@@ -440,8 +462,8 @@ app.post('/api/posts/:id/like', async (c) => {
     }
   }
 
-  // Count total likes
-  const likesCountRes = await db.select({ value: count() }).from(schema.likes).where(eq(schema.likes.postId, postId)).get();
+  // Count total active likes
+  const likesCountRes = await db.select({ value: count() }).from(schema.likes).where(and(eq(schema.likes.postId, postId), isNull(schema.likes.deletedAt))).get();
   const likesCount = likesCountRes?.value || 0;
 
   // Broadcast like update to ALL online users
@@ -648,6 +670,97 @@ app.put('/api/comments/:id', async (c) => {
   return c.json(commentResponse);
 });
 
+// Get DM threads list (other users with last message preview and unread count)
+app.get('/api/messages/threads', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+
+  // 1. Fetch senderId and receiverId of messages involving authUser
+  const messagePartners = await db.select({
+    senderId: schema.messages.senderId,
+    receiverId: schema.messages.receiverId,
+  })
+  .from(schema.messages)
+  .where(
+    and(
+      sql`(${schema.messages.senderId} = ${authUser.id} OR ${schema.messages.receiverId} = ${authUser.id})`,
+      sql`${schema.messages.deletedAt} IS NULL`
+    )
+  )
+  .all();
+
+  // 2. Extract unique partner IDs (excluding current user)
+  const partnerIds = Array.from(new Set(
+    messagePartners.flatMap(m => [m.senderId, m.receiverId]).filter(id => id !== authUser.id)
+  ));
+
+  if (partnerIds.length === 0) {
+    return c.json([]);
+  }
+
+  // 3. Fetch detailed user records for those partner IDs
+  const otherUsers = await db.select({
+    id: schema.users.id,
+    username: schema.users.username,
+    role: schema.users.role,
+  })
+  .from(schema.users)
+  .where(
+    and(
+      inArray(schema.users.id, partnerIds),
+      sql`${schema.users.deletedAt} IS NULL`
+    )
+  )
+  .all();
+
+  const threads = await Promise.all(
+    otherUsers.map(async (u) => {
+      // Get last message in conversation
+      const lastMsg = await db.select()
+        .from(schema.messages)
+        .where(
+          and(
+            sql`(${schema.messages.senderId} = ${authUser.id} AND ${schema.messages.receiverId} = ${u.id}) OR 
+                (${schema.messages.senderId} = ${u.id} AND ${schema.messages.receiverId} = ${authUser.id})`,
+            sql`${schema.messages.deletedAt} IS NULL`
+          )
+        )
+        .orderBy(desc(schema.messages.createdAt))
+        .get();
+
+      // Count unread messages received from this user
+      const unread = await db.select({ value: count() })
+        .from(schema.messages)
+        .where(
+          and(
+            eq(schema.messages.senderId, u.id),
+            eq(schema.messages.receiverId, authUser.id),
+            eq(schema.messages.read, 0),
+            sql`${schema.messages.deletedAt} IS NULL`
+          )
+        )
+        .get();
+
+      return {
+        id: u.id,
+        username: u.username,
+        role: u.role,
+        lastMessage: lastMsg ? {
+          content: lastMsg.content,
+          senderId: lastMsg.senderId,
+          createdAt: lastMsg.createdAt,
+          read: lastMsg.read === 1,
+        } : null,
+        unreadCount: unread?.value || 0,
+      };
+    })
+  );
+
+  return c.json(threads);
+});
+
 // Get direct messages history
 app.get('/api/messages/:otherUserId', async (c) => {
   const authUser = await getAuthUser(c);
@@ -656,12 +769,36 @@ app.get('/api/messages/:otherUserId', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const otherUserId = parseInt(c.req.param('otherUserId'));
 
+  // Mark received messages as read
+  await db.update(schema.messages)
+    .set({ read: 1 })
+    .where(
+      and(
+        eq(schema.messages.senderId, otherUserId),
+        eq(schema.messages.receiverId, authUser.id),
+        eq(schema.messages.read, 0)
+      )
+    )
+    .run();
+
+  // Also broadcast read status to sender if online
+  try {
+    const doId = c.env.REALTIME_DO.idFromName('global');
+    const doStub = c.env.REALTIME_DO.get(doId);
+    await doStub.fetch(new Request('http://realtime/broadcast-read-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ senderId: otherUserId, receiverId: authUser.id }),
+    }));
+  } catch (e) {}
+
   const chatMessages = await db
     .select({
       id: schema.messages.id,
       senderId: schema.messages.senderId,
       receiverId: schema.messages.receiverId,
       content: schema.messages.content,
+      read: schema.messages.read,
       createdAt: schema.messages.createdAt,
     })
     .from(schema.messages)
@@ -689,11 +826,44 @@ app.get('/api/messages/:otherUserId', async (c) => {
         receiverUsername: receiver?.username || 'Unknown',
         content: msg.content,
         createdAt: msg.createdAt,
+        read: msg.read === 1,
       };
     })
   );
 
   return c.json(populatedMessages);
+});
+
+// Mark messages from a specific user as read
+app.post('/api/messages/read/:otherUserId', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const otherUserId = parseInt(c.req.param('otherUserId'));
+
+  await db.update(schema.messages)
+    .set({ read: 1 })
+    .where(
+      and(
+        eq(schema.messages.senderId, otherUserId),
+        eq(schema.messages.receiverId, authUser.id),
+        eq(schema.messages.read, 0)
+      )
+    )
+    .run();
+
+  try {
+    const doId = c.env.REALTIME_DO.idFromName('global');
+    const doStub = c.env.REALTIME_DO.get(doId);
+    await doStub.fetch(new Request('http://realtime/broadcast-read-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ senderId: otherUserId, receiverId: authUser.id }),
+    }));
+  } catch (e) {}
+
+  return c.json({ success: true });
 });
 
 // Get notifications
@@ -999,6 +1169,22 @@ export class RealtimeDO implements DurableObject {
       return new Response('OK');
     }
 
+    if (url.pathname === '/broadcast-read-status') {
+      if (request.method !== 'POST') {
+        return new Response('Method Not Allowed', { status: 405 });
+      }
+      const { senderId, receiverId } = await request.json() as { senderId: number; receiverId: number };
+      
+      for (const [ws, session] of this.sessions.entries()) {
+        if (session.userId === senderId) {
+          try {
+            ws.send(JSON.stringify({ type: 'messages_read', payload: { senderId, receiverId } }));
+          } catch (e) {}
+        }
+      }
+      return new Response('OK');
+    }
+
     if (url.pathname === '/broadcast-event') {
       if (request.method !== 'POST') {
         return new Response('Method Not Allowed', { status: 405 });
@@ -1066,7 +1252,34 @@ export class RealtimeDO implements DurableObject {
     else if (message.type === 'active_chat') {
       const session = this.sessions.get(ws);
       if (session) {
-        session.activeChatId = message.payload.recipientId;
+        const recipientId = message.payload.recipientId;
+        session.activeChatId = recipientId;
+
+        if (recipientId) {
+          // Mark all messages from recipientId to user as read in the DB
+          await db.update(schema.messages)
+            .set({ read: 1 })
+            .where(
+              and(
+                eq(schema.messages.senderId, recipientId),
+                eq(schema.messages.receiverId, session.userId),
+                eq(schema.messages.read, 0)
+              )
+            )
+            .run();
+
+          // Broadcast to sender (recipientId) that their messages were read
+          for (const [targetWs, targetSession] of this.sessions.entries()) {
+            if (targetSession.userId === recipientId) {
+              try {
+                targetWs.send(JSON.stringify({ 
+                  type: 'messages_read', 
+                  payload: { senderId: recipientId, receiverId: session.userId } 
+                }));
+              } catch (e) {}
+            }
+          }
+        }
       }
     }
     
@@ -1076,10 +1289,20 @@ export class RealtimeDO implements DurableObject {
 
       const { receiverId, content } = message.payload;
       
+      // Determine if receiver has active chat open with sender
+      let receiverIsViewingChat = false;
+      for (const [_, targetSession] of this.sessions.entries()) {
+        if (targetSession.userId === receiverId && targetSession.activeChatId === session.userId) {
+          receiverIsViewingChat = true;
+          break;
+        }
+      }
+
       const [inserted] = await db.insert(schema.messages).values({
         senderId: session.userId,
         receiverId,
         content,
+        read: receiverIsViewingChat ? 1 : 0,
       }).returning();
 
       const receiverUser = await db.select().from(schema.users).where(eq(schema.users.id, receiverId)).get();
@@ -1092,20 +1315,17 @@ export class RealtimeDO implements DurableObject {
         receiverUsername: receiverUser?.username || 'Unknown',
         content,
         createdAt: inserted.createdAt,
+        read: inserted.read === 1,
       };
 
       try {
         ws.send(JSON.stringify({ type: 'message', payload: messagePayload }));
       } catch (e) {}
 
-      let receiverIsViewingChat = false;
       for (const [targetWs, targetSession] of this.sessions.entries()) {
         if (targetSession.userId === receiverId) {
           try {
             targetWs.send(JSON.stringify({ type: 'message', payload: messagePayload }));
-            if (targetSession.activeChatId === session.userId) {
-              receiverIsViewingChat = true;
-            }
           } catch (e) {}
         }
       }
@@ -1138,6 +1358,24 @@ export class RealtimeDO implements DurableObject {
           if (targetSession.userId === receiverId && targetSession.activeChatId !== session.userId) {
             try {
               targetWs.send(JSON.stringify({ type: 'notification', payload: notificationPayload }));
+            } catch (e) {}
+          }
+        }
+      }
+    }
+
+    else if (message.type === 'typing') {
+      const session = this.sessions.get(ws);
+      if (session) {
+        const { receiverId, isTyping } = message.payload;
+        // Forward typing event to the receiver
+        for (const [targetWs, targetSession] of this.sessions.entries()) {
+          if (targetSession.userId === receiverId) {
+            try {
+              targetWs.send(JSON.stringify({
+                type: 'typing',
+                payload: { senderId: session.userId, isTyping }
+              }));
             } catch (e) {}
           }
         }

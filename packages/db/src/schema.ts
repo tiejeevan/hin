@@ -44,9 +44,11 @@ export const likes = sqliteTable('likes', {
   userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text('deleted_at'), // Soft delete
 }, (table) => ({
   pk: primaryKey({ columns: [table.userId, table.postId] }),
   postIdIdx: index('likes_post_id_idx').on(table.postId),
+  deletedAtIdx: index('likes_deleted_at_idx').on(table.deletedAt),
 }));
 
 export const messages = sqliteTable('messages', {
@@ -54,6 +56,7 @@ export const messages = sqliteTable('messages', {
   senderId: integer('sender_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   receiverId: integer('receiver_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   content: text('content').notNull(),
+  read: integer('read').default(0).notNull(), // 0 = unread, 1 = read
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
   deletedAt: text('deleted_at'), // Soft delete
 }, (table) => ({

@@ -40,7 +40,21 @@ export interface Message {
   receiverUsername: string;
   content: string;
   createdAt: string;
+  read: boolean;
   deletedAt?: string | null;
+}
+
+export interface ChatThread {
+  id: number;
+  username: string;
+  role: string;
+  lastMessage: {
+    content: string;
+    senderId: number;
+    createdAt: string;
+    read: boolean;
+  } | null;
+  unreadCount: number;
 }
 
 export interface Notification {
@@ -84,7 +98,8 @@ export const LoginSchema = z.object({
 export type ClientMessage =
   | { type: 'join'; payload: { userId: number; username: string } }
   | { type: 'active_chat'; payload: { recipientId: number | null } }
-  | { type: 'send_message'; payload: { receiverId: number; content: string } };
+  | { type: 'send_message'; payload: { receiverId: number; content: string } }
+  | { type: 'typing'; payload: { receiverId: number; isTyping: boolean } };
 
 export type ServerMessage =
   | { type: 'message'; payload: Message }
@@ -96,4 +111,6 @@ export type ServerMessage =
   | { type: 'comment_created'; payload: { comment: Comment } }
   | { type: 'comment_deleted'; payload: { commentId: number; postId: number } }
   | { type: 'post_updated'; payload: { post: Post } }
-  | { type: 'comment_updated'; payload: { comment: Comment } };
+  | { type: 'comment_updated'; payload: { comment: Comment } }
+  | { type: 'typing'; payload: { senderId: number; isTyping: boolean } }
+  | { type: 'messages_read'; payload: { senderId: number; receiverId: number } };

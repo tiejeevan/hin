@@ -1,19 +1,80 @@
 @import "tailwindcss";
 
-/* Custom custom scrollbars or animations */
+@theme {
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-tertiary: var(--bg-tertiary);
+  --color-border-custom: var(--border-custom);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-card-bg: var(--card-bg);
+  --color-input-bg: var(--input-bg);
+  --color-chat-sidebar: var(--chat-sidebar);
+  --color-chat-bg: var(--chat-bg);
+  --color-chat-header: var(--chat-header);
+  --color-chat-input: var(--chat-input);
+  --color-msg-me: var(--msg-me);
+  --color-msg-me-text: var(--msg-me-text);
+  --color-msg-other: var(--msg-other);
+  --color-msg-other-text: var(--msg-other-text);
+}
+
+:root {
+  --bg-primary: #f2f2f7; /* iOS system gray background */
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e5e5ea;
+  --border-custom: #e5e5ea;
+  --text-primary: #000000;
+  --text-secondary: #3a3a3c;
+  --text-muted: #8e8e93;
+  --card-bg: #ffffff;
+  --input-bg: #e5e5ea;
+  --chat-sidebar: #ffffff;
+  --chat-bg: #ffffff;
+  --chat-header: #ffffff;
+  --chat-input: #ffffff;
+  --msg-me: #007aff; /* iOS Royal Blue sent bubble */
+  --msg-me-text: #ffffff;
+  --msg-other: #e9e9eb; /* iOS Light Gray received bubble */
+  --msg-other-text: #000000;
+}
+
+.dark {
+  --bg-primary: #000000; /* iOS dark mode deep black background */
+  --bg-secondary: #1c1c1e;
+  --bg-tertiary: #2c2c2e;
+  --border-custom: #2c2c2e;
+  --text-primary: #ffffff;
+  --text-secondary: #aeaeb2;
+  --text-muted: #8e8e93;
+  --card-bg: #1c1c1e;
+  --input-bg: #1c1c1e;
+  --chat-sidebar: #000000;
+  --chat-bg: #000000;
+  --chat-header: #1c1c1e;
+  --chat-input: #1c1c1e;
+  --msg-me: #0a84ff; /* iOS Dark Mode Blue sent bubble */
+  --msg-me-text: #ffffff;
+  --msg-other: #262629; /* iOS Dark Mode Gray received bubble */
+  --msg-other-text: #ffffff;
+}
+
+/* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.5);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.3);
+  background: var(--text-muted);
   border-radius: 4px;
+  opacity: 0.3;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.5);
+  background: var(--text-secondary);
 }
 
 @keyframes pulse-ring {
@@ -33,4 +94,36 @@
 
 .animate-pulse-ring {
   animation: pulse-ring 2s infinite;
+}
+
+@keyframes blink-border {
+  50% {
+    border-color: rgba(99, 102, 241, 0.85);
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.45);
+  }
+}
+
+.animate-blink-border {
+  animation: blink-border 1.2s ease-in-out 1;
+}
+
+
+/* Bouncing dots for typing indicator */
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.animate-bounce-dot {
+  animation: bounce 0.6s infinite ease-in-out;
+}
+.animate-bounce-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.animate-bounce-dot:nth-child(3) {
+  animation-delay: 0.3s;
 }

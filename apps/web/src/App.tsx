@@ -16,9 +16,12 @@ import {
   Sparkles,
   Trash2,
   Shield,
-  Lock
+  Lock,
+  Sun,
+  Moon,
+  SquarePen
 } from 'lucide-react';
-import { Post, Comment, Message, Notification, User as UserType } from '@hin/types';
+import { Post, Comment, Message, Notification, User as UserType, ChatThread } from '@hin/types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8787/ws';
@@ -43,7 +46,41 @@ interface CommentNode extends Comment {
   replies: CommentNode[];
 }
 
+const getAvatarColor = (username: string) => {
+  const colors = [
+    'bg-orange-500 text-white',
+    'bg-sky-500 text-white',
+    'bg-emerald-500 text-white',
+    'bg-amber-500 text-white',
+    'bg-indigo-500 text-white',
+    'bg-rose-500 text-white',
+    'bg-violet-500 text-white',
+  ];
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = username.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+};
+
 export default function App() {
+  // Theme State
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const saved = localStorage.getItem('hin_theme');
+    return saved === 'light' ? 'light' : 'dark';
+  });
+
+  // Apply theme to document element
+  useEffect(() => {
+    const root = window.document.documentElement;
+    if (theme === 'light') {
+      root.classList.remove('dark');
+    } else {
+      root.classList.add('dark');
+    }
+    localStorage.setItem('hin_theme', theme);
+  }, [theme]);
+
   // App States
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('hin_token'));
   const [currentUser, setCurrentUser] = useState<UserType | null>(() => {
@@ -71,6 +108,7 @@ export default function App() {
   // Feed States
   const [newPostContent, setNewPostContent] = useState('');
   const [newPostMedia, setNewPostMedia] = useState('');
+  const [newlyCreatedPostId, setNewlyCreatedPostId] = useState<number | null>(null);
   const [showNewPostForm, setShowNewPostForm] = useState(false);
   const [expandedComments, setExpandedComments] = useState<Record<number, boolean>>({});
   const [postComments, setPostComments] = useState<Record<number, Comment[]>>({});
@@ -84,12 +122,19 @@ export default function App() {
   const [editingCommentContent, setEditingCommentContent] = useState('');
   
   // Chat States
-  const [chatRecipient, setChatRecipient] = useState<UserType | null>(null);
+  const [chatRecipient, setChatRecipient] = useState<{ id: number; username: string; role: string } | null>(null);
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [newMsgText, setNewMsgText] = useState('');
   const [onlineUserIds, setOnlineUserIds] = useState<number[]>([]);
   const [showChatMobile, setShowChatMobile] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  // Extended Chat States
+  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [typingUsers, setTypingUsers] = useState<Record<number, boolean>>({});
+  const typingTimeoutRef = useRef<Record<number, any>>({});
+  const lastTypingSentRef = useRef<Record<number, number>>({});
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Notification States
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -104,6 +149,7 @@ export default function App() {
 
   // WebSockets Ref
   const ws = useRef<WebSocket | null>(null);
+  const processedNotifIdsRef = useRef<Set<number>>(new Set());
 
   // Helper for auth headers
   const getHeaders = () => {
@@ -195,6 +241,50 @@ export default function App() {
     }
   };
 
+  // Fetch DM threads list
+  const fetchThreads = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/messages/threads`, {
+        headers: getHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setThreads(data);
+      }
+    } catch (e) {
+      console.error('Error fetching threads:', e);
+    }
+  };
+
+  // Handle local user typing events to send to WebSocket
+  const handleUserTyping = (recipientId: number) => {
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+
+    const now = Date.now();
+    if (!lastTypingSentRef.current[recipientId] || now - lastTypingSentRef.current[recipientId] > 1000) {
+      ws.current.send(JSON.stringify({
+        type: 'typing',
+        payload: { receiverId: recipientId, isTyping: true }
+      }));
+      lastTypingSentRef.current[recipientId] = now;
+    }
+
+    if (typingTimeoutRef.current[recipientId]) {
+      clearTimeout(typingTimeoutRef.current[recipientId]);
+    }
+
+    typingTimeoutRef.current[recipientId] = setTimeout(() => {
+      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+        ws.current.send(JSON.stringify({
+          type: 'typing',
+          payload: { receiverId: recipientId, isTyping: false }
+        }));
+      }
+      lastTypingSentRef.current[recipientId] = 0;
+    }, 1500);
+  };
+
   // Fetch Admin Stats
   const fetchAdminStats = async () => {
     if (!currentUser || currentUser.role !== 'admin' || !token) return;
@@ -226,6 +316,7 @@ export default function App() {
       fetchUsers();
       fetchPosts();
       fetchNotifications();
+      fetchThreads();
       if (currentUser?.role === 'admin') {
         fetchAdminStats();
       }
@@ -233,8 +324,16 @@ export default function App() {
       setUsers([]);
       setPosts([]);
       setNotifications([]);
+      setThreads([]);
     }
   }, [token]);
+
+  // Fetch threads when messages tab becomes active
+  useEffect(() => {
+    if (activeTab === 'messages' && token) {
+      fetchThreads();
+    }
+  }, [activeTab, token]);
 
   // Fetch admin stats when active tab shifts to admin
   useEffect(() => {
@@ -258,6 +357,7 @@ export default function App() {
   useEffect(() => {
     if (!currentUser || !token) {
       if (ws.current) {
+        ws.current.onclose = null;
         ws.current.close();
         ws.current = null;
       }
@@ -300,15 +400,59 @@ export default function App() {
               // Append to active chat screen if relevant
               if (chatRecipient && (msg.senderId === chatRecipient.id || msg.receiverId === chatRecipient.id)) {
                 setChatMessages(prev => [...prev, msg]);
+                if (msg.senderId === chatRecipient.id) {
+                  // Mark as read in backend
+                  fetch(`${API_URL}/api/messages/read/${chatRecipient.id}`, {
+                    method: 'POST',
+                    headers: getHeaders()
+                  });
+                }
               }
+              // Refresh threads sidebar
+              fetchThreads();
+              break;
+            }
+
+            case 'messages_read': {
+              const { receiverId } = message.payload;
+              // If chatting with this receiver, update local messages read ticks
+              if (chatRecipient && chatRecipient.id === receiverId) {
+                setChatMessages(prev => prev.map(m => m.receiverId === receiverId ? { ...m, read: true } : m));
+              }
+              setThreads(prev => prev.map(t => {
+                if (t.id === receiverId && t.lastMessage) {
+                  return {
+                    ...t,
+                    lastMessage: { ...t.lastMessage, read: true }
+                  };
+                }
+                return t;
+              }));
+              break;
+            }
+
+            case 'typing': {
+              const { senderId, isTyping } = message.payload;
+              setTypingUsers(prev => ({
+                ...prev,
+                [senderId]: isTyping
+              }));
               break;
             }
 
             case 'notification': {
               const notif: Notification = message.payload;
-              setNotifications(prev => [notif, ...prev]);
+              if (processedNotifIdsRef.current.has(notif.id)) {
+                break;
+              }
+              processedNotifIdsRef.current.add(notif.id);
+
+              setNotifications(prev => {
+                if (prev.some(n => n.id === notif.id)) return prev;
+                return [notif, ...prev];
+              });
+
               setUnreadNotifsCount(prev => prev + 1);
-              
               if (notif.type === 'like') {
                 addToast(notif.content, 'like');
               } else if (notif.type === 'comment') {
@@ -434,6 +578,7 @@ export default function App() {
 
     return () => {
       if (ws.current) {
+        ws.current.onclose = null;
         ws.current.close();
       }
     };
@@ -506,6 +651,7 @@ export default function App() {
     setUnreadNotifsCount(0);
     setActiveTab('feed');
     setShowChatMobile(false);
+    processedNotifIdsRef.current.clear();
     if (ws.current) {
       ws.current.close();
     }
@@ -528,11 +674,17 @@ export default function App() {
 
       if (res.ok) {
         const newPost = await res.json();
-        setPosts(prev => [newPost, ...prev]);
+        setPosts(prev => {
+          if (prev.some(p => p.id === newPost.id)) return prev;
+          return [newPost, ...prev];
+        });
         setNewPostContent('');
         setNewPostMedia('');
         setShowNewPostForm(false);
-        addToast('Post published successfully!', 'system');
+        setNewlyCreatedPostId(newPost.id);
+        setTimeout(() => {
+          setNewlyCreatedPostId(null);
+        }, 3000);
       }
     } catch (e) {
       console.error(e);
@@ -712,11 +864,12 @@ export default function App() {
   };
 
   // Select User for Chat
-  const startChat = (recipient: UserType) => {
+  const startChat = (recipient: { id: number; username: string; role: string }) => {
     setChatRecipient(recipient);
     setActiveTab('messages');
     setShowChatMobile(true);
     fetchMessages(recipient.id);
+    fetchThreads();
   };
 
   // Send Direct Message via WS
@@ -732,6 +885,17 @@ export default function App() {
           content: newMsgText.trim()
         }
       }));
+      
+      // Stop typing status immediately
+      if (typingTimeoutRef.current[chatRecipient.id]) {
+        clearTimeout(typingTimeoutRef.current[chatRecipient.id]);
+      }
+      ws.current.send(JSON.stringify({
+        type: 'typing',
+        payload: { receiverId: chatRecipient.id, isTyping: false }
+      }));
+      lastTypingSentRef.current[chatRecipient.id] = 0;
+
       setNewMsgText('');
     } else {
       alert('WebSocket is currently disconnected. Reconnecting...');
@@ -1013,7 +1177,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col font-sans select-none text-slate-100">
+    <div className="min-h-screen bg-bg-primary flex flex-col font-sans select-none text-text-primary transition-colors duration-200">
       {/* Admin Impersonation Active Banner */}
       {adminToken && adminUser && (
         <div className="bg-amber-600 text-slate-950 font-bold px-4 py-2.5 text-center text-xs flex items-center justify-center gap-3 shrink-0 select-none shadow-md z-50">
@@ -1031,21 +1195,30 @@ export default function App() {
       )}
 
       {/* Top Header */}
-      <header className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
+      <header className="sticky top-0 z-40 bg-bg-secondary/85 backdrop-blur-md border-b border-border-custom px-4 py-3 flex items-center justify-between transition-colors duration-200">
         <div className="flex items-center gap-2">
           <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
             <Sparkles className="h-5 w-5 text-white" />
           </div>
-          <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">
+          <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary via-text-secondary to-text-muted">
             Hin
           </span>
-          <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-mono font-medium">
+          <span className="text-[10px] bg-bg-tertiary text-text-secondary border border-border-custom px-2 py-0.5 rounded-full font-mono font-medium">
             Secure
           </span>
         </div>
 
         {currentUser && (
           <div className="flex items-center gap-4">
+            {/* Theme Toggle Button */}
+            <button
+              onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
+              className="p-2 rounded-xl border border-border-custom bg-bg-secondary hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-all cursor-pointer"
+              title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+            >
+              {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4 text-amber-500" />}
+            </button>
+
             {/* Notification Bell (Hidden on mobile bottom nav) */}
             <div className="relative hidden md:block">
               <button 
@@ -1177,9 +1350,6 @@ export default function App() {
                   setShowNotifications(false);
                   if (chatRecipient) {
                     setShowChatMobile(true);
-                  } else if (users.length > 0) {
-                    const firstOther = users.find(u => u.id !== currentUser.id);
-                    if (firstOther) startChat(firstOther);
                   }
                 }}
                 className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all cursor-pointer ${
@@ -1424,8 +1594,15 @@ export default function App() {
                     const nestedComments = buildCommentTree(commentsList);
                     const isCommentsExpanded = expandedComments[post.id] || false;
 
+                    const isNewlyCreated = newlyCreatedPostId === post.id;
+
                     return (
-                      <article key={post.id} className="bg-slate-900 border border-slate-900/60 rounded-2xl p-4 space-y-4 shadow-sm hover:border-slate-800/50 transition-colors relative">
+                      <article
+                        key={post.id}
+                        className={`bg-slate-900 border border-slate-900/60 rounded-2xl p-4 space-y-4 shadow-sm hover:border-slate-800/50 transition-all relative ${
+                          isNewlyCreated ? 'animate-blink-border' : ''
+                        }`}
+                      >
                         
                         {/* Actions (Owner or Admin) */}
                         {currentUser && (currentUser.role === 'admin' || currentUser.id === post.userId) && (
@@ -1622,117 +1799,232 @@ export default function App() {
             </div>
           ) : activeTab === 'messages' && !showNotifications ? (
             /* DIRECT MESSAGES VIEW */
-            <div className="flex-grow flex flex-col md:flex-row overflow-hidden h-[calc(100vh-65px)]">
+            <div className="flex-grow flex flex-col md:flex-row overflow-hidden h-[calc(100vh-65px)] bg-bg-primary text-text-primary border-t border-border-custom transition-colors duration-200">
               {/* User Selection column */}
-              <div className={`w-full md:w-64 border-r border-slate-900/60 flex flex-col shrink-0 md:bg-slate-950/20 ${
+              <div className={`w-full md:w-80 border-r border-border-custom flex flex-col shrink-0 bg-chat-sidebar transition-colors duration-200 ${
                 chatRecipient && showChatMobile ? 'hidden md:flex' : 'flex'
               }`}>
-                <div className="p-3 border-b border-slate-900 bg-slate-950/50">
-                  <h3 className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
-                    <MessageSquare className="h-4 w-4 text-indigo-400" />
-                    Chat Threads
-                  </h3>
+                <div className="p-4 border-b border-border-custom bg-chat-sidebar flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xl font-bold text-text-primary tracking-tight font-sans">
+                      Messages
+                    </h3>
+                  </div>
+                  {/* Search Bar */}
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      placeholder="Search"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      className="w-full bg-input-bg border-none rounded-xl pl-9 pr-8 py-2 text-xs text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all font-sans"
+                    />
+                    <Users className="absolute left-3 h-3.5 w-3.5 text-text-muted" />
+                    {searchQuery && (
+                      <button 
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-3 text-text-muted hover:text-text-primary text-xs cursor-pointer"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex-grow overflow-y-auto p-2 space-y-1">
-                  {users
-                    .filter(u => u.id !== currentUser.id)
-                    .map(u => {
-                      const isOnline = onlineUserIds.includes(u.id);
+                
+                {/* Threads list */}
+                <div className="flex-grow overflow-y-auto bg-chat-sidebar transition-colors duration-200">
+                  {(() => {
+                    const renderList = [...threads];
+                    // Append active new chat if not in list
+                    if (chatRecipient && !threads.some(t => t.id === chatRecipient.id)) {
+                      renderList.unshift({
+                        id: chatRecipient.id,
+                        username: chatRecipient.username,
+                        role: chatRecipient.role,
+                        lastMessage: null,
+                        unreadCount: 0
+                      });
+                    }
+
+                    const filtered = renderList
+                      .filter(t => t.username.toLowerCase().includes(searchQuery.toLowerCase()))
+                      .sort((a, b) => {
+                        // Keep new chat at top
+                        if (chatRecipient && a.id === chatRecipient.id && !threads.some(t => t.id === chatRecipient.id)) return -1;
+                        if (chatRecipient && b.id === chatRecipient.id && !threads.some(t => t.id === chatRecipient.id)) return 1;
+
+                        if (a.lastMessage && b.lastMessage) {
+                          return new Date(b.lastMessage.createdAt).getTime() - new Date(a.lastMessage.createdAt).getTime();
+                        }
+                        if (a.lastMessage) return -1;
+                        if (b.lastMessage) return 1;
+                        return a.username.localeCompare(b.username);
+                      });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="flex flex-col items-center justify-center py-16 px-4 text-center gap-2">
+                          <div className="p-3 bg-bg-tertiary rounded-full text-text-secondary mb-1">
+                            <SquarePen className="h-5 w-5" />
+                          </div>
+                          <p className="text-xs font-semibold text-text-primary font-sans">No messages</p>
+                          <p className="text-[10px] text-text-muted font-sans max-w-[160px] leading-relaxed">
+                            Send a message to start a conversation
+                          </p>
+                        </div>
+                      );
+                    }
+
+                    return filtered.map(t => {
+                      const isOnline = onlineUserIds.includes(t.id);
+                      const isSelected = chatRecipient?.id === t.id;
                       return (
                         <button
-                          key={u.id}
-                          onClick={() => startChat(u)}
-                          className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition-all text-left cursor-pointer ${
-                            chatRecipient?.id === u.id 
-                              ? 'bg-slate-900 text-white border border-slate-800' 
-                              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60 border border-transparent'
+                          key={t.id}
+                          onClick={() => startChat(t)}
+                          className={`w-full flex items-center gap-3.5 px-4 py-3.5 border-b border-border-custom/30 transition-all text-left cursor-pointer hover:bg-bg-tertiary/40 ${
+                            isSelected ? 'bg-bg-tertiary/70 font-medium' : ''
                           }`}
                         >
                           <div className="relative shrink-0">
-                            <div className="h-8 w-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs uppercase text-slate-300">
-                              {u.username[0]}
+                            <div className={`h-12 w-12 rounded-full flex items-center justify-center font-bold text-sm uppercase shadow-sm ${getAvatarColor(t.username)}`}>
+                              {t.username[0]}
                             </div>
                             {isOnline && (
-                              <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border border-slate-950" />
+                              <span className="absolute bottom-0.5 right-0.5 h-3 w-3 rounded-full bg-emerald-500 border-2 border-bg-secondary animate-pulse-ring" />
                             )}
                           </div>
-                          <div className="min-w-0 flex-grow">
-                            <p className="text-xs font-semibold truncate flex items-center gap-1">
-                              @{u.username}
-                              {u.role === 'admin' && <Shield className="h-3.5 w-3.5 text-amber-500" />}
-                            </p>
-                            <p className="text-[9px] text-slate-500">
-                              {isOnline ? 'Online' : 'Offline'}
-                            </p>
+                          <div className="min-w-0 flex-grow pr-1">
+                            <div className="flex justify-between items-baseline mb-0.5">
+                              <p className="text-sm font-semibold text-text-primary truncate font-sans">
+                                @{t.username}
+                                {t.role === 'admin' && <Shield className="h-3.5 w-3.5 text-amber-500 inline ml-1 align-text-bottom" />}
+                              </p>
+                              {t.lastMessage && (
+                                <span className="text-[10px] text-text-muted shrink-0 ml-2 font-sans font-medium">
+                                  {new Date(t.lastMessage.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              )}
+                            </div>
+                            
+                            <div className="flex justify-between items-center">
+                              <div className="min-w-0 flex-grow pr-2">
+                                {typingUsers[t.id] ? (
+                                  <p className="text-xs font-semibold text-indigo-500 animate-pulse flex items-center gap-1 font-sans">
+                                    Typing
+                                    <span className="flex gap-0.5">
+                                      <span className="h-1 w-1 bg-indigo-500 rounded-full animate-bounce-dot" />
+                                      <span className="h-1 w-1 bg-indigo-500 rounded-full animate-bounce-dot" />
+                                      <span className="h-1 w-1 bg-indigo-500 rounded-full animate-bounce-dot" />
+                                    </span>
+                                  </p>
+                                ) : t.lastMessage ? (
+                                  <p className={`text-[12px] truncate leading-relaxed font-sans ${t.unreadCount > 0 ? 'text-text-primary font-bold' : 'text-text-secondary'}`}>
+                                    {t.lastMessage.senderId === currentUser.id ? 'You: ' : ''}
+                                    {t.lastMessage.content}
+                                  </p>
+                                ) : (
+                                  <p className="text-[12px] text-text-muted italic font-sans">No messages yet</p>
+                                )}
+                              </div>
+                              
+                              <div className="shrink-0 flex items-center gap-1.5">
+                                {t.unreadCount > 0 && (
+                                  <span className="h-5 min-w-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow-sm font-sans animate-pulse-ring">
+                                    {t.unreadCount}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </button>
                       );
-                    })}
+                    });
+                  })()}
                 </div>
               </div>
 
               {/* Chat Conversation Column */}
-              <div className={`flex-grow flex flex-col min-w-0 bg-slate-900/10 ${
+              <div className={`flex-grow flex flex-col min-w-0 bg-chat-bg transition-colors duration-200 ${
                 !chatRecipient || !showChatMobile ? 'hidden md:flex' : 'flex'
               }`}>
                 {chatRecipient ? (
                   <>
                     {/* Chat Header */}
-                    <div className="p-4 border-b border-slate-900/60 bg-slate-950/60 flex items-center justify-between shrink-0">
-                      <div className="flex items-center gap-2.5">
+                    <div className="p-4 border-b border-border-custom bg-chat-header flex items-center justify-between shrink-0 shadow-sm z-10 transition-colors duration-200 relative">
+                      <div className="flex items-center gap-3">
                         <button 
                           onClick={() => {
                             setShowChatMobile(false);
                             setChatRecipient(null);
                           }}
-                          className="p-1 text-slate-400 hover:text-white md:hidden mr-1 cursor-pointer"
-                          title="Back to threads"
+                          className="flex items-center text-indigo-500 hover:text-indigo-600 font-sans text-sm font-medium mr-1 cursor-pointer transition-colors"
+                          title="Back"
                         >
-                          <ChevronLeft className="h-5 w-5" />
+                          <ChevronLeft className="h-5 w-5 mr-0.5 inline" />
+                          Messages
                         </button>
-
-                        <div className="relative shrink-0">
-                          <div className="h-9 w-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs uppercase text-indigo-400">
-                            {chatRecipient.username[0]}
-                          </div>
-                          {onlineUserIds.includes(chatRecipient.id) && (
-                            <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border border-slate-950" />
-                          )}
-                        </div>
-                        <div className="text-left">
-                          <h4 className="text-xs font-bold text-slate-200">@{chatRecipient.username}</h4>
-                          <p className="text-[9px] text-slate-500">
-                            {onlineUserIds.includes(chatRecipient.id) ? 'Online now' : 'Offline'}
-                          </p>
-                        </div>
                       </div>
+
+                      {/* Header Contact Details */}
+                      <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center select-none pointer-events-none">
+                        <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-xs uppercase shadow-sm mb-0.5 ${getAvatarColor(chatRecipient.username)}`}>
+                          {chatRecipient.username[0]}
+                        </div>
+                        <span className="text-[10px] font-bold text-text-primary tracking-tight font-sans leading-none">
+                          @{chatRecipient.username}
+                        </span>
+                      </div>
+
+                      <div className="w-12" /> {/* Balanced spacing */}
                     </div>
 
                     {/* Messages Body */}
-                    <div className="flex-grow overflow-y-auto p-4 space-y-3">
+                    <div className="flex-grow overflow-y-auto p-4 space-y-3 bg-chat-bg transition-colors duration-200">
                       {chatMessages.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-slate-500 text-xs gap-1.5 py-12">
-                          <MessageCircle className="h-8 w-8 text-slate-700" />
-                          <span>No messages in this chat. Start typing below!</span>
+                        <div className="h-full flex flex-col items-center justify-center text-text-muted text-xs gap-1.5 py-12">
+                          <MessageCircle className="h-8 w-8 text-text-muted opacity-40" />
+                          <span className="font-sans">No messages yet. Start typing below!</span>
                         </div>
                       ) : (
-                        chatMessages.map(msg => {
+                        chatMessages.map((msg, index) => {
                           const isMe = msg.senderId === currentUser.id;
+                          const prevMsg = index > 0 ? chatMessages[index - 1] : null;
+                          const isLast = index === chatMessages.length - 1;
+                          
+                          // Show time divider if 15 mins gap
+                          const showTime = !prevMsg || (new Date(msg.createdAt).getTime() - new Date(prevMsg.createdAt).getTime()) > 15 * 60 * 1000;
+
                           return (
-                            <div 
-                              key={msg.id} 
-                              className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
-                            >
-                              <div className={`max-w-[70%] rounded-2xl px-4 py-2.5 text-xs shadow-sm ${
-                                isMe 
-                                  ? 'bg-indigo-600 text-white rounded-br-none text-right' 
-                                  : 'bg-slate-900 text-slate-100 rounded-bl-none text-left border border-slate-880'
-                              }`}>
-                                <p className="leading-relaxed break-words">{msg.content}</p>
-                                <span className={`text-[8px] mt-1 block ${isMe ? 'text-indigo-200' : 'text-slate-500'}`}>
-                                  {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
+                            <div key={msg.id} className="flex flex-col">
+                              {showTime && (
+                                <div className="text-[10px] text-text-muted font-bold text-center my-3 font-sans uppercase tracking-wider">
+                                  {new Date(msg.createdAt).toLocaleDateString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              )}
+
+                              <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-0.5`}>
+                                <div className={`max-w-[70%] rounded-[20px] px-4 py-2 text-[13px] leading-relaxed shadow-sm font-sans ${
+                                  isMe 
+                                    ? 'bg-msg-me text-msg-me-text rounded-br-[4px] text-left' 
+                                    : 'bg-msg-other text-msg-other-text rounded-bl-[4px] text-left border border-border-custom'
+                                }`}>
+                                  <p className="break-words">{msg.content}</p>
+                                </div>
                               </div>
+
+                              {/* iMessage style Delivered/Read label only under the very last message */}
+                              {isLast && isMe && (
+                                <div className="text-[10px] text-text-muted font-medium text-right pr-1.5 mt-0.5 font-sans">
+                                  {msg.read ? (
+                                    <span>
+                                      Read {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  ) : (
+                                    <span>Delivered</span>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           );
                         })
@@ -1741,27 +2033,35 @@ export default function App() {
                     </div>
 
                     {/* Chat Input */}
-                    <form onSubmit={handleSendDM} className="p-3 bg-slate-950/60 border-t border-slate-900/60 flex items-center gap-2 shrink-0">
+                    <form onSubmit={handleSendDM} className="p-3 bg-chat-input border-t border-border-custom flex items-center gap-2 shrink-0 transition-colors duration-200">
                       <input
                         type="text"
                         required
-                        placeholder={`Message @${chatRecipient.username}...`}
+                        placeholder="iMessage"
                         value={newMsgText}
-                        onChange={e => setNewMsgText(e.target.value)}
-                        className="flex-grow bg-slate-900 border border-slate-850 rounded-xl px-4 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                        onChange={e => {
+                          setNewMsgText(e.target.value);
+                          handleUserTyping(chatRecipient.id);
+                        }}
+                        className="flex-grow bg-input-bg border border-border-custom rounded-2xl px-4 py-2 text-[13px] text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-indigo-500/20 transition-all font-sans"
                       />
                       <button 
                         type="submit"
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white p-2.5 rounded-xl transition-colors shadow-lg shadow-indigo-600/10 shrink-0 cursor-pointer"
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white p-2.5 rounded-full transition-colors shadow-md shrink-0 cursor-pointer"
                       >
                         <Send className="h-4 w-4" />
                       </button>
                     </form>
                   </>
                 ) : (
-                  <div className="flex-grow flex flex-col items-center justify-center p-6 text-slate-500 text-sm gap-2">
-                    <MessageSquare className="h-10 w-10 text-slate-700" />
-                    <span>Select a user from the sidebar thread list to begin chatting.</span>
+                  <div className="flex-grow flex flex-col items-center justify-center p-6 text-text-muted text-sm gap-3 bg-chat-bg transition-colors duration-200">
+                    <div className="p-4 bg-indigo-50 dark:bg-bg-tertiary rounded-full text-indigo-500 mb-1">
+                      <SquarePen className="h-8 w-8" />
+                    </div>
+                    <span className="font-sans font-semibold text-text-primary text-base">No messages</span>
+                    <span className="font-sans text-xs text-text-muted max-w-xs text-center leading-relaxed">
+                      No messages, send message to start conversation
+                    </span>
                   </div>
                 )}
               </div>
@@ -1971,8 +2271,7 @@ export default function App() {
                   )}
                 </div>
                 <div className="flex-grow text-left">
-                  <p className="text-xs font-semibold">Real-Time Event</p>
-                  <p className="text-[11px] text-slate-355 mt-0.5 leading-relaxed">{t.content}</p>
+                  <p className="text-xs font-medium text-slate-200 leading-relaxed">{t.content}</p>
                 </div>
               </div>
             ))}
@@ -2021,9 +2320,6 @@ export default function App() {
               setShowNotifications(false);
               if (chatRecipient) {
                 setShowChatMobile(true);
-              } else if (users.length > 0) {
-                const firstOther = users.find(u => u.id !== currentUser.id);
-                if (firstOther) startChat(firstOther);
               }
             }}
             className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all cursor-pointer ${
