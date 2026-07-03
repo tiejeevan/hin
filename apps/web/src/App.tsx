@@ -1,111 +1,39 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Heart, 
-  MessageSquare, 
-  Send, 
-  Users, 
-  Bell, 
-  Plus, 
-  Image as ImageIcon, 
-  X, 
-  LogOut, 
-  MessageCircle, 
-  Compass, 
-  ChevronRight,
-  ChevronLeft,
-  Sparkles,
-  Trash2,
-  Shield,
-  Lock,
-  Sun,
-  Moon,
-  SquarePen
-} from 'lucide-react';
-import { Post, Comment, Message, Notification, User as UserType, ChatThread } from '@hin/types';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8787/ws';
-
-interface Toast {
-  id: string;
-  content: string;
-  type: 'like' | 'comment' | 'message' | 'system';
-}
-
-interface AdminData {
-  stats: {
-    users: number;
-    posts: number;
-    comments: number;
-    messages: number;
-  };
-  users: UserType[];
-}
-
-interface CommentNode extends Comment {
-  replies: CommentNode[];
-}
-
-const getAvatarColor = (username: string) => {
-  const colors = [
-    'bg-orange-500 text-white',
-    'bg-sky-500 text-white',
-    'bg-emerald-500 text-white',
-    'bg-amber-500 text-white',
-    'bg-indigo-500 text-white',
-    'bg-rose-500 text-white',
-    'bg-violet-500 text-white',
-  ];
-  let hash = 0;
-  for (let i = 0; i < username.length; i++) {
-    hash = username.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return colors[Math.abs(hash) % colors.length];
-};
+import { useState, useEffect, useRef } from 'react';
+import { Comment, Message, Notification, User as UserType } from '@hin/types';
+import { API_URL, WS_URL } from './config';
+import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode } from './types/ui';
+import { AppShell } from './components/layout/AppShell';
+import { AppHeader } from './components/layout/AppHeader';
+import { Sidebar } from './components/layout/Sidebar';
+import { BottomNav } from './components/layout/BottomNav';
+import { ImpersonationBanner } from './components/layout/ImpersonationBanner';
+import { AuthForm } from './components/auth/AuthForm';
+import { FeedView } from './components/feed/FeedView';
+import { AdminDashboard } from './components/admin/AdminDashboard';
+import { ToastContainer } from './components/ui/ToastContainer';
 
 export default function App() {
-  // Theme State
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    const saved = localStorage.getItem('hin_theme');
-    return saved === 'light' ? 'light' : 'dark';
-  });
-
-  // Apply theme to document element
-  useEffect(() => {
-    const root = window.document.documentElement;
-    if (theme === 'light') {
-      root.classList.remove('dark');
-    } else {
-      root.classList.add('dark');
-    }
-    localStorage.setItem('hin_theme', theme);
-  }, [theme]);
-
-  // App States
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('hin_token'));
   const [currentUser, setCurrentUser] = useState<UserType | null>(() => {
     const saved = localStorage.getItem('hin_user');
     return saved ? JSON.parse(saved) : null;
   });
   const [users, setUsers] = useState<UserType[]>([]);
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [activeTab, setActiveTab] = useState<'feed' | 'messages' | 'admin'>('feed');
+  const [posts, setPosts] = useState<import('@hin/types').Post[]>([]);
+  const [activeTab, setActiveTab] = useState<ActiveTab>('feed');
 
-  // Admin Delegation Backup states
   const [adminToken, setAdminToken] = useState<string | null>(() => localStorage.getItem('hin_admin_token'));
   const [adminUser, setAdminUser] = useState<UserType | null>(() => {
     const saved = localStorage.getItem('hin_admin_user');
     return saved ? JSON.parse(saved) : null;
   });
-  
-  // Auth Form States
+
   const [isRegisterMode, setIsRegisterMode] = useState(false);
   const [usernameInput, setUsernameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
-  // Feed States
   const [newPostContent, setNewPostContent] = useState('');
   const [newPostMedia, setNewPostMedia] = useState('');
   const [newlyCreatedPostId, setNewlyCreatedPostId] = useState<number | null>(null);
@@ -115,90 +43,127 @@ export default function App() {
   const [newCommentText, setNewCommentText] = useState<Record<number, string>>({});
   const [replyingTo, setReplyingTo] = useState<Record<number, Comment | null>>({});
 
-  // Inline editing states for posts and comments
   const [editingPostId, setEditingPostId] = useState<number | null>(null);
   const [editingPostContent, setEditingPostContent] = useState('');
   const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
   const [editingCommentContent, setEditingCommentContent] = useState('');
-  
-  // Chat States
-  const [chatRecipient, setChatRecipient] = useState<{ id: number; username: string; role: string } | null>(null);
+
+  const [chatRecipient, setChatRecipient] = useState<ChatRecipient | null>(null);
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [newMsgText, setNewMsgText] = useState('');
   const [onlineUserIds, setOnlineUserIds] = useState<number[]>([]);
-  const [showChatMobile, setShowChatMobile] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // Extended Chat States
-  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [threads, setThreads] = useState<import('@hin/types').ChatThread[]>([]);
   const [typingUsers, setTypingUsers] = useState<Record<number, boolean>>({});
-  const typingTimeoutRef = useRef<Record<number, any>>({});
+  const typingTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const lastTypingSentRef = useRef<Record<number, number>>({});
-  const [searchQuery, setSearchQuery] = useState('');
 
-  // Notification States
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showMessagesDropdown, setShowMessagesDropdown] = useState(false);
+  const [messagesPanelExpanded, setMessagesPanelExpanded] = useState(false);
+  const [messageIconPulseAt, setMessageIconPulseAt] = useState(0);
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
 
-  // Toasts
   const [toasts, setToasts] = useState<Toast[]>([]);
-
-  // Admin Panel States
   const [adminData, setAdminData] = useState<AdminData | null>(null);
 
-  // WebSockets Ref
   const ws = useRef<WebSocket | null>(null);
+  const wsReadyRef = useRef(false);
   const processedNotifIdsRef = useRef<Set<number>>(new Set());
+  const showMessagesDropdownRef = useRef(showMessagesDropdown);
+  const chatRecipientRef = useRef(chatRecipient);
 
-  // Helper for auth headers
+  useEffect(() => {
+    showMessagesDropdownRef.current = showMessagesDropdown;
+  }, [showMessagesDropdown]);
+
+  useEffect(() => {
+    chatRecipientRef.current = chatRecipient;
+  }, [chatRecipient]);
+
   const getHeaders = () => {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     return headers;
   };
 
-  // Fetch all users
+  const addToast = (content: string, type: Toast['type']) => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts(prev => [...prev, { id, content, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+  };
+
+  const goHome = () => {
+    setActiveTab('feed');
+    setShowNotifications(false);
+    setShowMessagesDropdown(false);
+    setMessagesPanelExpanded(false);
+    setChatRecipient(null);
+  };
+
+  const closeMessagesPanel = () => {
+    setShowMessagesDropdown(false);
+    setMessagesPanelExpanded(false);
+    setChatRecipient(null);
+  };
+
+  const openChatInPanel = (recipient: ChatRecipient) => {
+    setChatRecipient(recipient);
+    fetchMessages(recipient.id);
+    setThreads(prev =>
+      prev.map(t => (t.id === recipient.id ? { ...t, unreadCount: 0 } : t))
+    );
+  };
+
+  const backToMessagesList = () => {
+    setChatRecipient(null);
+  };
+
+  const toggleMessagesDropdown = () => {
+    setShowMessagesDropdown(prev => {
+      const next = !prev;
+      if (next) {
+        setShowNotifications(false);
+        fetchThreads();
+      } else {
+        setMessagesPanelExpanded(false);
+        setChatRecipient(null);
+      }
+      return next;
+    });
+  };
+
+  const unreadMessagesCount = threads.reduce((sum, t) => sum + t.unreadCount, 0);
+
+  const openAdmin = () => {
+    setActiveTab('admin');
+    setShowNotifications(false);
+  };
+
   const fetchUsers = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/users`, {
-        headers: getHeaders()
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(data);
-      }
+      const res = await fetch(`${API_URL}/api/users`, { headers: getHeaders() });
+      if (res.ok) setUsers(await res.json());
     } catch (e) {
       console.error('Error fetching users:', e);
     }
   };
 
-  // Fetch posts
   const fetchPosts = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/posts`, {
-        headers: getHeaders()
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPosts(data);
-      }
+      const res = await fetch(`${API_URL}/api/posts`, { headers: getHeaders() });
+      if (res.ok) setPosts(await res.json());
     } catch (e) {
       console.error('Error fetching posts:', e);
     }
   };
 
-  // Fetch comments for a specific post
   const fetchComments = async (postId: number) => {
     try {
-      const res = await fetch(`${API_URL}/api/posts/${postId}/comments`, {
-        headers: getHeaders()
-      });
+      const res = await fetch(`${API_URL}/api/posts/${postId}/comments`, { headers: getHeaders() });
       if (res.ok) {
         const data = await res.json();
         setPostComments(prev => ({ ...prev, [postId]: data }));
@@ -208,118 +173,74 @@ export default function App() {
     }
   };
 
-  // Fetch notifications
   const fetchNotifications = async () => {
     if (!currentUser || !token) return;
     try {
-      const res = await fetch(`${API_URL}/api/notifications`, {
-        headers: getHeaders()
-      });
+      const res = await fetch(`${API_URL}/api/notifications`, { headers: getHeaders() });
       if (res.ok) {
         const data = await res.json();
-        setNotifications(data);
-        setUnreadNotifsCount(data.filter((n: Notification) => !n.read).length);
+        const filtered = data.filter((n: Notification) => n.type !== 'message');
+        setNotifications(filtered);
+        setUnreadNotifsCount(filtered.filter((n: Notification) => !n.read).length);
       }
     } catch (e) {
       console.error('Error fetching notifications:', e);
     }
   };
 
-  // Fetch direct messages history
   const fetchMessages = async (otherUserId: number) => {
     if (!currentUser || !token) return;
     try {
-      const res = await fetch(`${API_URL}/api/messages/${otherUserId}`, {
-        headers: getHeaders()
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setChatMessages(data);
-      }
+      const res = await fetch(`${API_URL}/api/messages/${otherUserId}`, { headers: getHeaders() });
+      if (res.ok) setChatMessages(await res.json());
     } catch (e) {
       console.error('Error fetching messages:', e);
     }
   };
 
-  // Fetch DM threads list
   const fetchThreads = async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/messages/threads`, {
-        headers: getHeaders()
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setThreads(data);
-      }
+      const res = await fetch(`${API_URL}/api/messages/threads`, { headers: getHeaders() });
+      if (res.ok) setThreads(await res.json());
     } catch (e) {
       console.error('Error fetching threads:', e);
     }
   };
 
-  // Handle local user typing events to send to WebSocket
-  const handleUserTyping = (recipientId: number) => {
-    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
-
-    const now = Date.now();
-    if (!lastTypingSentRef.current[recipientId] || now - lastTypingSentRef.current[recipientId] > 1000) {
-      ws.current.send(JSON.stringify({
-        type: 'typing',
-        payload: { receiverId: recipientId, isTyping: true }
-      }));
-      lastTypingSentRef.current[recipientId] = now;
-    }
-
-    if (typingTimeoutRef.current[recipientId]) {
-      clearTimeout(typingTimeoutRef.current[recipientId]);
-    }
-
-    typingTimeoutRef.current[recipientId] = setTimeout(() => {
-      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-        ws.current.send(JSON.stringify({
-          type: 'typing',
-          payload: { receiverId: recipientId, isTyping: false }
-        }));
-      }
-      lastTypingSentRef.current[recipientId] = 0;
-    }, 1500);
-  };
-
-  // Fetch Admin Stats
   const fetchAdminStats = async () => {
     if (!currentUser || currentUser.role !== 'admin' || !token) return;
     try {
-      const res = await fetch(`${API_URL}/api/admin/stats`, {
-        headers: getHeaders()
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setAdminData(data);
-      }
+      const res = await fetch(`${API_URL}/api/admin/stats`, { headers: getHeaders() });
+      if (res.ok) setAdminData(await res.json());
     } catch (e) {
       console.error('Error fetching admin stats:', e);
     }
   };
 
-  // Trigger local toast notification
-  const addToast = (content: string, type: 'like' | 'comment' | 'message' | 'system') => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setToasts(prev => [...prev, { id, content, type }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4000);
+  const handleUserTyping = (recipientId: number) => {
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN || !wsReadyRef.current) return;
+    const now = Date.now();
+    if (!lastTypingSentRef.current[recipientId] || now - lastTypingSentRef.current[recipientId] > 1000) {
+      ws.current.send(JSON.stringify({ type: 'typing', payload: { receiverId: recipientId, isTyping: true } }));
+      lastTypingSentRef.current[recipientId] = now;
+    }
+    if (typingTimeoutRef.current[recipientId]) clearTimeout(typingTimeoutRef.current[recipientId]);
+    typingTimeoutRef.current[recipientId] = setTimeout(() => {
+      if (ws.current?.readyState === WebSocket.OPEN) {
+        ws.current.send(JSON.stringify({ type: 'typing', payload: { receiverId: recipientId, isTyping: false } }));
+      }
+      lastTypingSentRef.current[recipientId] = 0;
+    }, 1500);
   };
 
-  // Initial load when token change
   useEffect(() => {
     if (token) {
       fetchUsers();
       fetchPosts();
       fetchNotifications();
       fetchThreads();
-      if (currentUser?.role === 'admin') {
-        fetchAdminStats();
-      }
+      if (currentUser?.role === 'admin') fetchAdminStats();
     } else {
       setUsers([]);
       setPosts([]);
@@ -328,34 +249,26 @@ export default function App() {
     }
   }, [token]);
 
-  // Fetch threads when messages tab becomes active
   useEffect(() => {
-    if (activeTab === 'messages' && token) {
-      fetchThreads();
-    }
-  }, [activeTab, token]);
-
-  // Fetch admin stats when active tab shifts to admin
-  useEffect(() => {
-    if (activeTab === 'admin') {
-      fetchAdminStats();
-    }
+    if (activeTab === 'admin') fetchAdminStats();
   }, [activeTab]);
 
-  // Update active chat status on the WebSocket server
-  useEffect(() => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      const recipientId = activeTab === 'messages' && chatRecipient ? chatRecipient.id : null;
-      ws.current.send(JSON.stringify({
-        type: 'active_chat',
-        payload: { recipientId }
-      }));
-    }
-  }, [chatRecipient, activeTab]);
+  const sendActiveChat = () => {
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN || !wsReadyRef.current) return;
+    const recipientId =
+      chatRecipientRef.current && showMessagesDropdownRef.current
+        ? chatRecipientRef.current.id
+        : null;
+    ws.current.send(JSON.stringify({ type: 'active_chat', payload: { recipientId } }));
+  };
 
-  // Connect to WebSockets
+  useEffect(() => {
+    sendActiveChat();
+  }, [chatRecipient, showMessagesDropdown]);
+
   useEffect(() => {
     if (!currentUser || !token) {
+      wsReadyRef.current = false;
       if (ws.current) {
         ws.current.onclose = null;
         ws.current.close();
@@ -364,114 +277,113 @@ export default function App() {
       return;
     }
 
+    const appendChatMessage = (msg: Message) => {
+      setChatMessages(prev => {
+        if (prev.some(m => m.id === msg.id)) return prev;
+        const withoutOptimistic = prev.filter(
+          m => !(m.id < 0 && m.content === msg.content && m.senderId === msg.senderId)
+        );
+        return [...withoutOptimistic, msg];
+      });
+    };
+
     const connectWS = () => {
-      console.log('Connecting to WebSocket...');
+      wsReadyRef.current = false;
       const socket = new WebSocket(WS_URL);
       ws.current = socket;
 
       socket.onopen = () => {
-        console.log('WebSocket connected');
-        // Join the realtime session with JWT token
-        socket.send(JSON.stringify({
-          type: 'join',
-          payload: { token }
-        }));
-        
-        // Restore active chat if any
-        const recipientId = activeTab === 'messages' && chatRecipient ? chatRecipient.id : null;
-        socket.send(JSON.stringify({
-          type: 'active_chat',
-          payload: { recipientId }
-        }));
+        socket.send(JSON.stringify({ type: 'join', payload: { token } }));
       };
 
-      socket.onmessage = (event) => {
+      socket.onmessage = event => {
         try {
           const message = JSON.parse(event.data);
-          console.log('Received WebSocket message:', message);
-
           switch (message.type) {
+            case 'joined':
+              wsReadyRef.current = true;
+              sendActiveChat();
+              break;
             case 'online_users':
               setOnlineUserIds(message.payload.userIds);
               break;
-
             case 'message': {
               const msg: Message = message.payload;
-              // Append to active chat screen if relevant
-              if (chatRecipient && (msg.senderId === chatRecipient.id || msg.receiverId === chatRecipient.id)) {
-                setChatMessages(prev => [...prev, msg]);
-                if (msg.senderId === chatRecipient.id) {
-                  // Mark as read in backend
-                  fetch(`${API_URL}/api/messages/read/${chatRecipient.id}`, {
+              const partnerId = msg.senderId === currentUser!.id ? msg.receiverId : msg.senderId;
+              const isIncoming = msg.senderId !== currentUser!.id;
+              const viewingPartner = chatRecipientRef.current?.id === partnerId;
+              const isViewingChat = viewingPartner && showMessagesDropdownRef.current;
+
+              if (viewingPartner) {
+                appendChatMessage(msg);
+                if (isIncoming) {
+                  fetch(`${API_URL}/api/messages/read/${partnerId}`, {
                     method: 'POST',
-                    headers: getHeaders()
+                    headers: getHeaders(),
                   });
                 }
               }
-              // Refresh threads sidebar
+
+              if (isIncoming && !isViewingChat) {
+                setMessageIconPulseAt(Date.now());
+                setThreads(prev => {
+                  const idx = prev.findIndex(t => t.id === partnerId);
+                  if (idx === -1) return prev;
+                  return prev.map(t =>
+                    t.id === partnerId
+                      ? {
+                          ...t,
+                          unreadCount: t.unreadCount + 1,
+                          lastMessage: {
+                            content: msg.content,
+                            createdAt: msg.createdAt,
+                            senderId: msg.senderId,
+                            read: false,
+                          },
+                        }
+                      : t
+                  );
+                });
+              }
+
               fetchThreads();
               break;
             }
-
             case 'messages_read': {
-              const { receiverId } = message.payload;
-              // If chatting with this receiver, update local messages read ticks
-              if (chatRecipient && chatRecipient.id === receiverId) {
-                setChatMessages(prev => prev.map(m => m.receiverId === receiverId ? { ...m, read: true } : m));
+              const { senderId, receiverId } = message.payload;
+              // Sent to the message sender; receiverId is the chat partner who read them
+              if (currentUser!.id === senderId && chatRecipientRef.current?.id === receiverId) {
+                setChatMessages(prev =>
+                  prev.map(m => (m.senderId === currentUser!.id ? { ...m, read: true } : m))
+                );
               }
-              setThreads(prev => prev.map(t => {
-                if (t.id === receiverId && t.lastMessage) {
-                  return {
-                    ...t,
-                    lastMessage: { ...t.lastMessage, read: true }
-                  };
-                }
-                return t;
-              }));
+              setThreads(prev =>
+                prev.map(t => {
+                  if (t.id !== receiverId || !t.lastMessage || t.lastMessage.senderId !== senderId) return t;
+                  return { ...t, lastMessage: { ...t.lastMessage, read: true } };
+                })
+              );
               break;
             }
-
-            case 'typing': {
-              const { senderId, isTyping } = message.payload;
-              setTypingUsers(prev => ({
-                ...prev,
-                [senderId]: isTyping
-              }));
+            case 'typing':
+              setTypingUsers(prev => ({ ...prev, [message.payload.senderId]: message.payload.isTyping }));
               break;
-            }
-
             case 'notification': {
               const notif: Notification = message.payload;
-              if (processedNotifIdsRef.current.has(notif.id)) {
-                break;
-              }
+              if (notif.type === 'message') break;
+              if (processedNotifIdsRef.current.has(notif.id)) break;
               processedNotifIdsRef.current.add(notif.id);
-
-              setNotifications(prev => {
-                if (prev.some(n => n.id === notif.id)) return prev;
-                return [notif, ...prev];
-              });
-
+              setNotifications(prev => (prev.some(n => n.id === notif.id) ? prev : [notif, ...prev]));
               setUnreadNotifsCount(prev => prev + 1);
-              if (notif.type === 'like') {
-                addToast(notif.content, 'like');
-              } else if (notif.type === 'comment') {
-                addToast(notif.content, 'comment');
-              } else if (notif.type === 'message') {
-                addToast(notif.content, 'message');
-              }
+              if (notif.type === 'like') addToast(notif.content, 'like');
+              else if (notif.type === 'comment') addToast(notif.content, 'comment');
               break;
             }
-
             case 'post_created': {
               const { post } = message.payload;
-              setPosts(prev => {
-                if (prev.some(p => p.id === post.id)) return prev;
-                return [post, ...prev];
-              });
+              setPosts(prev => (prev.some(p => p.id === post.id) ? prev : [post, ...prev]));
               break;
             }
-
             case 'post_deleted': {
               const { postId } = message.payload;
               setPosts(prev => prev.filter(p => p.id !== postId));
@@ -482,78 +394,55 @@ export default function App() {
               });
               break;
             }
-
             case 'post_updated': {
               const { post } = message.payload;
-              setPosts(prev => prev.map(p => p.id === post.id ? { ...p, content: post.content } : p));
+              setPosts(prev => prev.map(p => (p.id === post.id ? { ...p, content: post.content } : p)));
               break;
             }
-
             case 'like_update': {
               const { postId, likesCount, userId, liked } = message.payload;
-              setPosts(prev => prev.map(p => {
-                if (p.id === postId) {
-                  return { 
-                    ...p, 
-                    likesCount, 
-                    hasLiked: userId === currentUser.id ? liked : p.hasLiked 
-                  };
-                }
-                return p;
-              }));
+              setPosts(prev =>
+                prev.map(p =>
+                  p.id === postId
+                    ? { ...p, likesCount, hasLiked: userId === currentUser!.id ? liked : p.hasLiked }
+                    : p
+                )
+              );
               break;
             }
-
             case 'comment_created': {
               const { comment } = message.payload;
               setPostComments(prev => {
-                const currentList = prev[comment.postId] || [];
-                if (currentList.some(c => c.id === comment.id)) return prev;
-                return {
-                  ...prev,
-                  [comment.postId]: [comment, ...currentList]
-                };
+                const list = prev[comment.postId] || [];
+                if (list.some(c => c.id === comment.id)) return prev;
+                return { ...prev, [comment.postId]: [comment, ...list] };
               });
-              setPosts(prev => prev.map(p => {
-                if (p.id === comment.postId) {
-                  return { ...p, commentsCount: p.commentsCount + 1 };
-                }
-                return p;
-              }));
+              setPosts(prev =>
+                prev.map(p => (p.id === comment.postId ? { ...p, commentsCount: p.commentsCount + 1 } : p))
+              );
               break;
             }
-
             case 'comment_deleted': {
               const { commentId, postId } = message.payload;
-              setPostComments(prev => {
-                const currentList = prev[postId] || [];
-                return {
-                  ...prev,
-                  [postId]: currentList.map(c => 
-                    c.id === commentId 
-                      ? { ...c, deletedAt: new Date().toISOString(), username: 'deleted', content: '[Comment deleted]' } 
-                      : c
-                  )
-                };
-              });
-              setPosts(prev => prev.map(p => {
-                if (p.id === postId) {
-                  return { ...p, commentsCount: Math.max(0, p.commentsCount - 1) };
-                }
-                return p;
+              setPostComments(prev => ({
+                ...prev,
+                [postId]: (prev[postId] || []).map(c =>
+                  c.id === commentId
+                    ? { ...c, deletedAt: new Date().toISOString(), username: 'deleted', content: '[Comment deleted]' }
+                    : c
+                ),
               }));
+              setPosts(prev =>
+                prev.map(p => (p.id === postId ? { ...p, commentsCount: Math.max(0, p.commentsCount - 1) } : p))
+              );
               break;
             }
-
             case 'comment_updated': {
               const { comment } = message.payload;
-              setPostComments(prev => {
-                const currentList = prev[comment.postId] || [];
-                return {
-                  ...prev,
-                  [comment.postId]: currentList.map(c => c.id === comment.id ? comment : c)
-                };
-              });
+              setPostComments(prev => ({
+                ...prev,
+                [comment.postId]: (prev[comment.postId] || []).map(c => (c.id === comment.id ? comment : c)),
+              }));
               break;
             }
           }
@@ -562,80 +451,62 @@ export default function App() {
         }
       };
 
-      socket.onclose = (e) => {
-        console.log('WebSocket closed, reconnecting in 3s...', e.reason);
+      socket.onclose = () => {
+        wsReadyRef.current = false;
         setTimeout(() => {
           if (currentUser && token) connectWS();
         }, 3000);
       };
-
-      socket.onerror = (e) => {
-        console.error('WebSocket error:', e);
-      };
     };
 
     connectWS();
-
     return () => {
+      wsReadyRef.current = false;
       if (ws.current) {
         ws.current.onclose = null;
         ws.current.close();
       }
     };
-  }, [currentUser, token, chatRecipient]);
+  }, [currentUser, token]);
 
-  // Scroll to bottom of chat when messages update
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // Handle Login & Registration
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!usernameInput.trim() || !passwordInput) {
       setAuthError('Please fill in all fields');
       return;
     }
-
     setAuthError(null);
     setIsAuthLoading(true);
-
     const path = isRegisterMode ? '/api/auth/register' : '/api/auth/login';
-
     try {
       const res = await fetch(`${API_URL}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: usernameInput.trim(),
-          password: passwordInput
-        })
+        body: JSON.stringify({ username: usernameInput.trim(), password: passwordInput }),
       });
-
       const data = await res.json();
-
       if (res.ok) {
         setToken(data.token);
         setCurrentUser(data.user);
         localStorage.setItem('hin_token', data.token);
         localStorage.setItem('hin_user', JSON.stringify(data.user));
-        
-        // Reset form
         setUsernameInput('');
         setPasswordInput('');
         setAuthError(null);
       } else {
         setAuthError(data.error || 'Authentication failed');
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
       setAuthError('Error connecting to authentication service');
     } finally {
       setIsAuthLoading(false);
     }
   };
 
-  // Handle Logout
   const handleLogout = () => {
     setToken(null);
     setCurrentUser(null);
@@ -650,59 +521,44 @@ export default function App() {
     setNotifications([]);
     setUnreadNotifsCount(0);
     setActiveTab('feed');
-    setShowChatMobile(false);
     processedNotifIdsRef.current.clear();
-    if (ws.current) {
-      ws.current.close();
-    }
+    ws.current?.close();
   };
 
-  // Create / Publish Post
   const handleCreatePost = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !newPostContent.trim()) return;
-
     try {
       const res = await fetch(`${API_URL}/api/posts`, {
         method: 'POST',
         headers: getHeaders(),
-        body: JSON.stringify({
-          content: newPostContent,
-          mediaUrl: newPostMedia || null
-        })
+        body: JSON.stringify({ content: newPostContent, mediaUrl: newPostMedia || null }),
       });
-
       if (res.ok) {
         const newPost = await res.json();
-        setPosts(prev => {
-          if (prev.some(p => p.id === newPost.id)) return prev;
-          return [newPost, ...prev];
-        });
+        setPosts(prev => (prev.some(p => p.id === newPost.id) ? prev : [newPost, ...prev]));
         setNewPostContent('');
         setNewPostMedia('');
         setShowNewPostForm(false);
         setNewlyCreatedPostId(newPost.id);
-        setTimeout(() => {
-          setNewlyCreatedPostId(null);
-        }, 3000);
+        setTimeout(() => setNewlyCreatedPostId(null), 3000);
       }
     } catch (e) {
       console.error(e);
     }
   };
 
-  // Save edited post to backend
   const handleSavePostEdit = async (postId: number) => {
     if (!editingPostContent.trim()) return;
     try {
       const res = await fetch(`${API_URL}/api/posts/${postId}`, {
         method: 'PUT',
         headers: getHeaders(),
-        body: JSON.stringify({ content: editingPostContent })
+        body: JSON.stringify({ content: editingPostContent }),
       });
       if (res.ok) {
         const updatedPost = await res.json();
-        setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
+        setPosts(prev => prev.map(p => (p.id === postId ? updatedPost : p)));
         setEditingPostId(null);
         addToast('Post updated successfully', 'system');
       }
@@ -711,114 +567,82 @@ export default function App() {
     }
   };
 
-  // Delete Post (Owner or Admin)
   const handleDeletePost = async (postId: number) => {
-    if (!currentUser) return;
-    if (!confirm('Are you sure you want to delete this post?')) return;
-
+    if (!currentUser || !confirm('Are you sure you want to delete this post?')) return;
     try {
-      const res = await fetch(`${API_URL}/api/posts/${postId}`, {
-        method: 'DELETE',
-        headers: getHeaders()
-      });
+      const res = await fetch(`${API_URL}/api/posts/${postId}`, { method: 'DELETE', headers: getHeaders() });
       if (res.ok) {
         setPosts(prev => prev.filter(p => p.id !== postId));
         addToast('Post deleted successfully', 'system');
-        if (currentUser.role === 'admin') {
-          fetchAdminStats();
-        }
+        if (currentUser.role === 'admin') fetchAdminStats();
       }
     } catch (e) {
       console.error(e);
     }
   };
 
-  // Toggle Like
   const handleToggleLike = async (postId: number) => {
     if (!currentUser) return;
     try {
-      const res = await fetch(`${API_URL}/api/posts/${postId}/like`, {
-        method: 'POST',
-        headers: getHeaders()
-      });
+      const res = await fetch(`${API_URL}/api/posts/${postId}/like`, { method: 'POST', headers: getHeaders() });
       if (res.ok) {
         const data = await res.json();
-        setPosts(prev => prev.map(p => {
-          if (p.id === postId) {
-            return { ...p, hasLiked: data.liked, likesCount: data.likesCount };
-          }
-          return p;
-        }));
+        setPosts(prev =>
+          prev.map(p => (p.id === postId ? { ...p, hasLiked: data.liked, likesCount: data.likesCount } : p))
+        );
       }
     } catch (e) {
       console.error(e);
     }
   };
 
-  // Toggle comments expand
   const toggleComments = (postId: number) => {
     setExpandedComments(prev => {
       const next = { ...prev, [postId]: !prev[postId] };
-      if (next[postId]) {
-        fetchComments(postId);
-      }
+      if (next[postId]) fetchComments(postId);
       return next;
     });
   };
 
-  // Create Comment or Reply
   const handleCreateComment = async (postId: number, e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
     const text = newCommentText[postId] || '';
     if (!text.trim()) return;
-
     const parent = replyingTo[postId];
-
     try {
       const res = await fetch(`${API_URL}/api/posts/${postId}/comments`, {
         method: 'POST',
         headers: getHeaders(),
-        body: JSON.stringify({ 
-          content: text,
-          parentId: parent ? parent.id : null
-        })
+        body: JSON.stringify({ content: text, parentId: parent ? parent.id : null }),
       });
-
       if (res.ok) {
         const newComment = await res.json();
-        setPostComments(prev => ({
-          ...prev,
-          [postId]: [newComment, ...(prev[postId] || [])]
-        }));
+        setPostComments(prev => ({ ...prev, [postId]: [newComment, ...(prev[postId] || [])] }));
         setNewCommentText(prev => ({ ...prev, [postId]: '' }));
         setReplyingTo(prev => ({ ...prev, [postId]: null }));
-        setPosts(prev => prev.map(p => {
-          if (p.id === postId) {
-            return { ...p, commentsCount: p.commentsCount + 1 };
-          }
-          return p;
-        }));
+        setPosts(prev =>
+          prev.map(p => (p.id === postId ? { ...p, commentsCount: p.commentsCount + 1 } : p))
+        );
       }
     } catch (e) {
       console.error(e);
     }
   };
 
-  // Save edited comment to backend
   const handleSaveCommentEdit = async (postId: number, commentId: number) => {
     if (!editingCommentContent.trim()) return;
     try {
       const res = await fetch(`${API_URL}/api/comments/${commentId}`, {
         method: 'PUT',
         headers: getHeaders(),
-        body: JSON.stringify({ content: editingCommentContent })
+        body: JSON.stringify({ content: editingCommentContent }),
       });
       if (res.ok) {
         const updatedComment = await res.json();
         setPostComments(prev => ({
           ...prev,
-          [postId]: (prev[postId] || []).map(c => c.id === commentId ? updatedComment : c)
+          [postId]: (prev[postId] || []).map(c => (c.id === commentId ? updatedComment : c)),
         }));
         setEditingCommentId(null);
         addToast('Comment updated successfully', 'system');
@@ -828,90 +652,82 @@ export default function App() {
     }
   };
 
-  // Delete Comment (Owner or Admin)
   const handleDeleteComment = async (postId: number, commentId: number) => {
-    if (!currentUser) return;
-    if (!confirm('Are you sure you want to delete this comment?')) return;
-
+    if (!currentUser || !confirm('Are you sure you want to delete this comment?')) return;
     try {
-      const res = await fetch(`${API_URL}/api/comments/${commentId}`, {
-        method: 'DELETE',
-        headers: getHeaders()
-      });
+      const res = await fetch(`${API_URL}/api/comments/${commentId}`, { method: 'DELETE', headers: getHeaders() });
       if (res.ok) {
         setPostComments(prev => ({
           ...prev,
-          [postId]: (prev[postId] || []).map(c => 
-            c.id === commentId 
-              ? { ...c, deletedAt: new Date().toISOString(), username: 'deleted', content: '[Comment deleted]' } 
+          [postId]: (prev[postId] || []).map(c =>
+            c.id === commentId
+              ? { ...c, deletedAt: new Date().toISOString(), username: 'deleted', content: '[Comment deleted]' }
               : c
-          )
+          ),
         }));
-        setPosts(prev => prev.map(p => {
-          if (p.id === postId) {
-            return { ...p, commentsCount: Math.max(0, p.commentsCount - 1) };
-          }
-          return p;
-        }));
+        setPosts(prev =>
+          prev.map(p => (p.id === postId ? { ...p, commentsCount: Math.max(0, p.commentsCount - 1) } : p))
+        );
         addToast('Comment deleted', 'system');
-        if (currentUser.role === 'admin') {
-          fetchAdminStats();
-        }
+        if (currentUser.role === 'admin') fetchAdminStats();
       }
     } catch (e) {
       console.error(e);
     }
   };
 
-  // Select User for Chat
-  const startChat = (recipient: { id: number; username: string; role: string }) => {
-    setChatRecipient(recipient);
-    setActiveTab('messages');
-    setShowChatMobile(true);
-    fetchMessages(recipient.id);
+  const startChat = (user: UserType | ChatRecipient) => {
+    const recipient: ChatRecipient = { id: user.id, username: user.username, role: user.role };
+    setActiveTab('feed');
+    setShowNotifications(false);
+    setShowMessagesDropdown(true);
+    setMessagesPanelExpanded(false);
+    openChatInPanel(recipient);
     fetchThreads();
   };
 
-  // Send Direct Message via WS
   const handleSendDM = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !chatRecipient || !newMsgText.trim()) return;
-
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({
-        type: 'send_message',
-        payload: {
+    const content = newMsgText.trim();
+    if (ws.current?.readyState === WebSocket.OPEN && wsReadyRef.current) {
+      setChatMessages(prev => [
+        ...prev,
+        {
+          id: -Date.now(),
+          senderId: currentUser.id,
+          senderUsername: currentUser.username,
           receiverId: chatRecipient.id,
-          content: newMsgText.trim()
-        }
-      }));
-      
-      // Stop typing status immediately
-      if (typingTimeoutRef.current[chatRecipient.id]) {
-        clearTimeout(typingTimeoutRef.current[chatRecipient.id]);
-      }
-      ws.current.send(JSON.stringify({
-        type: 'typing',
-        payload: { receiverId: chatRecipient.id, isTyping: false }
-      }));
+          receiverUsername: chatRecipient.username,
+          content,
+          createdAt: new Date().toISOString(),
+          read: false,
+        },
+      ]);
+      ws.current.send(
+        JSON.stringify({
+          type: 'send_message',
+          payload: { receiverId: chatRecipient.id, content },
+        })
+      );
+      if (typingTimeoutRef.current[chatRecipient.id]) clearTimeout(typingTimeoutRef.current[chatRecipient.id]);
+      ws.current.send(JSON.stringify({ type: 'typing', payload: { receiverId: chatRecipient.id, isTyping: false } }));
       lastTypingSentRef.current[chatRecipient.id] = 0;
-
       setNewMsgText('');
     } else {
-      alert('WebSocket is currently disconnected. Reconnecting...');
+      alert('Real-time connection is not ready yet. Please wait a moment and try again.');
     }
   };
 
-  // Mark Notification as read
   const handleMarkNotifRead = async (notifId: number) => {
     if (!currentUser) return;
     try {
       const res = await fetch(`${API_URL}/api/notifications/${notifId}/read`, {
         method: 'POST',
-        headers: getHeaders()
+        headers: getHeaders(),
       });
       if (res.ok) {
-        setNotifications(prev => prev.map(n => n.id === notifId ? { ...n, read: true } : n));
+        setNotifications(prev => prev.map(n => (n.id === notifId ? { ...n, read: true } : n)));
         setUnreadNotifsCount(prev => Math.max(0, prev - 1));
       }
     } catch (e) {
@@ -919,36 +735,36 @@ export default function App() {
     }
   };
 
-  // --- ADMIN DELEGATION & ACTION HANDLERS ---
+  const handleNotificationClick = (n: Notification) => {
+    handleMarkNotifRead(n.id);
+    setShowNotifications(false);
+    if (n.type === 'message') {
+      const sender = users.find(u => u.id === n.senderId);
+      if (sender) startChat(sender);
+    } else {
+      goHome();
+    }
+  };
 
-  // Act As (impersonate) target user
   const handleImpersonateUser = async (userId: number) => {
     if (!currentUser || currentUser.role !== 'admin' || !token) return;
     try {
       const res = await fetch(`${API_URL}/api/admin/impersonate`, {
         method: 'POST',
         headers: getHeaders(),
-        body: JSON.stringify({ userId })
+        body: JSON.stringify({ userId }),
       });
       if (res.ok) {
         const data = await res.json();
-        
-        // Backup active admin session
         localStorage.setItem('hin_admin_token', token);
         localStorage.setItem('hin_admin_user', JSON.stringify(currentUser));
         setAdminToken(token);
         setAdminUser(currentUser);
-
-        // Switch to target user active session
         localStorage.setItem('hin_token', data.token);
         localStorage.setItem('hin_user', JSON.stringify(data.user));
         setToken(data.token);
         setCurrentUser(data.user);
-        
-        setActiveTab('feed');
-        setShowChatMobile(false);
-        setChatRecipient(null);
-        
+        goHome();
         addToast(`Now acting as @${data.user.username}`, 'system');
       } else {
         const err = await res.json();
@@ -959,7 +775,6 @@ export default function App() {
     }
   };
 
-  // Return to Admin session
   const handleStopImpersonating = () => {
     const savedToken = localStorage.getItem('hin_admin_token');
     const savedUser = localStorage.getItem('hin_admin_user');
@@ -968,31 +783,25 @@ export default function App() {
       localStorage.setItem('hin_user', savedUser);
       setToken(savedToken);
       setCurrentUser(JSON.parse(savedUser));
-      
       localStorage.removeItem('hin_admin_token');
       localStorage.removeItem('hin_admin_user');
       setAdminToken(null);
       setAdminUser(null);
-      
       setActiveTab('admin');
-      setShowChatMobile(false);
       setChatRecipient(null);
-      
       addToast('Returned to Admin session', 'system');
     }
   };
 
-  // Toggle user's role between user and admin
   const handleUpdateUserRole = async (userId: number, currentRole: 'user' | 'admin') => {
     if (!currentUser || currentUser.role !== 'admin' || !token) return;
     const nextRole = currentRole === 'admin' ? 'user' : 'admin';
     if (!confirm(`Are you sure you want to change this user's role to ${nextRole}?`)) return;
-
     try {
       const res = await fetch(`${API_URL}/api/admin/users/${userId}/role`, {
         method: 'PUT',
         headers: getHeaders(),
-        body: JSON.stringify({ role: nextRole })
+        body: JSON.stringify({ role: nextRole }),
       });
       if (res.ok) {
         addToast('User role updated successfully', 'system');
@@ -1003,1349 +812,169 @@ export default function App() {
     }
   };
 
-  // Soft Delete a user account (admin only)
   const handleAdminDeleteUser = async (userId: number, targetUsername: string) => {
     if (!currentUser || currentUser.role !== 'admin' || !token) return;
-    if (!confirm(`WARNING: Are you sure you want to soft-delete @${targetUsername}? This user will be immediately logged out and disabled.`)) return;
-
+    if (!confirm(`WARNING: Are you sure you want to soft-delete @${targetUsername}?`)) return;
     try {
-      const res = await fetch(`${API_URL}/api/admin/users/${userId}`, {
-        method: 'DELETE',
-        headers: getHeaders()
-      });
+      const res = await fetch(`${API_URL}/api/admin/users/${userId}`, { method: 'DELETE', headers: getHeaders() });
       if (res.ok) {
         addToast(`Account @${targetUsername} has been soft-deleted`, 'system');
         fetchAdminStats();
-        fetchUsers(); // Refresh active sidebar list
+        fetchUsers();
       }
     } catch (e) {
       console.error(e);
     }
   };
 
-  // --- RECURSIVE COMMENTS (LOOPS) TREE BUILDER ---
-
-  const buildCommentTree = (flatComments: Comment[]): CommentNode[] => {
-    const map: Record<number, CommentNode> = {};
-    const roots: CommentNode[] = [];
-
-    // Map all flat comments to node structures
-    flatComments.forEach(comment => {
-      map[comment.id] = { ...comment, replies: [] };
-    });
-
-    // Nest under parents
-    flatComments.forEach(comment => {
-      const node = map[comment.id];
-      if (comment.parentId) {
-        const parent = map[comment.parentId];
-        if (parent) {
-          parent.replies.push(node);
-        } else {
-          // If parent is missing (or deleted and pruned), treat as root node
-          roots.push(node);
-        }
-      } else {
-        roots.push(node);
-      }
-    });
-
-    // Recursively prune deleted nodes that have no active children
-    const pruneTree = (nodes: CommentNode[]): CommentNode[] => {
-      return nodes.filter(node => {
-        node.replies = pruneTree(node.replies);
-        const isDeleted = !!node.deletedAt || node.username === 'deleted';
-        return !isDeleted || node.replies.length > 0;
-      });
-    };
-
-    return pruneTree(roots);
-  };
-
-  // Recursive Comment Component
-  const CommentItem = ({ 
-    comment, 
-    depth = 0, 
-    postId 
-  }: { 
-    comment: CommentNode; 
-    depth: number; 
-    postId: number;
-  }) => {
-    const isDeleted = !!comment.deletedAt || comment.username === 'deleted';
-    const isEditing = editingCommentId === comment.id;
-    
-    return (
-      <div 
-        className="space-y-2 text-left" 
-        style={{ marginLeft: depth > 0 ? `${Math.min(depth * 14, 56)}px` : '0px' }}
-      >
-        <div className={`flex gap-2.5 text-xs border-b border-slate-900 pb-2.5 relative group ${
-          depth > 0 ? 'border-l border-slate-800/40 pl-3.5' : ''
-        }`}>
-          
-          {/* Delete Action (Owner or Admin) */}
-          {!isDeleted && currentUser && (currentUser.role === 'admin' || currentUser.id === comment.userId) && (
-            <button
-              onClick={() => handleDeleteComment(postId, comment.id)}
-              className="absolute right-0 top-0.5 text-slate-550 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-1"
-              title="Delete Comment"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          )}
-
-          <div className="h-6 w-6 rounded-full bg-slate-800 flex items-center justify-center font-bold text-[10px] uppercase text-slate-400 shrink-0 border border-slate-700">
-            {isDeleted ? '?' : comment.username[0]}
-          </div>
-          
-          <div className="flex-grow min-w-0 text-left pr-6">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className={`font-semibold ${isDeleted ? 'text-slate-500 font-mono' : 'text-slate-200'}`}>
-                {isDeleted ? '[deleted]' : `@${comment.username}`}
-              </span>
-              <span className="text-[9px] text-slate-500">
-                {new Date(comment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            </div>
-            
-            {isEditing ? (
-              <div className="space-y-2 mt-1.5">
-                <input
-                  type="text"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 transition-colors"
-                  value={editingCommentContent}
-                  onChange={e => setEditingCommentContent(e.target.value)}
-                />
-                <div className="flex justify-end gap-1.5">
-                  <button
-                    onClick={() => setEditingCommentId(null)}
-                    className="px-2.5 py-1 rounded-lg text-[10px] text-slate-400 hover:bg-slate-850 hover:text-white transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => handleSaveCommentEdit(postId, comment.id)}
-                    className="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-semibold px-3 py-1 rounded-lg transition-all shadow-md cursor-pointer"
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <p className={`${isDeleted ? 'text-slate-500 italic mt-1' : 'text-slate-300'} text-xs mt-0.5 leading-relaxed break-words`}>
-                {comment.content}
-              </p>
-            )}
-            
-            {/* Reply / Edit buttons */}
-            {!isDeleted && !isEditing && currentUser && (
-              <div className="flex items-center gap-2 mt-1.5">
-                <button
-                  onClick={() => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
-                  className="text-[10px] text-indigo-400 hover:text-indigo-300 font-semibold transition-colors cursor-pointer"
-                >
-                  Reply
-                </button>
-                {(currentUser.role === 'admin' || currentUser.id === comment.userId) && (
-                  <button
-                    onClick={() => {
-                      setEditingCommentId(comment.id);
-                      setEditingCommentContent(comment.content);
-                    }}
-                    className="text-[10px] text-slate-450 hover:text-slate-350 transition-colors cursor-pointer"
-                  >
-                    Edit
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-        
-        {/* Render child comments recursively */}
-        {comment.replies && comment.replies.map(reply => (
-          <CommentItem 
-            key={reply.id} 
-            comment={reply} 
-            depth={depth + 1} 
-            postId={postId}
-          />
-        ))}
-      </div>
-    );
-  };
-
   return (
-    <div className="min-h-screen bg-bg-primary flex flex-col font-sans select-none text-text-primary transition-colors duration-200">
-      {/* Admin Impersonation Active Banner */}
-      {adminToken && adminUser && (
-        <div className="bg-amber-600 text-slate-950 font-bold px-4 py-2.5 text-center text-xs flex items-center justify-center gap-3 shrink-0 select-none shadow-md z-50">
-          <span className="flex items-center gap-1.5">
-            <Shield className="h-4 w-4 fill-slate-950" />
-            You are currently acting as <strong className="underline font-mono">@{currentUser?.username}</strong> (Delegated by @{adminUser.username})
-          </span>
-          <button 
-            onClick={handleStopImpersonating}
-            className="bg-slate-950 text-amber-500 hover:text-amber-400 font-bold px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-wider transition-colors cursor-pointer"
-          >
-            Return to Admin
-          </button>
-        </div>
-      )}
-
-      {/* Top Header */}
-      <header className="sticky top-0 z-40 bg-bg-secondary/85 backdrop-blur-md border-b border-border-custom px-4 py-3 flex items-center justify-between transition-colors duration-200">
-        <div className="flex items-center gap-2">
-          <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <Sparkles className="h-5 w-5 text-white" />
-          </div>
-          <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary via-text-secondary to-text-muted">
-            Hin
-          </span>
-          <span className="text-[10px] bg-bg-tertiary text-text-secondary border border-border-custom px-2 py-0.5 rounded-full font-mono font-medium">
-            Secure
-          </span>
-        </div>
-
-        {currentUser && (
-          <div className="flex items-center gap-4">
-            {/* Theme Toggle Button */}
-            <button
-              onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
-              className="p-2 rounded-xl border border-border-custom bg-bg-secondary hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-all cursor-pointer"
-              title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
-            >
-              {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4 text-amber-500" />}
-            </button>
-
-            {/* Notification Bell (Hidden on mobile bottom nav) */}
-            <div className="relative hidden md:block">
-              <button 
-                onClick={() => setShowNotifications(!showNotifications)}
-                className={`p-2 rounded-xl border transition-all cursor-pointer ${
-                  showNotifications 
-                    ? 'bg-slate-800 border-slate-700 text-indigo-400' 
-                    : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                <Bell className="h-5 w-5" />
-                {unreadNotifsCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold h-5 w-5 rounded-full flex items-center justify-center animate-pulse-ring">
-                    {unreadNotifsCount}
-                  </span>
-                )}
-              </button>
-
-              {/* Desktop Notifications Dropdown */}
-              {showNotifications && (
-                <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 py-2 divide-y divide-slate-800/50">
-                  <div className="px-4 py-2 flex items-center justify-between bg-slate-950/40">
-                    <span className="text-xs font-semibold text-slate-400">Notifications</span>
-                    {unreadNotifsCount > 0 && (
-                      <span className="text-[10px] bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded-full font-medium">
-                        {unreadNotifsCount} Unread
-                      </span>
-                    )}
-                  </div>
-                  {notifications.length === 0 ? (
-                    <div className="px-4 py-8 text-center text-xs text-slate-500">
-                      No notifications yet.
-                    </div>
-                  ) : (
-                    notifications.map(n => (
-                      <div 
-                        key={n.id} 
-                        onClick={() => {
-                          handleMarkNotifRead(n.id);
-                          if (n.type === 'message') {
-                            const sender = users.find(u => u.id === n.senderId);
-                            if (sender) startChat(sender);
-                          } else {
-                            setActiveTab('feed');
-                          }
-                          setShowNotifications(false);
-                        }}
-                        className={`px-4 py-3 flex gap-2 cursor-pointer transition-colors ${
-                          n.read ? 'hover:bg-slate-800/50' : 'bg-indigo-950/15 hover:bg-indigo-950/25'
-                        }`}
-                      >
-                        <div className="mt-0.5">
-                          {n.type === 'like' && <Heart className="h-4 w-4 text-rose-500 fill-rose-500" />}
-                          {n.type === 'comment' && <MessageSquare className="h-4 w-4 text-indigo-400" />}
-                          {n.type === 'message' && <MessageCircle className="h-4 w-4 text-emerald-400" />}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-xs ${n.read ? 'text-slate-300' : 'text-white font-medium'} text-left`}>
-                            {n.content}
-                          </p>
-                          <span className="text-[10px] text-slate-500 mt-1 block text-left">
-                            {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                        {!n.read && (
-                          <div className="h-2 w-2 rounded-full bg-indigo-500 self-center" />
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Profile badge / Logout */}
-            <div className="flex items-center gap-2 pl-2 border-l border-slate-850">
-              <div className="h-8 w-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700 text-slate-300 font-semibold uppercase text-sm select-none">
-                {currentUser.username[0]}
-              </div>
-              <div className="hidden sm:flex flex-col text-left">
-                <span className="text-xs font-semibold text-slate-200 flex items-center gap-1">
-                  @{currentUser.username}
-                  {currentUser.role === 'admin' && (
-                    <span title="Admin User">
-                      <Shield className="h-3 w-3 text-amber-500 fill-amber-500/20" />
-                    </span>
-                  )}
-                </span>
-                <span className="text-[10px] text-slate-500 capitalize">{currentUser.role} Account</span>
-              </div>
-              <button 
-                onClick={handleLogout}
-                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-450 hover:bg-slate-800/50 transition-colors ml-1 cursor-pointer"
-                title="Logout"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        )}
-      </header>
-
-      {/* Main Container */}
-      <main className="flex-grow max-w-6xl w-full mx-auto flex overflow-hidden">
-        
-        {/* Left Sidebar - Navigation / Users (Desktop Only) */}
-        {currentUser ? (
-          <aside className="w-80 border-r border-slate-900/60 hidden md:flex flex-col p-4 gap-4 shrink-0 bg-slate-950">
-            {/* Navigation Tabs */}
-            <div className="flex flex-col gap-1">
-              <button
-                onClick={() => {
-                  setActiveTab('feed');
-                  setShowNotifications(false);
-                }}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all cursor-pointer ${
-                  activeTab === 'feed' && !showNotifications
-                    ? 'bg-indigo-600 text-white font-medium shadow-lg shadow-indigo-600/20' 
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                }`}
-              >
-                <Compass className="h-5 w-5" />
-                <span>Explore Feed</span>
-              </button>
-              
-              <button
-                onClick={() => {
-                  setActiveTab('messages');
-                  setShowNotifications(false);
-                  if (chatRecipient) {
-                    setShowChatMobile(true);
-                  }
-                }}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all cursor-pointer ${
-                  activeTab === 'messages' && !showNotifications
-                    ? 'bg-indigo-600 text-white font-medium shadow-lg shadow-indigo-600/20' 
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                }`}
-              >
-                <MessageSquare className="h-5 w-5" />
-                <span>Direct Messages</span>
-              </button>
-
-              {/* Admin Panel Link (Only visible to Admins) */}
-              {currentUser.role === 'admin' && (
-                <button
-                  onClick={() => {
-                    setActiveTab('admin');
-                    setShowNotifications(false);
-                  }}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all cursor-pointer ${
-                    activeTab === 'admin' && !showNotifications
-                      ? 'bg-amber-600 text-white font-medium shadow-lg shadow-amber-600/20' 
-                      : 'text-amber-500/80 hover:text-amber-400 hover:bg-slate-900'
-                  }`}
-                >
-                  <Shield className="h-5 w-5" />
-                  <span>Admin Dashboard</span>
-                </button>
-              )}
-            </div>
-
-            {/* Online Members List */}
-            <div className="flex-grow flex flex-col min-h-0 bg-slate-900/20 rounded-2xl border border-slate-900/60 p-3">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 px-2 pb-3 border-b border-slate-900/80">
-                <Users className="h-4 w-4" />
-                <span>Active Users ({users.length})</span>
-              </div>
-              <div className="flex-grow overflow-y-auto mt-2 space-y-1">
-                {users.map(u => {
-                  const isSelf = u.id === currentUser.id;
-                  const isOnline = onlineUserIds.includes(u.id);
-                  return (
-                    <div 
-                      key={u.id}
-                      onClick={() => !isSelf && startChat(u)}
-                      className={`w-full flex items-center justify-between p-2 rounded-xl transition-colors text-left ${
-                        isSelf 
-                          ? 'bg-slate-900/10 opacity-70 cursor-default' 
-                          : 'cursor-pointer hover:bg-slate-900/60'
-                      } ${chatRecipient?.id === u.id && activeTab === 'messages' ? 'bg-slate-900' : ''}`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="relative">
-                          <div className="h-8 w-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs uppercase text-slate-300">
-                            {u.username[0]}
-                          </div>
-                          {isOnline && (
-                            <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border border-slate-950" />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium text-slate-200 truncate flex items-center gap-1">
-                            @{u.username} 
-                            {isSelf && <span className="text-[10px] text-slate-500 font-normal">(you)</span>}
-                            {u.role === 'admin' && <Shield className="h-3 w-3 text-amber-500" />}
-                          </p>
-                          <p className="text-[9px] text-slate-500">
-                            {isOnline ? 'Online' : 'Offline'}
-                          </p>
-                        </div>
-                      </div>
-                      {!isSelf && (
-                        <ChevronRight className="h-3 w-3 text-slate-600" />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </aside>
+    <AppShell
+      impersonationBanner={
+        adminToken && adminUser && currentUser ? (
+          <ImpersonationBanner
+            adminUser={adminUser}
+            currentUsername={currentUser.username}
+            onStopImpersonating={handleStopImpersonating}
+          />
+        ) : undefined
+      }
+      header={
+        <AppHeader
+          currentUser={currentUser}
+          showNotifications={showNotifications}
+          unreadNotifsCount={unreadNotifsCount}
+          notifications={notifications}
+          onToggleNotifications={() => {
+            setShowNotifications(prev => {
+              if (!prev) setShowMessagesDropdown(false);
+              return !prev;
+            });
+          }}
+          onCloseNotifications={() => setShowNotifications(false)}
+          onNotificationClick={handleNotificationClick}
+          onLogout={handleLogout}
+        />
+      }
+      sidebar={
+        currentUser ? (
+          <Sidebar
+            activeTab={activeTab}
+            currentUser={currentUser}
+            users={users}
+            onlineUserIds={onlineUserIds}
+            chatRecipient={chatRecipient}
+            onGoHome={goHome}
+            onOpenAdmin={openAdmin}
+            onStartChat={startChat}
+          />
+        ) : undefined
+      }
+      bottomNav={
+        currentUser ? (
+          <BottomNav
+            activeTab={activeTab}
+            currentUser={currentUser}
+            onOpenAdmin={openAdmin}
+          />
+        ) : undefined
+      }
+    >
+      <section className="flex-grow flex flex-col min-w-0 min-h-0 bg-bg-primary/40 relative">
+        {!currentUser ? (
+          <AuthForm
+            isRegisterMode={isRegisterMode}
+            usernameInput={usernameInput}
+            passwordInput={passwordInput}
+            authError={authError}
+            isAuthLoading={isAuthLoading}
+            onSubmit={handleAuthSubmit}
+            onUsernameChange={setUsernameInput}
+            onPasswordChange={setPasswordInput}
+            onToggleMode={() => {
+              setIsRegisterMode(!isRegisterMode);
+              setAuthError(null);
+            }}
+          />
+        ) : activeTab === 'feed' ? (
+          <FeedView
+            posts={posts}
+            users={users}
+            currentUser={currentUser}
+            threads={threads}
+            showNewPostForm={showNewPostForm}
+            showMessagesDropdown={showMessagesDropdown}
+            messagesPanelExpanded={messagesPanelExpanded}
+            typingUsers={typingUsers}
+            unreadMessagesCount={unreadMessagesCount}
+            messageIconPulseAt={messageIconPulseAt}
+            chatRecipient={chatRecipient}
+            chatMessages={chatMessages}
+            newMsgText={newMsgText}
+            chatBottomRef={chatBottomRef}
+            hasBottomNav={currentUser.role === 'admin'}
+            newPostContent={newPostContent}
+            newPostMedia={newPostMedia}
+            newlyCreatedPostId={newlyCreatedPostId}
+            expandedComments={expandedComments}
+            postComments={postComments}
+            newCommentText={newCommentText}
+            replyingTo={replyingTo}
+            editingPostId={editingPostId}
+            editingPostContent={editingPostContent}
+            editingCommentId={editingCommentId}
+            editingCommentContent={editingCommentContent}
+            onOpenCreatePost={() => {
+              setShowMessagesDropdown(false);
+              setShowNewPostForm(true);
+            }}
+            onCloseCreatePost={() => setShowNewPostForm(false)}
+            onToggleMessages={toggleMessagesDropdown}
+            onCloseMessages={closeMessagesPanel}
+            onToggleMessagesExpand={() => setMessagesPanelExpanded(prev => !prev)}
+            onSelectThread={openChatInPanel}
+            onBackToList={backToMessagesList}
+            onNewMsgTextChange={setNewMsgText}
+            onSendDM={handleSendDM}
+            onTyping={handleUserTyping}
+            onNewPostContentChange={setNewPostContent}
+            onNewPostMediaChange={setNewPostMedia}
+            onCreatePost={handleCreatePost}
+            onToggleLike={handleToggleLike}
+            onToggleComments={toggleComments}
+            onDeletePost={handleDeletePost}
+            onStartPostEdit={(id, content) => {
+              setEditingPostId(id);
+              setEditingPostContent(content);
+            }}
+            onCancelPostEdit={() => setEditingPostId(null)}
+            onSavePostEdit={handleSavePostEdit}
+            onEditPostContentChange={setEditingPostContent}
+            onCreateComment={handleCreateComment}
+            onCommentTextChange={(postId, text) => setNewCommentText(prev => ({ ...prev, [postId]: text }))}
+            onCancelReply={postId => setReplyingTo(prev => ({ ...prev, [postId]: null }))}
+            onStartChat={startChat}
+            onDeleteComment={handleDeleteComment}
+            onStartCommentEdit={(id, content) => {
+              setEditingCommentId(id);
+              setEditingCommentContent(content);
+            }}
+            onCancelCommentEdit={() => setEditingCommentId(null)}
+            onSaveCommentEdit={handleSaveCommentEdit}
+            onEditCommentContentChange={setEditingCommentContent}
+            onReply={(postId, comment: CommentNode) => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
+          />
+        ) : activeTab === 'admin' ? (
+          <AdminDashboard
+            adminData={adminData}
+            currentUser={currentUser}
+            onImpersonateUser={handleImpersonateUser}
+            onUpdateUserRole={handleUpdateUserRole}
+            onDeleteUser={handleAdminDeleteUser}
+          />
         ) : null}
 
-        {/* Workspace Content Area */}
-        <section className="flex-grow flex flex-col min-w-0 bg-slate-950/40 relative">
-          {!currentUser ? (
-            /* Secure Register & Login Form */
-            <div className="flex-grow flex flex-col items-center justify-center p-4 bg-radial from-indigo-900/10 via-transparent to-transparent">
-              <div className="max-w-md w-full bg-slate-900 border border-slate-800/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
-                
-                <div className="text-center mb-6">
-                  <div className="inline-flex h-14 w-14 rounded-2xl bg-indigo-600/10 text-indigo-400 items-center justify-center mb-3">
-                    <Lock className="h-8 w-8" />
-                  </div>
-                  <h2 className="text-2xl font-bold text-white">
-                    {isRegisterMode ? 'Create Account' : 'Welcome Back'}
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-2">
-                    {isRegisterMode 
-                      ? 'Register a secure username and password' 
-                      : 'Sign in to access secure real-time messaging'}
-                  </p>
-                </div>
-
-                {authError && (
-                  <div className="mb-4 bg-rose-500/10 border border-rose-500/20 text-rose-450 text-xs px-3.5 py-2.5 rounded-xl text-left">
-                    {authError}
-                  </div>
-                )}
-
-                <form onSubmit={handleAuthSubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">
-                      Username
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Enter username"
-                      value={usernameInput}
-                      onChange={e => setUsernameInput(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">
-                      Password
-                    </label>
-                    <input
-                      type="password"
-                      required
-                      placeholder="••••••••"
-                      value={passwordInput}
-                      onChange={e => setPasswordInput(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={isAuthLoading}
-                    className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white font-semibold text-sm py-3 rounded-xl transition-all shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    {isAuthLoading ? 'Please wait...' : isRegisterMode ? 'Register Account' : 'Sign In'}
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                </form>
-
-                <div className="mt-6 text-center">
-                  <button
-                    onClick={() => {
-                      setIsRegisterMode(!isRegisterMode);
-                      setAuthError(null);
-                    }}
-                    className="text-xs text-indigo-400 hover:underline cursor-pointer"
-                  >
-                    {isRegisterMode 
-                      ? 'Already have an account? Sign in' 
-                      : "Don't have an account? Register"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : activeTab === 'feed' && !showNotifications ? (
-            /* SOCIAL FEED VIEW */
-            <div className="flex-grow overflow-y-auto p-4 md:p-6 space-y-6">
-              
-              <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-4 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center shrink-0">
-                    <Compass className="h-5 w-5" />
-                  </div>
-                  <div className="text-left">
-                    <h4 className="text-xs font-bold text-white">Explore Feed</h4>
-                    <p className="text-[10px] text-slate-400">Share your thoughts and connect with other users in real time.</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setShowNewPostForm(true)} 
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3.5 py-2 rounded-xl transition-all shadow-md shadow-indigo-600/15 flex items-center gap-1 shrink-0 cursor-pointer"
-                >
-                  <Plus className="h-4 w-4" />
-                  Create Post
-                </button>
-              </div>
-
-              {/* Create Post Form */}
-              {showNewPostForm && (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800/60 pb-2">
-                    <span className="text-xs font-bold text-slate-350">Create New Post</span>
-                    <button onClick={() => setShowNewPostForm(false)} className="text-slate-400 hover:text-white cursor-pointer p-1">
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <form onSubmit={handleCreatePost} className="space-y-3">
-                    <textarea
-                      required
-                      rows={3}
-                      placeholder="What is on your mind?"
-                      value={newPostContent}
-                      onChange={e => setNewPostContent(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800/80 rounded-xl p-3 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors resize-none"
-                    />
-                    <div className="flex items-center gap-2">
-                      <ImageIcon className="h-4 w-4 text-slate-550" />
-                      <input
-                        type="text"
-                        placeholder="Image URL (optional)"
-                        value={newPostMedia}
-                        onChange={e => setNewPostMedia(e.target.value)}
-                        className="flex-grow bg-slate-950 border border-slate-800/80 rounded-xl px-3 py-1.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
-                      />
-                    </div>
-                    <div className="flex justify-end gap-2 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowNewPostForm(false)}
-                        className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:bg-slate-850 hover:text-white transition-colors cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all shadow-md shadow-indigo-600/15 cursor-pointer"
-                      >
-                        Publish Post
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              )}
-
-              {/* Posts List */}
-              <div className="space-y-4">
-                {posts.length === 0 ? (
-                  <div className="text-center py-12 border border-dashed border-slate-800 rounded-2xl text-slate-500 text-sm">
-                    No posts on the feed yet. Be the first to publish!
-                  </div>
-                ) : (
-                  posts.map(post => {
-                    const commentsList = postComments[post.id] || [];
-                    const nestedComments = buildCommentTree(commentsList);
-                    const isCommentsExpanded = expandedComments[post.id] || false;
-
-                    const isNewlyCreated = newlyCreatedPostId === post.id;
-
-                    return (
-                      <article
-                        key={post.id}
-                        className={`bg-slate-900 border border-slate-900/60 rounded-2xl p-4 space-y-4 shadow-sm hover:border-slate-800/50 transition-all relative ${
-                          isNewlyCreated ? 'animate-blink-border' : ''
-                        }`}
-                      >
-                        
-                        {/* Actions (Owner or Admin) */}
-                        {currentUser && (currentUser.role === 'admin' || currentUser.id === post.userId) && (
-                          <div className="absolute top-4 right-4 flex items-center gap-1.5">
-                            <button
-                              onClick={() => {
-                                setEditingPostId(post.id);
-                                setEditingPostContent(post.content);
-                              }}
-                              className="p-1.5 bg-indigo-500/10 border border-indigo-500/25 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors cursor-pointer"
-                              title="Edit Post"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={() => handleDeletePost(post.id)}
-                              className="p-1.5 bg-rose-500/10 border border-rose-500/25 hover:bg-rose-500/20 text-rose-550 rounded-lg transition-colors cursor-pointer"
-                              title="Delete Post"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        )}
-
-                        {/* Post Header */}
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2.5">
-                            <div className="h-9 w-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs uppercase text-slate-300">
-                              {post.username[0]}
-                            </div>
-                            <div className="text-left">
-                              <p className="text-xs font-bold text-slate-200 flex items-center gap-1">
-                                @{post.username}
-                                {users.find(u => u.id === post.userId)?.role === 'admin' && (
-                                  <Shield className="h-3 w-3 text-amber-500" />
-                                )}
-                              </p>
-                              <span className="text-[9px] text-slate-500">
-                                {new Date(post.createdAt).toLocaleDateString()} {new Date(post.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Quick Message Button for Post Author */}
-                          {currentUser && post.userId !== currentUser.id && (
-                            <button
-                              onClick={() => {
-                                const authorUser = users.find(u => u.id === post.userId);
-                                if (authorUser) startChat(authorUser);
-                              }}
-                              className="text-slate-550 hover:text-indigo-400 p-1.5 rounded-lg hover:bg-slate-800/45 transition-all mr-8 cursor-pointer"
-                              title={`Chat with @${post.username}`}
-                            >
-                              <MessageCircle className="h-4.5 w-4.5" />
-                            </button>
-                          )}
-                        </div>
-
-                        {/* Post Content / Editor */}
-                        <div className="space-y-3">
-                          {editingPostId === post.id ? (
-                            <div className="space-y-2.5 mt-2">
-                              <textarea
-                                rows={3}
-                                className="w-full bg-slate-950 border border-slate-800/80 rounded-xl p-3 text-sm text-slate-100 placeholder-slate-650 focus:outline-none focus:border-indigo-500 transition-colors resize-none"
-                                value={editingPostContent}
-                                onChange={e => setEditingPostContent(e.target.value)}
-                              />
-                              <div className="flex justify-end gap-2">
-                                <button
-                                  onClick={() => setEditingPostId(null)}
-                                  className="px-3.5 py-1.5 rounded-xl text-xs text-slate-400 hover:bg-slate-850 hover:text-white transition-colors cursor-pointer"
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  onClick={() => handleSavePostEdit(post.id)}
-                                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-1.5 rounded-xl transition-all shadow-md cursor-pointer"
-                                >
-                                  Save Edit
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-line text-left">
-                              {post.content}
-                            </p>
-                          )}
-                          
-                          {post.mediaUrl && (
-                            <div className="rounded-xl overflow-hidden border border-slate-800/50 bg-slate-950 max-h-80 flex items-center justify-center">
-                              <img 
-                                src={post.mediaUrl} 
-                                alt="Post attachment" 
-                                className="max-w-full max-h-80 object-contain"
-                                onError={(e) => {
-                                  (e.target as HTMLElement).style.display = 'none';
-                                }}
-                              />
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Post Actions (Likes & Comments buttons) */}
-                        <div className="flex items-center gap-6 border-t border-slate-800/40 pt-3">
-                          {/* Like Button */}
-                          <button 
-                            onClick={() => handleToggleLike(post.id)}
-                            className={`flex items-center gap-1.5 text-xs transition-colors py-1 cursor-pointer ${
-                              post.hasLiked 
-                                ? 'text-rose-500 font-semibold' 
-                                : 'text-slate-400 hover:text-rose-450'
-                            }`}
-                          >
-                            <Heart className={`h-4.5 w-4.5 ${post.hasLiked ? 'fill-rose-500' : ''}`} />
-                            <span>{post.likesCount}</span>
-                          </button>
-
-                          {/* Comments Button */}
-                          <button 
-                            onClick={() => toggleComments(post.id)}
-                            className={`flex items-center gap-1.5 text-xs transition-colors py-1 cursor-pointer ${
-                              isCommentsExpanded 
-                                ? 'text-indigo-400 font-semibold' 
-                                : 'text-slate-400 hover:text-indigo-400'
-                            }`}
-                          >
-                            <MessageSquare className="h-4.5 w-4.5" />
-                            <span>{post.commentsCount}</span>
-                          </button>
-                        </div>
-
-                        {/* Expandable Comments Drawer */}
-                        {isCommentsExpanded && (
-                          <div className="border-t border-slate-850 pt-4 mt-3 space-y-4 bg-slate-950/20 p-3 rounded-xl border border-slate-900/60">
-                            
-                            {/* Replying indicator */}
-                            {replyingTo[post.id] && (
-                              <div className="flex items-center justify-between bg-indigo-950/20 border border-indigo-900/30 rounded-xl px-3 py-1.5 text-[11px] text-indigo-300">
-                                <span>Replying to <strong>@{replyingTo[post.id]?.username}</strong></span>
-                                <button 
-                                  onClick={() => setReplyingTo(prev => ({ ...prev, [post.id]: null }))}
-                                  className="text-slate-500 hover:text-white p-0.5 cursor-pointer"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </div>
-                            )}
-
-                            {/* Comment Input Form */}
-                            <form onSubmit={(e) => handleCreateComment(post.id, e)} className="flex items-center gap-2">
-                              <input
-                                type="text"
-                                required
-                                placeholder={replyingTo[post.id] ? `Write a reply...` : "Write a comment..."}
-                                value={newCommentText[post.id] || ''}
-                                onChange={e => setNewCommentText(prev => ({ ...prev, [post.id]: e.target.value }))}
-                                className="flex-grow bg-slate-950 border border-slate-850 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
-                              />
-                              <button 
-                                type="submit"
-                                className="bg-indigo-600 hover:bg-indigo-500 text-white p-2.5 rounded-xl transition-colors shrink-0 cursor-pointer"
-                              >
-                                <Send className="h-3.5 w-3.5" />
-                              </button>
-                            </form>
-
-                            {/* Comment Thread List */}
-                            <div className="space-y-3.5 max-h-80 overflow-y-auto pr-1">
-                              {nestedComments.length === 0 ? (
-                                <p className="text-[11px] text-slate-500 text-center py-2">
-                                  No comments yet.
-                                </p>
-                              ) : (
-                                nestedComments.map(comment => (
-                                  <CommentItem 
-                                    key={comment.id} 
-                                    comment={comment} 
-                                    depth={0} 
-                                    postId={post.id} 
-                                  />
-                                ))
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </article>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          ) : activeTab === 'messages' && !showNotifications ? (
-            /* DIRECT MESSAGES VIEW */
-            <div className="flex-grow flex flex-col md:flex-row overflow-hidden h-[calc(100vh-65px)] bg-bg-primary text-text-primary border-t border-border-custom transition-colors duration-200">
-              {/* User Selection column */}
-              <div className={`w-full md:w-80 border-r border-border-custom flex flex-col shrink-0 bg-chat-sidebar transition-colors duration-200 ${
-                chatRecipient && showChatMobile ? 'hidden md:flex' : 'flex'
-              }`}>
-                <div className="p-4 border-b border-border-custom bg-chat-sidebar flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xl font-bold text-text-primary tracking-tight font-sans">
-                      Messages
-                    </h3>
-                  </div>
-                  {/* Search Bar */}
-                  <div className="relative flex items-center">
-                    <input
-                      type="text"
-                      placeholder="Search"
-                      value={searchQuery}
-                      onChange={e => setSearchQuery(e.target.value)}
-                      className="w-full bg-input-bg border-none rounded-xl pl-9 pr-8 py-2 text-xs text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all font-sans"
-                    />
-                    <Users className="absolute left-3 h-3.5 w-3.5 text-text-muted" />
-                    {searchQuery && (
-                      <button 
-                        onClick={() => setSearchQuery('')}
-                        className="absolute right-3 text-text-muted hover:text-text-primary text-xs cursor-pointer"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                
-                {/* Threads list */}
-                <div className="flex-grow overflow-y-auto bg-chat-sidebar transition-colors duration-200">
-                  {(() => {
-                    const renderList = [...threads];
-                    // Append active new chat if not in list
-                    if (chatRecipient && !threads.some(t => t.id === chatRecipient.id)) {
-                      renderList.unshift({
-                        id: chatRecipient.id,
-                        username: chatRecipient.username,
-                        role: chatRecipient.role,
-                        lastMessage: null,
-                        unreadCount: 0
-                      });
-                    }
-
-                    const filtered = renderList
-                      .filter(t => t.username.toLowerCase().includes(searchQuery.toLowerCase()))
-                      .sort((a, b) => {
-                        // Keep new chat at top
-                        if (chatRecipient && a.id === chatRecipient.id && !threads.some(t => t.id === chatRecipient.id)) return -1;
-                        if (chatRecipient && b.id === chatRecipient.id && !threads.some(t => t.id === chatRecipient.id)) return 1;
-
-                        if (a.lastMessage && b.lastMessage) {
-                          return new Date(b.lastMessage.createdAt).getTime() - new Date(a.lastMessage.createdAt).getTime();
-                        }
-                        if (a.lastMessage) return -1;
-                        if (b.lastMessage) return 1;
-                        return a.username.localeCompare(b.username);
-                      });
-
-                    if (filtered.length === 0) {
-                      return (
-                        <div className="flex flex-col items-center justify-center py-16 px-4 text-center gap-2">
-                          <div className="p-3 bg-bg-tertiary rounded-full text-text-secondary mb-1">
-                            <SquarePen className="h-5 w-5" />
-                          </div>
-                          <p className="text-xs font-semibold text-text-primary font-sans">No messages</p>
-                          <p className="text-[10px] text-text-muted font-sans max-w-[160px] leading-relaxed">
-                            Send a message to start a conversation
-                          </p>
-                        </div>
-                      );
-                    }
-
-                    return filtered.map(t => {
-                      const isOnline = onlineUserIds.includes(t.id);
-                      const isSelected = chatRecipient?.id === t.id;
-                      return (
-                        <button
-                          key={t.id}
-                          onClick={() => startChat(t)}
-                          className={`w-full flex items-center gap-3.5 px-4 py-3.5 border-b border-border-custom/30 transition-all text-left cursor-pointer hover:bg-bg-tertiary/40 ${
-                            isSelected ? 'bg-bg-tertiary/70 font-medium' : ''
-                          }`}
-                        >
-                          <div className="relative shrink-0">
-                            <div className={`h-12 w-12 rounded-full flex items-center justify-center font-bold text-sm uppercase shadow-sm ${getAvatarColor(t.username)}`}>
-                              {t.username[0]}
-                            </div>
-                            {isOnline && (
-                              <span className="absolute bottom-0.5 right-0.5 h-3 w-3 rounded-full bg-emerald-500 border-2 border-bg-secondary animate-pulse-ring" />
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-grow pr-1">
-                            <div className="flex justify-between items-baseline mb-0.5">
-                              <p className="text-sm font-semibold text-text-primary truncate font-sans">
-                                @{t.username}
-                                {t.role === 'admin' && <Shield className="h-3.5 w-3.5 text-amber-500 inline ml-1 align-text-bottom" />}
-                              </p>
-                              {t.lastMessage && (
-                                <span className="text-[10px] text-text-muted shrink-0 ml-2 font-sans font-medium">
-                                  {new Date(t.lastMessage.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                              )}
-                            </div>
-                            
-                            <div className="flex justify-between items-center">
-                              <div className="min-w-0 flex-grow pr-2">
-                                {typingUsers[t.id] ? (
-                                  <p className="text-xs font-semibold text-indigo-500 animate-pulse flex items-center gap-1 font-sans">
-                                    Typing
-                                    <span className="flex gap-0.5">
-                                      <span className="h-1 w-1 bg-indigo-500 rounded-full animate-bounce-dot" />
-                                      <span className="h-1 w-1 bg-indigo-500 rounded-full animate-bounce-dot" />
-                                      <span className="h-1 w-1 bg-indigo-500 rounded-full animate-bounce-dot" />
-                                    </span>
-                                  </p>
-                                ) : t.lastMessage ? (
-                                  <p className={`text-[12px] truncate leading-relaxed font-sans ${t.unreadCount > 0 ? 'text-text-primary font-bold' : 'text-text-secondary'}`}>
-                                    {t.lastMessage.senderId === currentUser.id ? 'You: ' : ''}
-                                    {t.lastMessage.content}
-                                  </p>
-                                ) : (
-                                  <p className="text-[12px] text-text-muted italic font-sans">No messages yet</p>
-                                )}
-                              </div>
-                              
-                              <div className="shrink-0 flex items-center gap-1.5">
-                                {t.unreadCount > 0 && (
-                                  <span className="h-5 min-w-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow-sm font-sans animate-pulse-ring">
-                                    {t.unreadCount}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    });
-                  })()}
-                </div>
-              </div>
-
-              {/* Chat Conversation Column */}
-              <div className={`flex-grow flex flex-col min-w-0 bg-chat-bg transition-colors duration-200 ${
-                !chatRecipient || !showChatMobile ? 'hidden md:flex' : 'flex'
-              }`}>
-                {chatRecipient ? (
-                  <>
-                    {/* Chat Header */}
-                    <div className="p-4 border-b border-border-custom bg-chat-header flex items-center justify-between shrink-0 shadow-sm z-10 transition-colors duration-200 relative">
-                      <div className="flex items-center gap-3">
-                        <button 
-                          onClick={() => {
-                            setShowChatMobile(false);
-                            setChatRecipient(null);
-                          }}
-                          className="flex items-center text-indigo-500 hover:text-indigo-600 font-sans text-sm font-medium mr-1 cursor-pointer transition-colors"
-                          title="Back"
-                        >
-                          <ChevronLeft className="h-5 w-5 mr-0.5 inline" />
-                          Messages
-                        </button>
-                      </div>
-
-                      {/* Header Contact Details */}
-                      <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center select-none pointer-events-none">
-                        <div className={`h-8 w-8 rounded-full flex items-center justify-center font-bold text-xs uppercase shadow-sm mb-0.5 ${getAvatarColor(chatRecipient.username)}`}>
-                          {chatRecipient.username[0]}
-                        </div>
-                        <span className="text-[10px] font-bold text-text-primary tracking-tight font-sans leading-none">
-                          @{chatRecipient.username}
-                        </span>
-                      </div>
-
-                      <div className="w-12" /> {/* Balanced spacing */}
-                    </div>
-
-                    {/* Messages Body */}
-                    <div className="flex-grow overflow-y-auto p-4 space-y-3 bg-chat-bg transition-colors duration-200">
-                      {chatMessages.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-text-muted text-xs gap-1.5 py-12">
-                          <MessageCircle className="h-8 w-8 text-text-muted opacity-40" />
-                          <span className="font-sans">No messages yet. Start typing below!</span>
-                        </div>
-                      ) : (
-                        chatMessages.map((msg, index) => {
-                          const isMe = msg.senderId === currentUser.id;
-                          const prevMsg = index > 0 ? chatMessages[index - 1] : null;
-                          const isLast = index === chatMessages.length - 1;
-                          
-                          // Show time divider if 15 mins gap
-                          const showTime = !prevMsg || (new Date(msg.createdAt).getTime() - new Date(prevMsg.createdAt).getTime()) > 15 * 60 * 1000;
-
-                          return (
-                            <div key={msg.id} className="flex flex-col">
-                              {showTime && (
-                                <div className="text-[10px] text-text-muted font-bold text-center my-3 font-sans uppercase tracking-wider">
-                                  {new Date(msg.createdAt).toLocaleDateString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                              )}
-
-                              <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-0.5`}>
-                                <div className={`max-w-[70%] rounded-[20px] px-4 py-2 text-[13px] leading-relaxed shadow-sm font-sans ${
-                                  isMe 
-                                    ? 'bg-msg-me text-msg-me-text rounded-br-[4px] text-left' 
-                                    : 'bg-msg-other text-msg-other-text rounded-bl-[4px] text-left border border-border-custom'
-                                }`}>
-                                  <p className="break-words">{msg.content}</p>
-                                </div>
-                              </div>
-
-                              {/* iMessage style Delivered/Read label only under the very last message */}
-                              {isLast && isMe && (
-                                <div className="text-[10px] text-text-muted font-medium text-right pr-1.5 mt-0.5 font-sans">
-                                  {msg.read ? (
-                                    <span>
-                                      Read {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </span>
-                                  ) : (
-                                    <span>Delivered</span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })
-                      )}
-                      <div ref={chatBottomRef} />
-                    </div>
-
-                    {/* Chat Input */}
-                    <form onSubmit={handleSendDM} className="p-3 bg-chat-input border-t border-border-custom flex items-center gap-2 shrink-0 transition-colors duration-200">
-                      <input
-                        type="text"
-                        required
-                        placeholder="iMessage"
-                        value={newMsgText}
-                        onChange={e => {
-                          setNewMsgText(e.target.value);
-                          handleUserTyping(chatRecipient.id);
-                        }}
-                        className="flex-grow bg-input-bg border border-border-custom rounded-2xl px-4 py-2 text-[13px] text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-indigo-500/20 transition-all font-sans"
-                      />
-                      <button 
-                        type="submit"
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white p-2.5 rounded-full transition-colors shadow-md shrink-0 cursor-pointer"
-                      >
-                        <Send className="h-4 w-4" />
-                      </button>
-                    </form>
-                  </>
-                ) : (
-                  <div className="flex-grow flex flex-col items-center justify-center p-6 text-text-muted text-sm gap-3 bg-chat-bg transition-colors duration-200">
-                    <div className="p-4 bg-indigo-50 dark:bg-bg-tertiary rounded-full text-indigo-500 mb-1">
-                      <SquarePen className="h-8 w-8" />
-                    </div>
-                    <span className="font-sans font-semibold text-text-primary text-base">No messages</span>
-                    <span className="font-sans text-xs text-text-muted max-w-xs text-center leading-relaxed">
-                      No messages, send message to start conversation
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : activeTab === 'admin' && !showNotifications ? (
-            /* ADMIN DASHBOARD VIEW */
-            <div className="flex-grow overflow-y-auto p-4 md:p-6 space-y-6">
-              
-              <div className="flex items-center gap-3 border-b border-slate-850 pb-4">
-                <div className="h-10 w-10 bg-amber-600/10 border border-amber-600/20 text-amber-500 flex items-center justify-center rounded-xl">
-                  <Shield className="h-6 w-6" />
-                </div>
-                <div className="text-left">
-                  <h2 className="text-lg font-bold text-white">Admin Dashboard</h2>
-                  <p className="text-xs text-slate-400">Moderator metrics and platform user administration</p>
-                </div>
-              </div>
-
-              {adminData ? (
-                <>
-                  {/* Stats Cards Grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl text-left shadow-sm">
-                      <p className="text-xs text-slate-550 font-semibold uppercase">Total Users</p>
-                      <p className="text-2xl font-bold text-white mt-1.5">{adminData.stats.users}</p>
-                    </div>
-                    <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl text-left shadow-sm">
-                      <p className="text-xs text-slate-550 font-semibold uppercase">Total Posts</p>
-                      <p className="text-2xl font-bold text-indigo-400 mt-1.5">{adminData.stats.posts}</p>
-                    </div>
-                    <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl text-left shadow-sm">
-                      <p className="text-xs text-slate-550 font-semibold uppercase">Comments</p>
-                      <p className="text-2xl font-bold text-emerald-400 mt-1.5">{adminData.stats.comments}</p>
-                    </div>
-                    <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl text-left shadow-sm">
-                      <p className="text-xs text-slate-550 font-semibold uppercase">DMs Sent</p>
-                      <p className="text-2xl font-bold text-violet-400 mt-1.5">{adminData.stats.messages}</p>
-                    </div>
-                  </div>
-
-                  {/* Users Admin Table */}
-                  <div className="bg-slate-900 border border-slate-900/60 rounded-2xl overflow-hidden shadow-sm">
-                    <div className="p-4 border-b border-slate-850 bg-slate-950/20 text-left">
-                      <h3 className="text-xs font-bold text-slate-350 flex items-center gap-1.5">
-                        <Users className="h-4.5 w-4.5 text-indigo-400" />
-                        Registered Accounts
-                      </h3>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs text-left text-slate-300">
-                        <thead className="bg-slate-950/30 text-slate-550 border-b border-slate-900">
-                          <tr>
-                            <th className="p-3">User ID</th>
-                            <th className="p-3">Username</th>
-                            <th className="p-3">Role</th>
-                            <th className="p-3">Created Date</th>
-                            <th className="p-3 text-center">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-850">
-                          {adminData.users.map(u => (
-                            <tr key={u.id} className="hover:bg-slate-850/40">
-                              <td className="p-3 font-mono text-slate-400">#{u.id}</td>
-                              <td className="p-3 font-semibold text-slate-200">@{u.username}</td>
-                              <td className="p-3">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                                  u.role === 'admin' 
-                                    ? 'bg-amber-500/20 text-amber-500 border border-amber-500/30' 
-                                    : 'bg-slate-800 text-slate-400'
-                                }`}>
-                                  {u.role}
-                                </span>
-                              </td>
-                              <td className="p-3 text-slate-500">
-                                {new Date(u.createdAt).toLocaleDateString()} {new Date(u.createdAt).toLocaleTimeString()}
-                              </td>
-                              <td className="p-3 flex items-center justify-center gap-2">
-                                {u.id !== currentUser.id && (
-                                  <>
-                                    <button
-                                      onClick={() => handleImpersonateUser(u.id)}
-                                      className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-semibold transition-colors cursor-pointer"
-                                      title={`Act as @${u.username}`}
-                                    >
-                                      Act As
-                                    </button>
-                                    <button
-                                      onClick={() => handleUpdateUserRole(u.id, u.role)}
-                                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-705 text-slate-300 border border-slate-700 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer"
-                                    >
-                                      Toggle Role
-                                    </button>
-                                    <button
-                                      onClick={() => handleAdminDeleteUser(u.id, u.username)}
-                                      className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-550 border border-rose-500/25 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer"
-                                    >
-                                      Delete
-                                    </button>
-                                  </>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="text-center py-12 text-slate-500 text-xs">
-                  Loading Admin Panel statistics...
-                </div>
-              )}
-            </div>
-          ) : (
-            /* MOBILE NOTIFICATION OVERLAY DRAWER VIEW */
-            <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/95 py-2 divide-y divide-slate-800/50 overflow-y-auto">
-              <div className="px-4 py-3 flex items-center justify-between bg-slate-950/40 border-b border-slate-800">
-                <span className="text-sm font-bold text-slate-300">Notifications</span>
-                <div className="flex items-center gap-2">
-                  {unreadNotifsCount > 0 && (
-                    <span className="text-[10px] bg-indigo-500/20 text-indigo-400 px-2.5 py-0.5 rounded-full font-semibold">
-                      {unreadNotifsCount} Unread
-                    </span>
-                  )}
-                  <button 
-                    onClick={() => setShowNotifications(false)}
-                    className="p-1 text-slate-400 hover:text-white cursor-pointer"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-              {notifications.length === 0 ? (
-                <div className="px-4 py-12 text-center text-xs text-slate-500 flex-grow flex items-center justify-center">
-                  No notifications yet.
-                </div>
-              ) : (
-                <div className="flex-grow divide-y divide-slate-800/50 overflow-y-auto">
-                  {notifications.map(n => (
-                    <div 
-                      key={n.id} 
-                      onClick={() => {
-                        handleMarkNotifRead(n.id);
-                        setShowNotifications(false);
-                        if (n.type === 'message') {
-                          const sender = users.find(u => u.id === n.senderId);
-                          if (sender) startChat(sender);
-                        } else {
-                          setActiveTab('feed');
-                        }
-                      }}
-                      className={`px-4 py-4 flex gap-3 cursor-pointer transition-colors ${
-                        n.read ? 'hover:bg-slate-800/50' : 'bg-indigo-950/15 hover:bg-indigo-950/25'
-                      }`}
-                    >
-                      <div className="mt-0.5 shrink-0">
-                        {n.type === 'like' && <Heart className="h-4.5 w-4.5 text-rose-500 fill-rose-500" />}
-                        {n.type === 'comment' && <MessageSquare className="h-4.5 w-4.5 text-indigo-400" />}
-                        {n.type === 'message' && <MessageCircle className="h-4.5 w-4.5 text-emerald-400" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-xs ${n.read ? 'text-slate-300' : 'text-white font-medium'} text-left leading-relaxed`}>
-                          {n.content}
-                        </p>
-                        <span className="text-[10px] text-slate-500 mt-1 block text-left">
-                          {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                      {!n.read && (
-                        <div className="h-2 w-2 rounded-full bg-indigo-500 self-center shrink-0" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Toast Notification Container */}
-          <div className="fixed bottom-16 md:bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
-            {toasts.map(t => (
-              <div 
-                key={t.id} 
-                className="bg-slate-900/90 text-white border border-slate-800 rounded-xl p-3.5 shadow-2xl flex items-center gap-3 animate-pulse-ring max-w-sm pointer-events-auto backdrop-blur-md"
-              >
-                <div className="shrink-0">
-                  {t.type === 'like' && (
-                    <div className="h-8 w-8 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
-                      <Heart className="h-4.5 w-4.5 fill-rose-500 text-rose-500" />
-                    </div>
-                  )}
-                  {t.type === 'comment' && (
-                    <div className="h-8 w-8 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
-                      <MessageSquare className="h-4.5 w-4.5" />
-                    </div>
-                  )}
-                  {t.type === 'message' && (
-                    <div className="h-8 w-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
-                      <MessageCircle className="h-4.5 w-4.5" />
-                    </div>
-                  )}
-                  {t.type === 'system' && (
-                    <div className="h-8 w-8 rounded-lg bg-indigo-500/15 text-indigo-400 flex items-center justify-center">
-                      <Sparkles className="h-4.5 w-4.5" />
-                    </div>
-                  )}
-                </div>
-                <div className="flex-grow text-left">
-                  <p className="text-xs font-medium text-slate-200 leading-relaxed">{t.content}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-        </section>
-
-      </main>
-
-      {/* Floating Bottom Nav (For mobile screens only) */}
-      {currentUser && (
-        <nav className="sticky bottom-0 z-30 md:hidden bg-slate-900 border-t border-slate-800 p-2 flex items-center justify-around shrink-0 select-none">
-          <button
-            onClick={() => {
-              setActiveTab('feed');
-              setShowNotifications(false);
-            }}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all cursor-pointer ${
-              activeTab === 'feed' && !showNotifications ? 'text-indigo-400' : 'text-slate-555'
-            }`}
-          >
-            <Compass className="h-5 w-5" />
-            <span className="text-[9px]">Feed</span>
-          </button>
-          
-          <button
-            onClick={() => {
-              setShowNotifications(true);
-            }}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl relative transition-all cursor-pointer ${
-              showNotifications ? 'text-indigo-400' : 'text-slate-555'
-            }`}
-          >
-            <Bell className="h-5 w-5" />
-            {unreadNotifsCount > 0 && (
-              <span className="absolute top-1.5 right-3.5 bg-rose-500 text-white text-[8px] font-bold h-4.5 w-4.5 rounded-full flex items-center justify-center animate-pulse-ring">
-                {unreadNotifsCount}
-              </span>
-            )}
-            <span className="text-[9px]">Alerts</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveTab('messages');
-              setShowNotifications(false);
-              if (chatRecipient) {
-                setShowChatMobile(true);
-              }
-            }}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all cursor-pointer ${
-              activeTab === 'messages' && !showNotifications ? 'text-indigo-400' : 'text-slate-555'
-            }`}
-          >
-            <MessageSquare className="h-5 w-5" />
-            <span className="text-[9px]">Messages</span>
-          </button>
-
-          {currentUser.role === 'admin' && (
-            <button
-              onClick={() => {
-                setActiveTab('admin');
-                setShowNotifications(false);
-              }}
-              className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all cursor-pointer ${
-                activeTab === 'admin' && !showNotifications ? 'text-amber-500' : 'text-amber-500/50'
-              }`}
-            >
-              <Shield className="h-5 w-5" />
-              <span className="text-[9px]">Admin</span>
-            </button>
-          )}
-        </nav>
-      )}
-    </div>
+        <ToastContainer toasts={toasts} />
+      </section>
+    </AppShell>
   );
 }

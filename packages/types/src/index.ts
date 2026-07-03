@@ -102,6 +102,8 @@ export type ClientMessage =
   | { type: 'typing'; payload: { receiverId: number; isTyping: boolean } };
 
 export type ServerMessage =
+  | { type: 'joined'; payload: { userId: number } }
+  | { type: 'error'; payload: { message: string } }
   | { type: 'message'; payload: Message }
   | { type: 'notification'; payload: Notification }
   | { type: 'online_users'; payload: { userIds: number[] } }

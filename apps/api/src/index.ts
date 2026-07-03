@@ -1244,8 +1244,14 @@ export class RealtimeDO implements DurableObject {
 
         this.sessions.set(ws, { userId, username });
         this.broadcastOnlineUsers();
+        try {
+          ws.send(JSON.stringify({ type: 'joined', payload: { userId } }));
+        } catch (e) {}
       } catch (e) {
         console.error('WebSocket token authentication failed:', e);
+        try {
+          ws.send(JSON.stringify({ type: 'error', payload: { message: 'Authentication failed' } }));
+        } catch (_) {}
       }
     } 
     
@@ -1327,39 +1333,6 @@ export class RealtimeDO implements DurableObject {
           try {
             targetWs.send(JSON.stringify({ type: 'message', payload: messagePayload }));
           } catch (e) {}
-        }
-      }
-
-      if (!receiverIsViewingChat) {
-        const notificationContent = `${session.username} sent you a message: "${content.substring(0, 20)}${content.length > 20 ? '...' : ''}"`;
-        
-        const [notif] = await db.insert(schema.notifications).values({
-          userId: receiverId,
-          senderId: session.userId,
-          type: 'message',
-          entityId: inserted.id,
-          content: notificationContent,
-          read: 0,
-        }).returning();
-
-        const notificationPayload: Notification = {
-          id: notif.id,
-          userId: receiverId,
-          senderId: session.userId,
-          senderUsername: session.username,
-          type: 'message',
-          entityId: inserted.id,
-          content: notificationContent,
-          read: false,
-          createdAt: notif.createdAt,
-        };
-
-        for (const [targetWs, targetSession] of this.sessions.entries()) {
-          if (targetSession.userId === receiverId && targetSession.activeChatId !== session.userId) {
-            try {
-              targetWs.send(JSON.stringify({ type: 'notification', payload: notificationPayload }));
-            } catch (e) {}
-          }
         }
       }
     }
