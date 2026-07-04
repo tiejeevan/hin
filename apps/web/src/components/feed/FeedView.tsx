@@ -1,6 +1,6 @@
 import { Plus } from 'lucide-react';
-import { Post, Comment, User as UserType, ChatThread, Message } from '@hin/types';
-import { CommentNode, ChatRecipient } from '../../types/ui';
+import { Post, Comment, User as UserType } from '@hin/types';
+import { CommentNode } from '../../types/ui';
 import { CreatePostForm } from './CreatePostForm';
 import { PostCard } from './PostCard';
 import { FloatingActionStack } from '../ui/FloatingActionStack';
@@ -9,17 +9,10 @@ interface FeedViewProps {
   posts: Post[];
   users: UserType[];
   currentUser: UserType;
-  threads: ChatThread[];
   showNewPostForm: boolean;
   showMessagesDropdown: boolean;
-  messagesPanelExpanded: boolean;
-  typingUsers: Record<number, boolean>;
   unreadMessagesCount: number;
   messageIconPulseAt: number;
-  chatRecipient: ChatRecipient | null;
-  chatMessages: Message[];
-  newMsgText: string;
-  chatBottomRef: React.RefObject<HTMLDivElement>;
   hasBottomNav: boolean;
   newPostContent: string;
   newPostMedia: string;
@@ -35,13 +28,6 @@ interface FeedViewProps {
   onOpenCreatePost: () => void;
   onCloseCreatePost: () => void;
   onToggleMessages: () => void;
-  onCloseMessages: () => void;
-  onToggleMessagesExpand: () => void;
-  onSelectThread: (thread: ChatRecipient) => void;
-  onBackToList: () => void;
-  onNewMsgTextChange: (text: string) => void;
-  onSendDM: (e: React.FormEvent) => void;
-  onTyping: (recipientId: number) => void;
   onNewPostContentChange: (value: string) => void;
   onNewPostMediaChange: (value: string) => void;
   onCreatePost: (e: React.FormEvent) => void;
@@ -55,7 +41,7 @@ interface FeedViewProps {
   onCreateComment: (postId: number, e: React.FormEvent) => void;
   onCommentTextChange: (postId: number, text: string) => void;
   onCancelReply: (postId: number) => void;
-  onStartChat: (user: UserType) => void;
+  onViewProfile: (userId: number) => void;
   onDeleteComment: (postId: number, commentId: number) => void;
   onStartCommentEdit: (commentId: number, content: string) => void;
   onCancelCommentEdit: () => void;
@@ -68,17 +54,10 @@ export function FeedView({
   posts,
   users,
   currentUser,
-  threads,
   showNewPostForm,
   showMessagesDropdown,
-  messagesPanelExpanded,
-  typingUsers,
   unreadMessagesCount,
   messageIconPulseAt,
-  chatRecipient,
-  chatMessages,
-  newMsgText,
-  chatBottomRef,
   hasBottomNav,
   newPostContent,
   newPostMedia,
@@ -94,13 +73,6 @@ export function FeedView({
   onOpenCreatePost,
   onCloseCreatePost,
   onToggleMessages,
-  onCloseMessages,
-  onToggleMessagesExpand,
-  onSelectThread,
-  onBackToList,
-  onNewMsgTextChange,
-  onSendDM,
-  onTyping,
   onNewPostContentChange,
   onNewPostMediaChange,
   onCreatePost,
@@ -114,7 +86,7 @@ export function FeedView({
   onCreateComment,
   onCommentTextChange,
   onCancelReply,
-  onStartChat,
+  onViewProfile,
   onDeleteComment,
   onStartCommentEdit,
   onCancelCommentEdit,
@@ -178,7 +150,7 @@ export function FeedView({
               onCreateComment={onCreateComment}
               onCommentTextChange={onCommentTextChange}
               onCancelReply={onCancelReply}
-              onStartChat={onStartChat}
+              onViewProfile={onViewProfile}
               onDeleteComment={onDeleteComment}
               onStartCommentEdit={onStartCommentEdit}
               onCancelCommentEdit={onCancelCommentEdit}
@@ -193,26 +165,11 @@ export function FeedView({
       <FloatingActionStack
         showNewPostForm={showNewPostForm}
         showMessagesDropdown={showMessagesDropdown}
-        messagesPanelExpanded={messagesPanelExpanded}
-        threads={threads}
-        currentUser={currentUser}
-        chatRecipient={chatRecipient}
-        chatMessages={chatMessages}
-        newMsgText={newMsgText}
-        typingUsers={typingUsers}
         unreadMessagesCount={unreadMessagesCount}
         messageIconPulseAt={messageIconPulseAt}
-        chatBottomRef={chatBottomRef}
         hasBottomNav={hasBottomNav}
         onOpenCreatePost={onOpenCreatePost}
         onToggleMessages={onToggleMessages}
-        onCloseMessages={onCloseMessages}
-        onToggleMessagesExpand={onToggleMessagesExpand}
-        onSelectThread={onSelectThread}
-        onBackToList={onBackToList}
-        onNewMsgTextChange={onNewMsgTextChange}
-        onSendDM={onSendDM}
-        onTyping={onTyping}
       />
     </div>
   );

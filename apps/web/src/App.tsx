@@ -10,6 +10,8 @@ import { ImpersonationBanner } from './components/layout/ImpersonationBanner';
 import { AuthForm } from './components/auth/AuthForm';
 import { FeedView } from './components/feed/FeedView';
 import { AdminDashboard } from './components/admin/AdminDashboard';
+import { ProfileView } from './components/profile/ProfileView';
+import { MessagesPanel } from './components/messages/MessagesPanel';
 import { ToastContainer } from './components/ui/ToastContainer';
 
 export default function App() {
@@ -69,6 +71,13 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [adminData, setAdminData] = useState<AdminData | null>(null);
 
+  const [profileUserId, setProfileUserId] = useState<number | null>(null);
+  const [profileUser, setProfileUser] = useState<UserType | null>(null);
+  const [profilePosts, setProfilePosts] = useState<import('@hin/types').Post[]>([]);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [isProfileEditing, setIsProfileEditing] = useState(false);
+
   const ws = useRef<WebSocket | null>(null);
   const wsReadyRef = useRef(false);
   const processedNotifIdsRef = useRef<Set<number>>(new Set());
@@ -97,6 +106,11 @@ export default function App() {
 
   const goHome = () => {
     setActiveTab('feed');
+    setProfileUserId(null);
+    setProfileUser(null);
+    setProfilePosts([]);
+    setProfileError(null);
+    setIsProfileEditing(false);
     setShowNotifications(false);
     setShowMessagesDropdown(false);
     setMessagesPanelExpanded(false);
@@ -137,8 +151,63 @@ export default function App() {
 
   const unreadMessagesCount = threads.reduce((sum, t) => sum + t.unreadCount, 0);
 
+  const fetchProfile = async (userId: number) => {
+    if (!token) return;
+    setProfileLoading(true);
+    setProfileError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/users/${userId}`, { headers: getHeaders() });
+      if (res.ok) {
+        setProfileUser(await res.json());
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setProfileError(data.error || 'Failed to load profile');
+        setProfileUser(null);
+      }
+    } catch {
+      setProfileError('Failed to load profile');
+      setProfileUser(null);
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const fetchProfilePosts = async (userId: number) => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/posts?userId=${userId}`, { headers: getHeaders() });
+      if (res.ok) setProfilePosts(await res.json());
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const openProfile = (userId: number) => {
+    setProfileUserId(userId);
+    setActiveTab('profile');
+    setIsProfileEditing(false);
+    setShowNotifications(false);
+    setShowMessagesDropdown(false);
+    setMessagesPanelExpanded(false);
+    setChatRecipient(null);
+    fetchProfile(userId);
+    fetchProfilePosts(userId);
+  };
+
+  const handleProfileSaved = (updated: UserType) => {
+    setProfileUser(updated);
+    setUsers(prev => prev.map(u => (u.id === updated.id ? updated : u)));
+    if (currentUser?.id === updated.id) {
+      setCurrentUser(updated);
+      localStorage.setItem('hin_user', JSON.stringify(updated));
+    }
+    addToast('Profile updated successfully', 'system');
+  };
+
   const openAdmin = () => {
     setActiveTab('admin');
+    setProfileUserId(null);
+    setIsProfileEditing(false);
     setShowNotifications(false);
   };
 
@@ -537,6 +606,10 @@ export default function App() {
       if (res.ok) {
         const newPost = await res.json();
         setPosts(prev => (prev.some(p => p.id === newPost.id) ? prev : [newPost, ...prev]));
+        if (profileUserId === currentUser.id) {
+          setProfilePosts(prev => (prev.some(p => p.id === newPost.id) ? prev : [newPost, ...prev]));
+          setProfileUser(prev => prev ? { ...prev, postCount: (prev.postCount || 0) + 1 } : prev);
+        }
         setNewPostContent('');
         setNewPostMedia('');
         setShowNewPostForm(false);
@@ -559,6 +632,7 @@ export default function App() {
       if (res.ok) {
         const updatedPost = await res.json();
         setPosts(prev => prev.map(p => (p.id === postId ? updatedPost : p)));
+        setProfilePosts(prev => prev.map(p => (p.id === postId ? updatedPost : p)));
         setEditingPostId(null);
         addToast('Post updated successfully', 'system');
       }
@@ -573,6 +647,10 @@ export default function App() {
       const res = await fetch(`${API_URL}/api/posts/${postId}`, { method: 'DELETE', headers: getHeaders() });
       if (res.ok) {
         setPosts(prev => prev.filter(p => p.id !== postId));
+        setProfilePosts(prev => prev.filter(p => p.id !== postId));
+        if (profileUser) {
+          setProfileUser(prev => prev ? { ...prev, postCount: Math.max(0, (prev.postCount || 1) - 1) } : prev);
+        }
         addToast('Post deleted successfully', 'system');
         if (currentUser.role === 'admin') fetchAdminStats();
       }
@@ -588,6 +666,9 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setPosts(prev =>
+          prev.map(p => (p.id === postId ? { ...p, hasLiked: data.liked, likesCount: data.likesCount } : p))
+        );
+        setProfilePosts(prev =>
           prev.map(p => (p.id === postId ? { ...p, hasLiked: data.liked, likesCount: data.likesCount } : p))
         );
       }
@@ -678,7 +759,6 @@ export default function App() {
 
   const startChat = (user: UserType | ChatRecipient) => {
     const recipient: ChatRecipient = { id: user.id, username: user.username, role: user.role };
-    setActiveTab('feed');
     setShowNotifications(false);
     setShowMessagesDropdown(true);
     setMessagesPanelExpanded(false);
@@ -852,6 +932,7 @@ export default function App() {
           }}
           onCloseNotifications={() => setShowNotifications(false)}
           onNotificationClick={handleNotificationClick}
+          onOpenProfile={openProfile}
           onLogout={handleLogout}
         />
       }
@@ -900,17 +981,10 @@ export default function App() {
             posts={posts}
             users={users}
             currentUser={currentUser}
-            threads={threads}
             showNewPostForm={showNewPostForm}
             showMessagesDropdown={showMessagesDropdown}
-            messagesPanelExpanded={messagesPanelExpanded}
-            typingUsers={typingUsers}
             unreadMessagesCount={unreadMessagesCount}
             messageIconPulseAt={messageIconPulseAt}
-            chatRecipient={chatRecipient}
-            chatMessages={chatMessages}
-            newMsgText={newMsgText}
-            chatBottomRef={chatBottomRef}
             hasBottomNav={currentUser.role === 'admin'}
             newPostContent={newPostContent}
             newPostMedia={newPostMedia}
@@ -929,13 +1003,6 @@ export default function App() {
             }}
             onCloseCreatePost={() => setShowNewPostForm(false)}
             onToggleMessages={toggleMessagesDropdown}
-            onCloseMessages={closeMessagesPanel}
-            onToggleMessagesExpand={() => setMessagesPanelExpanded(prev => !prev)}
-            onSelectThread={openChatInPanel}
-            onBackToList={backToMessagesList}
-            onNewMsgTextChange={setNewMsgText}
-            onSendDM={handleSendDM}
-            onTyping={handleUserTyping}
             onNewPostContentChange={setNewPostContent}
             onNewPostMediaChange={setNewPostMedia}
             onCreatePost={handleCreatePost}
@@ -952,7 +1019,7 @@ export default function App() {
             onCreateComment={handleCreateComment}
             onCommentTextChange={(postId, text) => setNewCommentText(prev => ({ ...prev, [postId]: text }))}
             onCancelReply={postId => setReplyingTo(prev => ({ ...prev, [postId]: null }))}
-            onStartChat={startChat}
+            onViewProfile={openProfile}
             onDeleteComment={handleDeleteComment}
             onStartCommentEdit={(id, content) => {
               setEditingCommentId(id);
@@ -963,6 +1030,53 @@ export default function App() {
             onEditCommentContentChange={setEditingCommentContent}
             onReply={(postId, comment: CommentNode) => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
           />
+        ) : activeTab === 'profile' && profileUserId && token ? (
+          <ProfileView
+            profileUser={profileUser}
+            profilePosts={profilePosts}
+            isLoading={profileLoading}
+            loadError={profileError}
+            currentUser={currentUser}
+            token={token}
+            isEditing={isProfileEditing}
+            users={users}
+            expandedComments={expandedComments}
+            postComments={postComments}
+            newCommentText={newCommentText}
+            replyingTo={replyingTo}
+            editingPostId={editingPostId}
+            editingPostContent={editingPostContent}
+            editingCommentId={editingCommentId}
+            editingCommentContent={editingCommentContent}
+            onBack={goHome}
+            onStartEdit={() => setIsProfileEditing(true)}
+            onCancelEdit={() => setIsProfileEditing(false)}
+            onProfileSaved={handleProfileSaved}
+            onStartChat={startChat}
+            onToggleLike={handleToggleLike}
+            onToggleComments={toggleComments}
+            onDeletePost={handleDeletePost}
+            onStartPostEdit={(id, content) => {
+              setEditingPostId(id);
+              setEditingPostContent(content);
+            }}
+            onCancelPostEdit={() => setEditingPostId(null)}
+            onSavePostEdit={handleSavePostEdit}
+            onEditPostContentChange={setEditingPostContent}
+            onCreateComment={handleCreateComment}
+            onCommentTextChange={(postId, text) => setNewCommentText(prev => ({ ...prev, [postId]: text }))}
+            onCancelReply={postId => setReplyingTo(prev => ({ ...prev, [postId]: null }))}
+            onDeleteComment={handleDeleteComment}
+            onStartCommentEdit={(id, content) => {
+              setEditingCommentId(id);
+              setEditingCommentContent(content);
+            }}
+            onCancelCommentEdit={() => setEditingCommentId(null)}
+            onSaveCommentEdit={handleSaveCommentEdit}
+            onEditCommentContentChange={setEditingCommentContent}
+            onReply={(postId, comment: CommentNode) => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
+            onViewProfile={openProfile}
+          />
         ) : activeTab === 'admin' ? (
           <AdminDashboard
             adminData={adminData}
@@ -972,6 +1086,28 @@ export default function App() {
             onDeleteUser={handleAdminDeleteUser}
           />
         ) : null}
+
+        {currentUser && (
+          <MessagesPanel
+            isOpen={showMessagesDropdown}
+            isExpanded={messagesPanelExpanded}
+            onToggleExpand={() => setMessagesPanelExpanded(prev => !prev)}
+            threads={threads}
+            currentUser={currentUser}
+            chatRecipient={chatRecipient}
+            chatMessages={chatMessages}
+            newMsgText={newMsgText}
+            typingUsers={typingUsers}
+            chatBottomRef={chatBottomRef}
+            hasBottomNav={currentUser.role === 'admin'}
+            onClose={closeMessagesPanel}
+            onSelectThread={openChatInPanel}
+            onBackToList={backToMessagesList}
+            onNewMsgTextChange={setNewMsgText}
+            onSendDM={handleSendDM}
+            onTyping={handleUserTyping}
+          />
+        )}
 
         <ToastContainer toasts={toasts} />
       </section>

@@ -6,6 +6,9 @@ export const users = sqliteTable('users', {
   username: text('username').notNull().unique(),
   passwordHash: text('password_hash').default('').notNull(),
   role: text('role').default('user').notNull(),
+  bio: text('bio'),
+  avatarUrl: text('avatar_url'),
+  coverUrl: text('cover_url'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
   deletedAt: text('deleted_at'), // Soft delete for users
 }, (table) => ({
@@ -23,6 +26,18 @@ export const posts = sqliteTable('posts', {
   userIdIdx: index('posts_user_id_idx').on(table.userId),
   createdAtIdx: index('posts_created_at_idx').on(table.createdAt),
   deletedAtIdx: index('posts_deleted_at_idx').on(table.deletedAt),
+}));
+
+export const postEditHistory = sqliteTable('post_edit_history', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  previousContent: text('previous_content').notNull(),
+  previousMediaUrl: text('previous_media_url'),
+  editedBy: integer('edited_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  editedAt: text('edited_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  postIdIdx: index('post_edit_history_post_id_idx').on(table.postId),
+  editedAtIdx: index('post_edit_history_edited_at_idx').on(table.editedAt),
 }));
 
 export const comments = sqliteTable('comments', {

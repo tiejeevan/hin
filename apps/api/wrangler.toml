@@ -16,3 +16,7 @@ bindings = [
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RealtimeDO"]
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "gmart"

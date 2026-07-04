@@ -4,8 +4,12 @@ export interface User {
   id: number;
   username: string;
   role: 'user' | 'admin';
+  bio?: string | null;
+  avatarUrl?: string | null;
+  coverUrl?: string | null;
   createdAt: string;
   deletedAt?: string | null;
+  postCount?: number;
 }
 
 export interface Post {
@@ -92,6 +96,12 @@ export const RegisterSchema = z.object({
 export const LoginSchema = z.object({
   username: z.string().min(1, 'Username is required'),
   password: z.string().min(1, 'Password is required'),
+});
+
+export const UpdateProfileSchema = z.object({
+  bio: z.string().max(500, 'Bio is too long').nullable().optional(),
+  avatarUrl: z.string().url().nullable().optional(),
+  coverUrl: z.string().url().nullable().optional(),
 });
 
 // WebSocket Message Types

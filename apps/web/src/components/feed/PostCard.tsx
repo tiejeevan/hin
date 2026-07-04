@@ -1,8 +1,10 @@
-import { Heart, MessageSquare, MessageCircle, Shield, Trash2, Send, X } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Heart, MessageSquare, Shield, Trash2, Send, X, MoreVertical, Pencil } from 'lucide-react';
 import { Post, Comment, User as UserType } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { buildCommentTree } from '../../utils/comments';
 import { CommentItem } from './CommentItem';
+import { UserAvatar } from '../profile/UserAvatar';
 
 interface PostCardProps {
   post: Post;
@@ -17,6 +19,7 @@ interface PostCardProps {
   replyingTo: Comment | null;
   editingCommentId: number | null;
   editingCommentContent: string;
+  hideAuthorHeader?: boolean;
   onToggleLike: (postId: number) => void;
   onToggleComments: (postId: number) => void;
   onDeletePost: (postId: number) => void;
@@ -27,13 +30,13 @@ interface PostCardProps {
   onCreateComment: (postId: number, e: React.FormEvent) => void;
   onCommentTextChange: (postId: number, text: string) => void;
   onCancelReply: (postId: number) => void;
-  onStartChat: (user: UserType) => void;
   onDeleteComment: (postId: number, commentId: number) => void;
   onStartCommentEdit: (commentId: number, content: string) => void;
   onCancelCommentEdit: () => void;
   onSaveCommentEdit: (postId: number, commentId: number) => void;
   onEditCommentContentChange: (content: string) => void;
   onReply: (postId: number, comment: CommentNode) => void;
+  onViewProfile: (userId: number) => void;
 }
 
 export function PostCard({
@@ -49,6 +52,7 @@ export function PostCard({
   replyingTo,
   editingCommentId,
   editingCommentContent,
+  hideAuthorHeader = false,
   onToggleLike,
   onToggleComments,
   onDeletePost,
@@ -59,15 +63,39 @@ export function PostCard({
   onCreateComment,
   onCommentTextChange,
   onCancelReply,
-  onStartChat,
   onDeleteComment,
   onStartCommentEdit,
   onCancelCommentEdit,
   onSaveCommentEdit,
   onEditCommentContentChange,
   onReply,
+  onViewProfile,
 }: PostCardProps) {
   const nestedComments = buildCommentTree(commentsList);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const canManagePost = currentUser.role === 'admin' || currentUser.id === post.userId;
+  const author = users.find(u => u.id === post.userId);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [menuOpen]);
 
   return (
     <article
@@ -75,59 +103,76 @@ export function PostCard({
         isNewlyCreated ? 'animate-blink-border' : ''
       }`}
     >
-      {(currentUser.role === 'admin' || currentUser.id === post.userId) && (
-        <div className="absolute top-4 right-4 flex items-center gap-1.5">
+      {canManagePost && (
+        <div ref={menuRef} className="absolute top-4 right-4 z-10">
           <button
-            onClick={() => onStartPostEdit(post.id, post.content)}
-            className="p-1.5 bg-indigo-500/10 border border-indigo-500/25 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
-            title="Edit Post"
+            onClick={() => setMenuOpen(prev => !prev)}
+            className="p-1.5 text-text-muted hover:text-text-primary hover:bg-bg-tertiary rounded-lg transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
+            title="Post options"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
           >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-            </svg>
+            <MoreVertical className="h-4 w-4" />
           </button>
-          <button
-            onClick={() => onDeletePost(post.id)}
-            className="p-1.5 bg-rose-500/10 border border-rose-500/25 hover:bg-rose-500/20 text-rose-400 rounded-lg transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
-            title="Delete Post"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+
+          {menuOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 top-full mt-1 w-36 rounded-xl border border-border-custom bg-bg-secondary shadow-lg overflow-hidden"
+            >
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onStartPostEdit(post.id, post.content);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-text-secondary hover:bg-bg-tertiary hover:text-indigo-400 transition-colors cursor-pointer min-h-[44px]"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Edit
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDeletePost(post.id);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer min-h-[44px]"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </button>
+            </div>
+          )}
         </div>
       )}
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="h-9 w-9 rounded-full bg-bg-tertiary border border-border-custom flex items-center justify-center font-bold text-xs uppercase text-text-secondary">
-            {post.username[0]}
-          </div>
-          <div className="text-left">
-            <p className="text-xs font-bold text-text-primary flex items-center gap-1">
-              @{post.username}
-              {users.find(u => u.id === post.userId)?.role === 'admin' && (
-                <Shield className="h-3 w-3 text-amber-500" />
-              )}
-            </p>
-            <span className="text-[9px] text-text-muted">
-              {new Date(post.createdAt).toLocaleDateString()}{' '}
-              {new Date(post.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
+      {!hideAuthorHeader && (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <UserAvatar
+              username={post.username}
+              avatarUrl={author?.avatarUrl}
+              size="md"
+              onClick={() => onViewProfile(post.userId)}
+            />
+            <div className="text-left">
+              <button
+                type="button"
+                onClick={() => onViewProfile(post.userId)}
+                className="text-xs font-bold text-text-primary flex items-center gap-1 hover:text-indigo-400 transition-colors cursor-pointer"
+              >
+                {post.username}
+                {author?.role === 'admin' && <Shield className="h-3 w-3 text-amber-500" />}
+              </button>
+              <span className="text-[9px] text-text-muted block">
+                {new Date(post.createdAt).toLocaleDateString()}{' '}
+                {new Date(post.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
           </div>
         </div>
-
-        {post.userId !== currentUser.id && (
-          <button
-            onClick={() => {
-              const authorUser = users.find(u => u.id === post.userId);
-              if (authorUser) onStartChat(authorUser);
-            }}
-            className="text-text-muted hover:text-indigo-400 p-1.5 rounded-lg hover:bg-bg-tertiary transition-all mr-8 cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
-            title={`Chat with @${post.username}`}
-          >
-            <MessageCircle className="h-4.5 w-4.5" />
-          </button>
-        )}
-      </div>
+      )}
 
       <div className="space-y-3">
         {editingPostId === post.id ? (
@@ -198,7 +243,7 @@ export function PostCard({
           {replyingTo && (
             <div className="flex items-center justify-between bg-indigo-950/20 border border-indigo-900/30 rounded-xl px-3 py-1.5 text-[11px] text-indigo-300">
               <span>
-                Replying to <strong>@{replyingTo.username}</strong>
+                Replying to <strong>{replyingTo.username}</strong>
               </span>
               <button
                 onClick={() => onCancelReply(post.id)}

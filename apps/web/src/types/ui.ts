@@ -20,7 +20,7 @@ export interface CommentNode extends Comment {
   replies: CommentNode[];
 }
 
-export type ActiveTab = 'feed' | 'admin';
+export type ActiveTab = 'feed' | 'admin' | 'profile';
 
 export interface ChatRecipient {
   id: number;

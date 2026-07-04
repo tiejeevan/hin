@@ -10,9 +10,46 @@ import { sign, verify } from 'hono/jwt';
 interface Env {
   DB: D1Database;
   REALTIME_DO: DurableObjectNamespace;
+  MEDIA: R2Bucket;
 }
 
 const JWT_SECRET = 'hin-super-secret-key-12345';
+
+function toPublicUser(
+  user: {
+    id: number;
+    username: string;
+    role: string;
+    bio?: string | null;
+    avatarUrl?: string | null;
+    coverUrl?: string | null;
+    createdAt: string;
+    deletedAt?: string | null;
+  },
+  postCount?: number
+): User {
+  return {
+    id: user.id,
+    username: user.username,
+    role: user.role as User['role'],
+    bio: user.bio ?? null,
+    avatarUrl: user.avatarUrl ?? null,
+    coverUrl: user.coverUrl ?? null,
+    createdAt: user.createdAt,
+    deletedAt: user.deletedAt ?? null,
+    ...(postCount !== undefined ? { postCount } : {}),
+  };
+}
+
+const USER_PUBLIC_FIELDS = {
+  id: schema.users.id,
+  username: schema.users.username,
+  role: schema.users.role,
+  bio: schema.users.bio,
+  avatarUrl: schema.users.avatarUrl,
+  coverUrl: schema.users.coverUrl,
+  createdAt: schema.users.createdAt,
+};
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -20,7 +57,7 @@ const app = new Hono<{ Bindings: Env }>();
 app.use('*', cors({
   origin: '*',
   allowHeaders: ['Content-Type', 'Authorization'],
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
 
 // Helper to get authenticated user from JWT token
@@ -108,12 +145,7 @@ app.post('/api/auth/register', async (c) => {
 
   return c.json({
     token,
-    user: {
-      id: inserted.id,
-      username: inserted.username,
-      role: inserted.role,
-      createdAt: inserted.createdAt,
-    }
+    user: toPublicUser(inserted),
   });
 });
 
@@ -160,12 +192,7 @@ app.post('/api/auth/login', async (c) => {
 
   return c.json({
     token,
-    user: {
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      createdAt: user.createdAt,
-    }
+    user: toPublicUser(user),
   });
 });
 
@@ -175,17 +202,126 @@ app.get('/api/users', async (c) => {
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
 
   const db = drizzle(c.env.DB, { schema });
-  const allUsers = await db.select({
-    id: schema.users.id,
-    username: schema.users.username,
-    role: schema.users.role,
-    createdAt: schema.users.createdAt,
-  })
+  const allUsers = await db.select(USER_PUBLIC_FIELDS)
   .from(schema.users)
   .where(sql`${schema.users.deletedAt} IS NULL`) // Skip soft deleted users
   .all();
 
-  return c.json(allUsers);
+  return c.json(allUsers.map(u => toPublicUser(u)));
+});
+
+// Get single user profile
+app.get('/api/users/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const userId = parseInt(c.req.param('id'));
+  if (isNaN(userId)) return c.json({ error: 'Invalid user id' }, 400);
+
+  const user = await db.select(USER_PUBLIC_FIELDS)
+    .from(schema.users)
+    .where(
+      and(
+        eq(schema.users.id, userId),
+        sql`${schema.users.deletedAt} IS NULL`
+      )
+    )
+    .get();
+
+  if (!user) return c.json({ error: 'User not found' }, 404);
+
+  const postCountRes = await db.select({ value: count() })
+    .from(schema.posts)
+    .where(
+      and(
+        eq(schema.posts.userId, userId),
+        sql`${schema.posts.deletedAt} IS NULL`
+      )
+    )
+    .get();
+
+  return c.json(toPublicUser(user, postCountRes?.value || 0));
+});
+
+// Update own profile
+app.patch('/api/users/me', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const body = await c.req.json<{ bio?: string | null; avatarUrl?: string | null; coverUrl?: string | null }>();
+  const updates: Partial<{ bio: string | null; avatarUrl: string | null; coverUrl: string | null }> = {};
+
+  if (body.bio !== undefined) {
+    if (body.bio !== null && body.bio.length > 500) {
+      return c.json({ error: 'Bio is too long (max 500 characters)' }, 400);
+    }
+    updates.bio = body.bio === null ? null : body.bio.trim();
+  }
+  if (body.avatarUrl !== undefined) updates.avatarUrl = body.avatarUrl;
+  if (body.coverUrl !== undefined) updates.coverUrl = body.coverUrl;
+
+  if (Object.keys(updates).length === 0) {
+    return c.json({ error: 'No valid fields to update' }, 400);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const [updated] = await db.update(schema.users)
+    .set(updates)
+    .where(eq(schema.users.id, authUser.id))
+    .returning();
+
+  return c.json(toPublicUser(updated));
+});
+
+// Upload profile image to R2
+app.post('/api/upload', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const formData = await c.req.formData();
+  const file = formData.get('file');
+  const uploadType = formData.get('type');
+
+  if (!(file instanceof File)) {
+    return c.json({ error: 'No file provided' }, 400);
+  }
+  if (uploadType !== 'avatar' && uploadType !== 'cover') {
+    return c.json({ error: 'Invalid upload type' }, 400);
+  }
+
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!allowedTypes.includes(file.type)) {
+    return c.json({ error: 'Invalid file type. Use JPEG, PNG, or WebP.' }, 400);
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    return c.json({ error: 'File too large (max 5MB)' }, 400);
+  }
+
+  const ext = file.type === 'image/jpeg' ? 'jpg' : file.type === 'image/png' ? 'png' : 'webp';
+  const folder = uploadType === 'avatar' ? 'avatars' : 'covers';
+  const key = `${folder}/${authUser.id}/${crypto.randomUUID()}.${ext}`;
+
+  await c.env.MEDIA.put(key, file.stream(), {
+    httpMetadata: { contentType: file.type },
+  });
+
+  const origin = new URL(c.req.url).origin;
+  return c.json({ url: `${origin}/api/media/${key}`, key });
+});
+
+// Serve uploaded media from R2
+app.get('/api/media/*', async (c) => {
+  const key = c.req.path.replace(/^\/api\/media\//, '');
+  if (!key) return c.notFound();
+
+  const object = await c.env.MEDIA.get(key);
+  if (!object) return c.notFound();
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+  return new Response(object.body, { headers });
 });
 
 // Get posts
@@ -195,6 +331,18 @@ app.get('/api/posts', async (c) => {
   const currentUserId = authUser ? authUser.id : null;
 
   // Let's fetch posts with author details, likes count, and comments count.
+  const filterUserId = c.req.query('userId');
+  const postConditions = [
+    sql`${schema.posts.deletedAt} IS NULL`,
+    sql`${schema.users.deletedAt} IS NULL`,
+  ];
+
+  if (filterUserId) {
+    const uid = parseInt(filterUserId);
+    if (isNaN(uid)) return c.json({ error: 'Invalid userId' }, 400);
+    postConditions.push(eq(schema.posts.userId, uid));
+  }
+
   const allPosts = await db.select({
     id: schema.posts.id,
     userId: schema.posts.userId,
@@ -205,12 +353,7 @@ app.get('/api/posts', async (c) => {
   })
   .from(schema.posts)
   .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
-  .where(
-    and(
-      sql`${schema.posts.deletedAt} IS NULL`,
-      sql`${schema.users.deletedAt} IS NULL` // Skip posts from deleted users
-    )
-  )
+  .where(and(...postConditions))
   .orderBy(desc(schema.posts.createdAt))
   .all();
 
@@ -332,6 +475,16 @@ app.put('/api/posts/:id', async (c) => {
   const { content } = await c.req.json<{ content: string }>();
   if (!content || content.trim() === '') {
     return c.json({ error: 'Content cannot be empty' }, 400);
+  }
+
+  // Preserve previous version for admin/system audit trail
+  if (content.trim() !== post.content) {
+    await db.insert(schema.postEditHistory).values({
+      postId,
+      previousContent: post.content,
+      previousMediaUrl: post.mediaUrl,
+      editedBy: authUser.id,
+    }).run();
   }
 
   const [updated] = await db.update(schema.posts)

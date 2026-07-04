@@ -2,6 +2,7 @@ import { Sparkles, LogOut, Shield } from 'lucide-react';
 import { User as UserType, Notification } from '@hin/types';
 import { NotificationBell } from '../notifications/NotificationBell';
 import { NotificationPanel } from '../notifications/NotificationPanel';
+import { UserAvatar } from '../profile/UserAvatar';
 import { useRef } from 'react';
 
 interface AppHeaderProps {
@@ -12,6 +13,7 @@ interface AppHeaderProps {
   onToggleNotifications: () => void;
   onCloseNotifications: () => void;
   onNotificationClick: (notification: Notification) => void;
+  onOpenProfile: (userId: number) => void;
   onLogout: () => void;
 }
 
@@ -23,6 +25,7 @@ export function AppHeader({
   onToggleNotifications,
   onCloseNotifications,
   onNotificationClick,
+  onOpenProfile,
   onLogout,
 }: AppHeaderProps) {
   const bellRef = useRef<HTMLDivElement>(null);
@@ -60,18 +63,25 @@ export function AppHeader({
           </div>
 
           <div className="flex items-center gap-2 pl-2 border-l border-border-custom">
-            <div className="h-8 w-8 rounded-full bg-bg-tertiary flex items-center justify-center border border-border-custom text-text-secondary font-semibold uppercase text-sm select-none">
-              {currentUser.username[0]}
-            </div>
+            <UserAvatar
+              username={currentUser.username}
+              avatarUrl={currentUser.avatarUrl}
+              size="sm"
+              onClick={() => onOpenProfile(currentUser.id)}
+            />
             <div className="hidden sm:flex flex-col text-left">
-              <span className="text-xs font-semibold text-text-primary flex items-center gap-1">
-                @{currentUser.username}
+              <button
+                type="button"
+                onClick={() => onOpenProfile(currentUser.id)}
+                className="text-xs font-semibold text-text-primary flex items-center gap-1 hover:text-indigo-400 transition-colors cursor-pointer"
+              >
+                {currentUser.username}
                 {currentUser.role === 'admin' && (
                   <span title="Admin User">
                     <Shield className="h-3 w-3 text-amber-500 fill-amber-500/20" />
                   </span>
                 )}
-              </span>
+              </button>
               <span className="text-[10px] text-text-muted capitalize">{currentUser.role} Account</span>
             </div>
             <button
