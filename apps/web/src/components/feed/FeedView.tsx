@@ -13,9 +13,8 @@ interface FeedViewProps {
   showMessagesDropdown: boolean;
   unreadMessagesCount: number;
   messageIconPulseAt: number;
-  hasBottomNav: boolean;
   newPostContent: string;
-  newPostMedia: string;
+  token: string;
   newlyCreatedPostId: number | null;
   expandedComments: Record<number, boolean>;
   postComments: Record<number, Comment[]>;
@@ -29,8 +28,7 @@ interface FeedViewProps {
   onCloseCreatePost: () => void;
   onToggleMessages: () => void;
   onNewPostContentChange: (value: string) => void;
-  onNewPostMediaChange: (value: string) => void;
-  onCreatePost: (e: React.FormEvent) => void;
+  onCreatePost: (e: React.FormEvent, mediaUrls: string[]) => void | Promise<void>;
   onToggleLike: (postId: number) => void;
   onToggleComments: (postId: number) => void;
   onDeletePost: (postId: number) => void;
@@ -58,9 +56,8 @@ export function FeedView({
   showMessagesDropdown,
   unreadMessagesCount,
   messageIconPulseAt,
-  hasBottomNav,
   newPostContent,
-  newPostMedia,
+  token,
   newlyCreatedPostId,
   expandedComments,
   postComments,
@@ -74,7 +71,6 @@ export function FeedView({
   onCloseCreatePost,
   onToggleMessages,
   onNewPostContentChange,
-  onNewPostMediaChange,
   onCreatePost,
   onToggleLike,
   onToggleComments,
@@ -94,8 +90,6 @@ export function FeedView({
   onEditCommentContentChange,
   onReply,
 }: FeedViewProps) {
-  const bottomPad = hasBottomNav ? 'pb-24' : 'pb-20';
-
   return (
     <div className="flex-grow overflow-y-auto p-4 md:p-6 space-y-4 relative">
       <div className="hidden md:flex justify-end">
@@ -111,15 +105,14 @@ export function FeedView({
       {showNewPostForm && (
         <CreatePostForm
           content={newPostContent}
-          mediaUrl={newPostMedia}
+          token={token}
           onContentChange={onNewPostContentChange}
-          onMediaChange={onNewPostMediaChange}
           onSubmit={onCreatePost}
           onClose={onCloseCreatePost}
         />
       )}
 
-      <div className={`space-y-4 ${bottomPad} md:pb-4`}>
+      <div className="space-y-4 pb-20 md:pb-4">
         {posts.length === 0 ? (
           <div className="text-center py-12 border border-dashed border-border-custom rounded-2xl text-text-muted text-sm">
             No posts yet. Be the first to publish!
@@ -167,7 +160,6 @@ export function FeedView({
         showMessagesDropdown={showMessagesDropdown}
         unreadMessagesCount={unreadMessagesCount}
         messageIconPulseAt={messageIconPulseAt}
-        hasBottomNav={hasBottomNav}
         onOpenCreatePost={onOpenCreatePost}
         onToggleMessages={onToggleMessages}
       />

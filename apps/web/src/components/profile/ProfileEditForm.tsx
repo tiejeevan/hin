@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { User as UserType } from '@hin/types';
 import { API_URL } from '../../config';
+import { ImagePicker, PickedImage } from '../ui/ImagePicker';
+import { uploadCompressedImage } from '../../lib/compressImage';
 
 interface ProfileEditFormProps {
   user: UserType;
@@ -13,36 +15,58 @@ export function ProfileEditForm({ user, token, onSave, onCancel }: ProfileEditFo
   const [bio, setBio] = useState(user.bio || '');
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl || '');
   const [coverUrl, setCoverUrl] = useState(user.coverUrl || '');
+  const [avatarImages, setAvatarImages] = useState<PickedImage[]>(
+    user.avatarUrl
+      ? [{ previewUrl: user.avatarUrl, remoteUrl: user.avatarUrl, file: new File([], 'avatar') }]
+      : [],
+  );
+  const [coverImages, setCoverImages] = useState<PickedImage[]>(
+    user.coverUrl
+      ? [{ previewUrl: user.coverUrl, remoteUrl: user.coverUrl, file: new File([], 'cover') }]
+      : [],
+  );
   const [isSaving, setIsSaving] = useState(false);
-  const [isUploading, setIsUploading] = useState<'avatar' | 'cover' | null>(null);
+  const [uploading, setUploading] = useState<'avatar' | 'cover' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const uploadImage = async (file: File, type: 'avatar' | 'cover') => {
-    setIsUploading(type);
+  const uploadSingle = async (files: File[], kind: 'avatar' | 'cover') => {
+    const file = files[0];
+    if (!file) return;
+    setUploading(kind);
     setError(null);
+    const previewUrl = URL.createObjectURL(file);
+    const placeholder: PickedImage = { previewUrl, remoteUrl: '', file };
+    if (kind === 'avatar') setAvatarImages([placeholder]);
+    else setCoverImages([placeholder]);
+
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('type', type);
-
-      const res = await fetch(`${API_URL}/api/upload`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Upload failed');
+      const result = await uploadCompressedImage(file, kind, token, API_URL);
+      const uploaded: PickedImage = { previewUrl, remoteUrl: result.url, uploadId: result.id, file };
+      if (kind === 'avatar') {
+        setAvatarImages([uploaded]);
+        setAvatarUrl(result.url);
+      } else {
+        setCoverImages([uploaded]);
+        setCoverUrl(result.url);
       }
-
-      const { url } = await res.json();
-      if (type === 'avatar') setAvatarUrl(url);
-      else setCoverUrl(url);
     } catch (e) {
+      URL.revokeObjectURL(previewUrl);
+      if (kind === 'avatar') {
+        setAvatarImages(
+          avatarUrl
+            ? [{ previewUrl: avatarUrl, remoteUrl: avatarUrl, file: new File([], 'avatar') }]
+            : [],
+        );
+      } else {
+        setCoverImages(
+          coverUrl
+            ? [{ previewUrl: coverUrl, remoteUrl: coverUrl, file: new File([], 'cover') }]
+            : [],
+        );
+      }
       setError(e instanceof Error ? e.message : 'Upload failed');
     } finally {
-      setIsUploading(null);
+      setUploading(null);
     }
   };
 
@@ -82,38 +106,32 @@ export function ProfileEditForm({ user, token, onSave, onCancel }: ProfileEditFo
 
       <div className="space-y-2">
         <label className="text-xs text-text-muted font-medium">Cover Image</label>
-        <div className="flex items-center gap-3">
-          <input
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            disabled={isUploading === 'cover'}
-            onChange={e => {
-              const file = e.target.files?.[0];
-              if (file) uploadImage(file, 'cover');
-              e.target.value = '';
-            }}
-            className="text-xs text-text-secondary file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 file:cursor-pointer"
-          />
-          {isUploading === 'cover' && <span className="text-xs text-text-muted">Uploading...</span>}
-        </div>
+        <ImagePicker
+          images={coverImages}
+          max={1}
+          uploading={uploading === 'cover'}
+          onAddFiles={files => uploadSingle(files, 'cover')}
+          onRemove={() => {
+            setCoverImages([]);
+            setCoverUrl('');
+          }}
+          disabled={isSaving || uploading === 'avatar'}
+        />
       </div>
 
       <div className="space-y-2">
         <label className="text-xs text-text-muted font-medium">Profile Picture</label>
-        <div className="flex items-center gap-3">
-          <input
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            disabled={isUploading === 'avatar'}
-            onChange={e => {
-              const file = e.target.files?.[0];
-              if (file) uploadImage(file, 'avatar');
-              e.target.value = '';
-            }}
-            className="text-xs text-text-secondary file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 file:cursor-pointer"
-          />
-          {isUploading === 'avatar' && <span className="text-xs text-text-muted">Uploading...</span>}
-        </div>
+        <ImagePicker
+          images={avatarImages}
+          max={1}
+          uploading={uploading === 'avatar'}
+          onAddFiles={files => uploadSingle(files, 'avatar')}
+          onRemove={() => {
+            setAvatarImages([]);
+            setAvatarUrl('');
+          }}
+          disabled={isSaving || uploading === 'cover'}
+        />
       </div>
 
       <div className="space-y-2">
@@ -141,7 +159,7 @@ export function ProfileEditForm({ user, token, onSave, onCancel }: ProfileEditFo
         </button>
         <button
           onClick={handleSave}
-          disabled={isSaving || isUploading !== null}
+          disabled={isSaving || uploading !== null}
           className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold px-4 py-1.5 rounded-xl transition-all shadow-md cursor-pointer min-h-[44px]"
         >
           {isSaving ? 'Saving...' : 'Save Profile'}

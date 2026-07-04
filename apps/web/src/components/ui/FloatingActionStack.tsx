@@ -6,7 +6,6 @@ interface FloatingActionStackProps {
   showMessagesDropdown: boolean;
   unreadMessagesCount: number;
   messageIconPulseAt: number;
-  hasBottomNav: boolean;
   onOpenCreatePost: () => void;
   onToggleMessages: () => void;
 }
@@ -16,11 +15,9 @@ export function FloatingActionStack({
   showMessagesDropdown,
   unreadMessagesCount,
   messageIconPulseAt,
-  hasBottomNav,
   onOpenCreatePost,
   onToggleMessages,
 }: FloatingActionStackProps) {
-  const fabBottom = hasBottomNav ? 'bottom-20' : 'bottom-4';
   const hasUnread = unreadMessagesCount > 0;
   const [isPulsing, setIsPulsing] = useState(false);
   const lastPulseAtRef = useRef(0);
@@ -36,7 +33,7 @@ export function FloatingActionStack({
   if (showNewPostForm) return null;
 
   return (
-    <div className={`fixed ${fabBottom} right-4 z-20 flex flex-col items-center gap-3`}>
+    <div className="fixed bottom-4 right-4 z-20 flex flex-col items-center gap-3">
       <button
         onClick={onOpenCreatePost}
         className="h-14 w-14 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 flex items-center justify-center cursor-pointer transition-all active:scale-95"

@@ -202,16 +202,39 @@ export function PostCard({
           <p className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left">{post.content}</p>
         )}
 
-        {post.mediaUrl && (
-          <div className="rounded-xl overflow-hidden border border-border-custom bg-bg-primary max-h-80 flex items-center justify-center">
-            <img
-              src={post.mediaUrl}
-              alt="Post attachment"
-              className="max-w-full max-h-80 object-contain"
-              onError={e => {
-                (e.target as HTMLElement).style.display = 'none';
-              }}
-            />
+        {post.mediaUrls && post.mediaUrls.length > 0 && (
+          <div
+            className={`rounded-xl overflow-hidden border border-border-custom bg-bg-primary ${
+              post.mediaUrls.length === 1
+                ? 'max-h-80 flex items-center justify-center'
+                : `grid gap-0.5 ${post.mediaUrls.length === 2 ? 'grid-cols-2' : 'grid-cols-2'}`
+            }`}
+          >
+            {post.mediaUrls.map((url, i) => (
+              <div
+                key={url + i}
+                className={
+                  post.mediaUrls.length === 1
+                    ? 'w-full'
+                    : post.mediaUrls.length === 3 && i === 0
+                      ? 'col-span-2 aspect-[2/1]'
+                      : 'aspect-square'
+                }
+              >
+                <img
+                  src={url}
+                  alt={`Post attachment ${i + 1}`}
+                  className={
+                    post.mediaUrls.length === 1
+                      ? 'max-w-full max-h-80 object-contain mx-auto'
+                      : 'w-full h-full object-cover'
+                  }
+                  onError={e => {
+                    (e.target as HTMLElement).style.display = 'none';
+                  }}
+                />
+              </div>
+            ))}
           </div>
         )}
       </div>

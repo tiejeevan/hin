@@ -14,8 +14,8 @@ interface MessagesPanelProps {
   chatMessages: Message[];
   newMsgText: string;
   typingUsers: Record<number, boolean>;
+  onlineUserIds: Set<number>;
   chatBottomRef: React.RefObject<HTMLDivElement>;
-  hasBottomNav: boolean;
   onClose: () => void;
   onSelectThread: (thread: ChatRecipient) => void;
   onBackToList: () => void;
@@ -34,8 +34,8 @@ export function MessagesPanel({
   chatMessages,
   newMsgText,
   typingUsers,
+  onlineUserIds,
   chatBottomRef,
-  hasBottomNav,
   onClose,
   onSelectThread,
   onBackToList,
@@ -82,7 +82,7 @@ export function MessagesPanel({
   if (!isOpen) return null;
 
   const showingChat = !!chatRecipient;
-  const anchorBottom = hasBottomNav ? 'bottom-[8.75rem]' : 'bottom-[4.75rem]';
+  const anchorBottom = 'bottom-[4.75rem]';
 
   return (
     <>
@@ -107,6 +107,7 @@ export function MessagesPanel({
         <PanelHeader
           showingChat={showingChat}
           chatRecipient={chatRecipient}
+          isOnline={chatRecipient ? onlineUserIds.has(chatRecipient.id) : false}
           isExpanded={isExpanded}
           onBack={onBackToList}
           onToggleExpand={onToggleExpand}
@@ -197,6 +198,7 @@ export function MessagesPanel({
             ) : (
               sorted.map(t => {
                 const hasUnread = t.unreadCount > 0;
+                const isOnline = onlineUserIds.has(t.id);
                 return (
                   <button
                     key={t.id}
@@ -215,6 +217,13 @@ export function MessagesPanel({
                       >
                         {t.username[0]}
                       </div>
+                      {isOnline && (
+                        <span
+                          className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-bg-secondary"
+                          title="Online"
+                          aria-label="Online"
+                        />
+                      )}
                       {hasUnread && (
                         <span className="absolute -top-0.5 -right-0.5 h-[18px] min-w-[18px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center border-2 border-bg-secondary">
                           {t.unreadCount > 9 ? '9+' : t.unreadCount}
@@ -271,6 +280,7 @@ export function MessagesPanel({
 function PanelHeader({
   showingChat,
   chatRecipient,
+  isOnline,
   isExpanded,
   onBack,
   onToggleExpand,
@@ -278,6 +288,7 @@ function PanelHeader({
 }: {
   showingChat: boolean;
   chatRecipient: ChatRecipient | null;
+  isOnline: boolean;
   isExpanded: boolean;
   onBack: () => void;
   onToggleExpand: () => void;
@@ -296,14 +307,28 @@ function PanelHeader({
               <ChevronLeft className="h-5 w-5" />
             </button>
             <div className="flex items-center gap-2 min-w-0">
-              <div
-                className={`h-7 w-7 rounded-full flex items-center justify-center font-bold text-[10px] uppercase shrink-0 ${getAvatarColor(chatRecipient.username)}`}
-              >
-                {chatRecipient.username[0]}
+              <div className="relative shrink-0">
+                <div
+                  className={`h-7 w-7 rounded-full flex items-center justify-center font-bold text-[10px] uppercase ${getAvatarColor(chatRecipient.username)}`}
+                >
+                  {chatRecipient.username[0]}
+                </div>
+                {isOnline && (
+                  <span
+                    className="absolute bottom-0 right-0 h-2 w-2 rounded-full bg-emerald-500 border-2 border-bg-primary"
+                    title="Online"
+                    aria-label="Online"
+                  />
+                )}
               </div>
-              <span className="text-[11px] font-semibold text-text-primary truncate">
-                @{chatRecipient.username}
-              </span>
+              <div className="min-w-0">
+                <span className="text-[11px] font-semibold text-text-primary truncate block">
+                  @{chatRecipient.username}
+                </span>
+                {isOnline && (
+                  <span className="text-[10px] text-emerald-500">Online</span>
+                )}
+              </div>
             </div>
           </>
         ) : (

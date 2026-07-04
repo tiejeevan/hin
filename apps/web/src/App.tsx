@@ -4,8 +4,6 @@ import { API_URL, WS_URL } from './config';
 import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode } from './types/ui';
 import { AppShell } from './components/layout/AppShell';
 import { AppHeader } from './components/layout/AppHeader';
-import { Sidebar } from './components/layout/Sidebar';
-import { BottomNav } from './components/layout/BottomNav';
 import { ImpersonationBanner } from './components/layout/ImpersonationBanner';
 import { AuthForm } from './components/auth/AuthForm';
 import { FeedView } from './components/feed/FeedView';
@@ -37,8 +35,8 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
   const [newPostContent, setNewPostContent] = useState('');
-  const [newPostMedia, setNewPostMedia] = useState('');
   const [newlyCreatedPostId, setNewlyCreatedPostId] = useState<number | null>(null);
+  const [onlineUserIds, setOnlineUserIds] = useState<Set<number>>(new Set());
   const [showNewPostForm, setShowNewPostForm] = useState(false);
   const [expandedComments, setExpandedComments] = useState<Record<number, boolean>>({});
   const [postComments, setPostComments] = useState<Record<number, Comment[]>>({});
@@ -53,7 +51,6 @@ export default function App() {
   const [chatRecipient, setChatRecipient] = useState<ChatRecipient | null>(null);
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [newMsgText, setNewMsgText] = useState('');
-  const [onlineUserIds, setOnlineUserIds] = useState<number[]>([]);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   const [threads, setThreads] = useState<import('@hin/types').ChatThread[]>([]);
@@ -373,8 +370,24 @@ export default function App() {
               wsReadyRef.current = true;
               sendActiveChat();
               break;
-            case 'online_users':
-              setOnlineUserIds(message.payload.userIds);
+            case 'presence_snapshot': {
+              const ids: number[] = message.payload.onlineUserIds || [];
+              setOnlineUserIds(new Set(ids));
+              break;
+            }
+            case 'user_online':
+              setOnlineUserIds(prev => {
+                const next = new Set(prev);
+                next.add(message.payload.userId);
+                return next;
+              });
+              break;
+            case 'user_offline':
+              setOnlineUserIds(prev => {
+                const next = new Set(prev);
+                next.delete(message.payload.userId);
+                return next;
+              });
               break;
             case 'message': {
               const msg: Message = message.payload;
@@ -591,34 +604,31 @@ export default function App() {
     setUnreadNotifsCount(0);
     setActiveTab('feed');
     processedNotifIdsRef.current.clear();
+    setOnlineUserIds(new Set());
     ws.current?.close();
   };
 
-  const handleCreatePost = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreatePost = async (_e: React.FormEvent, mediaUrls: string[]) => {
     if (!currentUser || !newPostContent.trim()) return;
-    try {
-      const res = await fetch(`${API_URL}/api/posts`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ content: newPostContent, mediaUrl: newPostMedia || null }),
-      });
-      if (res.ok) {
-        const newPost = await res.json();
-        setPosts(prev => (prev.some(p => p.id === newPost.id) ? prev : [newPost, ...prev]));
-        if (profileUserId === currentUser.id) {
-          setProfilePosts(prev => (prev.some(p => p.id === newPost.id) ? prev : [newPost, ...prev]));
-          setProfileUser(prev => prev ? { ...prev, postCount: (prev.postCount || 0) + 1 } : prev);
-        }
-        setNewPostContent('');
-        setNewPostMedia('');
-        setShowNewPostForm(false);
-        setNewlyCreatedPostId(newPost.id);
-        setTimeout(() => setNewlyCreatedPostId(null), 3000);
-      }
-    } catch (e) {
-      console.error(e);
+    const res = await fetch(`${API_URL}/api/posts`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ content: newPostContent, mediaUrls }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Failed to create post');
     }
+    const newPost = await res.json();
+    setPosts(prev => (prev.some(p => p.id === newPost.id) ? prev : [newPost, ...prev]));
+    if (profileUserId === currentUser.id) {
+      setProfilePosts(prev => (prev.some(p => p.id === newPost.id) ? prev : [newPost, ...prev]));
+      setProfileUser(prev => (prev ? { ...prev, postCount: (prev.postCount || 0) + 1 } : prev));
+    }
+    setNewPostContent('');
+    setShowNewPostForm(false);
+    setNewlyCreatedPostId(newPost.id);
+    setTimeout(() => setNewlyCreatedPostId(null), 3000);
   };
 
   const handleSavePostEdit = async (postId: number) => {
@@ -924,6 +934,9 @@ export default function App() {
           showNotifications={showNotifications}
           unreadNotifsCount={unreadNotifsCount}
           notifications={notifications}
+          isAdminTab={activeTab === 'admin'}
+          onGoHome={goHome}
+          onOpenAdmin={currentUser?.role === 'admin' ? openAdmin : undefined}
           onToggleNotifications={() => {
             setShowNotifications(prev => {
               if (!prev) setShowMessagesDropdown(false);
@@ -935,29 +948,6 @@ export default function App() {
           onOpenProfile={openProfile}
           onLogout={handleLogout}
         />
-      }
-      sidebar={
-        currentUser ? (
-          <Sidebar
-            activeTab={activeTab}
-            currentUser={currentUser}
-            users={users}
-            onlineUserIds={onlineUserIds}
-            chatRecipient={chatRecipient}
-            onGoHome={goHome}
-            onOpenAdmin={openAdmin}
-            onStartChat={startChat}
-          />
-        ) : undefined
-      }
-      bottomNav={
-        currentUser ? (
-          <BottomNav
-            activeTab={activeTab}
-            currentUser={currentUser}
-            onOpenAdmin={openAdmin}
-          />
-        ) : undefined
       }
     >
       <section className="flex-grow flex flex-col min-w-0 min-h-0 bg-bg-primary/40 relative">
@@ -985,9 +975,8 @@ export default function App() {
             showMessagesDropdown={showMessagesDropdown}
             unreadMessagesCount={unreadMessagesCount}
             messageIconPulseAt={messageIconPulseAt}
-            hasBottomNav={currentUser.role === 'admin'}
             newPostContent={newPostContent}
-            newPostMedia={newPostMedia}
+            token={token!}
             newlyCreatedPostId={newlyCreatedPostId}
             expandedComments={expandedComments}
             postComments={postComments}
@@ -1004,7 +993,6 @@ export default function App() {
             onCloseCreatePost={() => setShowNewPostForm(false)}
             onToggleMessages={toggleMessagesDropdown}
             onNewPostContentChange={setNewPostContent}
-            onNewPostMediaChange={setNewPostMedia}
             onCreatePost={handleCreatePost}
             onToggleLike={handleToggleLike}
             onToggleComments={toggleComments}
@@ -1098,8 +1086,8 @@ export default function App() {
             chatMessages={chatMessages}
             newMsgText={newMsgText}
             typingUsers={typingUsers}
+            onlineUserIds={onlineUserIds}
             chatBottomRef={chatBottomRef}
-            hasBottomNav={currentUser.role === 'admin'}
             onClose={closeMessagesPanel}
             onSelectThread={openChatInPanel}
             onBackToList={backToMessagesList}

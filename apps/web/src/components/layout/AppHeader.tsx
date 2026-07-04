@@ -10,6 +10,9 @@ interface AppHeaderProps {
   showNotifications: boolean;
   unreadNotifsCount: number;
   notifications: Notification[];
+  isAdminTab?: boolean;
+  onGoHome: () => void;
+  onOpenAdmin?: () => void;
   onToggleNotifications: () => void;
   onCloseNotifications: () => void;
   onNotificationClick: (notification: Notification) => void;
@@ -22,6 +25,9 @@ export function AppHeader({
   showNotifications,
   unreadNotifsCount,
   notifications,
+  isAdminTab,
+  onGoHome,
+  onOpenAdmin,
   onToggleNotifications,
   onCloseNotifications,
   onNotificationClick,
@@ -33,12 +39,19 @@ export function AppHeader({
   return (
     <header className="sticky top-0 z-40 bg-bg-secondary/85 backdrop-blur-md border-b border-border-custom px-4 py-3 flex items-center justify-between transition-colors duration-200 shrink-0">
       <div className="flex items-center gap-2">
-        <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-          <Sparkles className="h-5 w-5 text-white" />
-        </div>
-        <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary via-text-secondary to-text-muted">
-          Hin
-        </span>
+        <button
+          type="button"
+          onClick={onGoHome}
+          className="flex items-center gap-2 cursor-pointer rounded-xl hover:opacity-90 transition-opacity"
+          aria-label="Go home"
+        >
+          <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+            <Sparkles className="h-5 w-5 text-white" />
+          </div>
+          <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary via-text-secondary to-text-muted">
+            Hin
+          </span>
+        </button>
         <span className="text-[10px] bg-bg-tertiary text-text-secondary border border-border-custom px-2 py-0.5 rounded-full font-mono font-medium">
           Secure
         </span>
@@ -46,6 +59,22 @@ export function AppHeader({
 
       {currentUser && (
         <div className="flex items-center gap-3">
+          {currentUser.role === 'admin' && onOpenAdmin && (
+            <button
+              type="button"
+              onClick={onOpenAdmin}
+              className={`min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+                isAdminTab
+                  ? 'text-amber-500 bg-amber-500/10'
+                  : 'text-amber-500/70 hover:text-amber-400 hover:bg-bg-tertiary'
+              }`}
+              title="Admin"
+              aria-label="Admin"
+            >
+              <Shield className="h-5 w-5" />
+            </button>
+          )}
+
           <div ref={bellRef} className="relative flex items-center">
             <NotificationBell
               showNotifications={showNotifications}
