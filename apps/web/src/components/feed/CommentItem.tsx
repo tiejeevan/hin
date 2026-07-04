@@ -1,12 +1,15 @@
-import { Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Heart, MoreVertical, Pencil, Trash2 } from 'lucide-react';
 import { User as UserType } from '@hin/types';
 import { CommentNode } from '../../types/ui';
+import { MentionsText } from './MentionsText';
 
 interface CommentItemProps {
   comment: CommentNode;
   depth: number;
   postId: number;
   currentUser: UserType;
+  users: UserType[];
   editingCommentId: number | null;
   editingCommentContent: string;
   onDeleteComment: (postId: number, commentId: number) => void;
@@ -15,6 +18,8 @@ interface CommentItemProps {
   onSaveEdit: (postId: number, commentId: number) => void;
   onEditContentChange: (content: string) => void;
   onReply: (postId: number, comment: CommentNode) => void;
+  onToggleCommentLike: (postId: number, commentId: number) => void;
+  onViewProfile: (userId: number) => void;
 }
 
 export function CommentItem({
@@ -22,6 +27,7 @@ export function CommentItem({
   depth = 0,
   postId,
   currentUser,
+  users,
   editingCommentId,
   editingCommentContent,
   onDeleteComment,
@@ -30,9 +36,34 @@ export function CommentItem({
   onSaveEdit,
   onEditContentChange,
   onReply,
+  onToggleCommentLike,
+  onViewProfile,
 }: CommentItemProps) {
   const isDeleted = !!comment.deletedAt || comment.username === 'deleted';
   const isEditing = editingCommentId === comment.id;
+  const canManage = !isDeleted && (currentUser.role === 'admin' || currentUser.id === comment.userId);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [menuOpen]);
 
   return (
     <div
@@ -40,79 +71,130 @@ export function CommentItem({
       style={{ marginLeft: depth > 0 ? `${Math.min(depth * 14, 56)}px` : '0px' }}
     >
       <div
-        className={`flex gap-2.5 text-xs border-b border-border-custom pb-2.5 relative group ${
+        className={`flex gap-2.5 text-xs border-b border-border-custom pb-2.5 relative ${
           depth > 0 ? 'border-l border-border-custom/40 pl-3.5' : ''
         }`}
       >
-        {!isDeleted && (currentUser.role === 'admin' || currentUser.id === comment.userId) && (
-          <button
-            onClick={() => onDeleteComment(postId, comment.id)}
-            className="absolute right-0 top-0.5 text-text-muted hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
-            title="Delete Comment"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        )}
-
         <div className="h-6 w-6 rounded-full bg-bg-tertiary flex items-center justify-center font-bold text-[10px] uppercase text-text-muted shrink-0 border border-border-custom">
           {isDeleted ? '?' : comment.username[0]}
         </div>
 
-        <div className="flex-grow min-w-0 text-left pr-6">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className={`font-semibold ${isDeleted ? 'text-text-muted font-mono' : 'text-text-primary'}`}>
-              {isDeleted ? '[deleted]' : `@${comment.username}`}
-            </span>
-            <span className="text-[9px] text-text-muted">
-              {new Date(comment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
+        <div className="flex-grow min-w-0 text-left">
+          <div className="flex items-start gap-2">
+            <div className="flex-grow min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className={`font-semibold ${isDeleted ? 'text-text-muted font-mono' : 'text-text-primary'}`}>
+                  {isDeleted ? '[deleted]' : `@${comment.username}`}
+                </span>
+                <span className="text-[9px] text-text-muted">
+                  {new Date(comment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+
+              {isEditing ? (
+                <div className="space-y-2 mt-1.5">
+                  <input
+                    type="text"
+                    className="w-full bg-bg-primary border border-border-custom rounded-xl px-3 py-1.5 text-xs text-text-primary focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
+                    value={editingCommentContent}
+                    onChange={e => onEditContentChange(e.target.value)}
+                  />
+                  <div className="flex justify-end gap-1.5">
+                    <button
+                      onClick={onCancelEdit}
+                      className="px-2.5 py-1 rounded-lg text-[10px] text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer min-h-[44px]"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => onSaveEdit(postId, comment.id)}
+                      className="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-semibold px-3 py-1 rounded-lg transition-all shadow-md cursor-pointer min-h-[44px]"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              ) : isDeleted ? (
+                <p className="text-text-muted italic mt-1 text-xs leading-relaxed break-words">
+                  {comment.content}
+                </p>
+              ) : (
+                <MentionsText
+                  content={comment.content}
+                  users={users}
+                  onViewProfile={onViewProfile}
+                  className="text-text-secondary text-xs mt-0.5 leading-relaxed break-words"
+                />
+              )}
+            </div>
+
+            {canManage && !isEditing && (
+              <div ref={menuRef} className="relative shrink-0 -mt-0.5">
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen(prev => !prev)}
+                  className="p-1 text-text-muted hover:text-text-primary hover:bg-bg-tertiary rounded-lg transition-colors cursor-pointer min-h-[32px] min-w-[32px] flex items-center justify-center"
+                  title="Comment options"
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                >
+                  <MoreVertical className="h-3.5 w-3.5" />
+                </button>
+
+                {menuOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full mt-1 w-32 rounded-xl border border-border-custom bg-bg-secondary shadow-lg overflow-hidden z-20"
+                  >
+                    <button
+                      role="menuitem"
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onStartEdit(comment.id, comment.content);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-secondary hover:bg-bg-tertiary hover:text-indigo-400 transition-colors cursor-pointer min-h-[40px]"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Edit
+                    </button>
+                    <button
+                      role="menuitem"
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onDeleteComment(postId, comment.id);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer min-h-[40px]"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          {isEditing ? (
-            <div className="space-y-2 mt-1.5">
-              <input
-                type="text"
-                className="w-full bg-bg-primary border border-border-custom rounded-xl px-3 py-1.5 text-xs text-text-primary focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
-                value={editingCommentContent}
-                onChange={e => onEditContentChange(e.target.value)}
-              />
-              <div className="flex justify-end gap-1.5">
-                <button
-                  onClick={onCancelEdit}
-                  className="px-2.5 py-1 rounded-lg text-[10px] text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer min-h-[44px]"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => onSaveEdit(postId, comment.id)}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-semibold px-3 py-1 rounded-lg transition-all shadow-md cursor-pointer min-h-[44px]"
-                >
-                  Save
-                </button>
-              </div>
-            </div>
-          ) : (
-            <p className={`${isDeleted ? 'text-text-muted italic mt-1' : 'text-text-secondary'} text-xs mt-0.5 leading-relaxed break-words`}>
-              {comment.content}
-            </p>
-          )}
-
           {!isDeleted && !isEditing && (
-            <div className="flex items-center gap-2 mt-1.5">
+            <div className="flex items-center gap-3 mt-1.5">
               <button
+                type="button"
+                onClick={() => onToggleCommentLike(postId, comment.id)}
+                className={`flex items-center gap-1 text-[10px] transition-colors cursor-pointer min-h-[32px] px-0.5 ${
+                  comment.hasLiked ? 'text-rose-500 font-semibold' : 'text-text-muted hover:text-rose-400'
+                }`}
+              >
+                <Heart className={`h-3.5 w-3.5 ${comment.hasLiked ? 'fill-rose-500' : ''}`} />
+                <span>{comment.likesCount || 0}</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => onReply(postId, comment)}
-                className="text-[10px] text-indigo-400 hover:text-indigo-300 font-semibold transition-colors cursor-pointer min-h-[44px] px-1"
+                className="text-[10px] text-text-muted hover:text-indigo-400 font-semibold transition-colors cursor-pointer min-h-[32px] px-0.5"
               >
                 Reply
               </button>
-              {(currentUser.role === 'admin' || currentUser.id === comment.userId) && (
-                <button
-                  onClick={() => onStartEdit(comment.id, comment.content)}
-                  className="text-[10px] text-text-muted hover:text-text-secondary transition-colors cursor-pointer min-h-[44px] px-1"
-                >
-                  Edit
-                </button>
-              )}
             </div>
           )}
         </div>
@@ -125,6 +207,7 @@ export function CommentItem({
           depth={depth + 1}
           postId={postId}
           currentUser={currentUser}
+          users={users}
           editingCommentId={editingCommentId}
           editingCommentContent={editingCommentContent}
           onDeleteComment={onDeleteComment}
@@ -133,6 +216,8 @@ export function CommentItem({
           onSaveEdit={onSaveEdit}
           onEditContentChange={onEditContentChange}
           onReply={onReply}
+          onToggleCommentLike={onToggleCommentLike}
+          onViewProfile={onViewProfile}
         />
       ))}
     </div>

@@ -24,9 +24,9 @@ auth.post('/register', async (c) => {
     return c.json({ error: 'Password must be at least 6 characters' }, 400);
   }
 
-  const normalizedUsername = username.trim().toLowerCase();
+  const normalizedUsername = username.trim();
 
-  // Check if exists
+  // Check if exists (case-sensitive)
   const existing = await db.select().from(schema.users).where(eq(schema.users.username, normalizedUsername)).get();
   if (existing) {
     return c.json({ error: 'Username already taken' }, 400);
@@ -67,9 +67,9 @@ auth.post('/login', async (c) => {
     return c.json({ error: 'Username and password are required' }, 400);
   }
 
-  const normalizedUsername = username.trim().toLowerCase();
+  const normalizedUsername = username.trim();
 
-  // Find user (filtering out soft deleted ones)
+  // Find user (case-sensitive; filtering out soft deleted ones)
   const user = await db.select().from(schema.users)
     .where(
       and(

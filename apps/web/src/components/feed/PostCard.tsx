@@ -4,6 +4,8 @@ import { Post, Comment, User as UserType } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { buildCommentTree } from '../../utils/comments';
 import { CommentItem } from './CommentItem';
+import { MentionsText } from './MentionsText';
+import { ImageLightbox } from './ImageLightbox';
 import { UserAvatar } from '../profile/UserAvatar';
 
 interface PostCardProps {
@@ -36,6 +38,7 @@ interface PostCardProps {
   onSaveCommentEdit: (postId: number, commentId: number) => void;
   onEditCommentContentChange: (content: string) => void;
   onReply: (postId: number, comment: CommentNode) => void;
+  onToggleCommentLike: (postId: number, commentId: number) => void;
   onViewProfile: (userId: number) => void;
 }
 
@@ -69,10 +72,12 @@ export function PostCard({
   onSaveCommentEdit,
   onEditCommentContentChange,
   onReply,
+  onToggleCommentLike,
   onViewProfile,
 }: PostCardProps) {
   const nestedComments = buildCommentTree(commentsList);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const canManagePost = currentUser.role === 'admin' || currentUser.id === post.userId;
   const author = users.find(u => u.id === post.userId);
@@ -199,7 +204,12 @@ export function PostCard({
             </div>
           </div>
         ) : (
-          <p className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left">{post.content}</p>
+          <MentionsText
+            content={post.content}
+            users={users}
+            onViewProfile={onViewProfile}
+            className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left"
+          />
         )}
 
         {post.mediaUrls && post.mediaUrls.length > 0 && (
@@ -211,15 +221,18 @@ export function PostCard({
             }`}
           >
             {post.mediaUrls.map((url, i) => (
-              <div
+              <button
+                type="button"
                 key={url + i}
-                className={
+                onClick={() => setLightboxIndex(i)}
+                className={`block p-0 border-0 bg-transparent cursor-pointer ${
                   post.mediaUrls.length === 1
                     ? 'w-full'
                     : post.mediaUrls.length === 3 && i === 0
                       ? 'col-span-2 aspect-[2/1]'
                       : 'aspect-square'
-                }
+                }`}
+                aria-label={`View image ${i + 1}`}
               >
                 <img
                   src={url}
@@ -233,9 +246,17 @@ export function PostCard({
                     (e.target as HTMLElement).style.display = 'none';
                   }}
                 />
-              </div>
+              </button>
             ))}
           </div>
+        )}
+
+        {lightboxIndex !== null && post.mediaUrls.length > 0 && (
+          <ImageLightbox
+            images={post.mediaUrls}
+            initialIndex={lightboxIndex}
+            onClose={() => setLightboxIndex(null)}
+          />
         )}
       </div>
 
@@ -305,6 +326,7 @@ export function PostCard({
                   depth={0}
                   postId={post.id}
                   currentUser={currentUser}
+                  users={users}
                   editingCommentId={editingCommentId}
                   editingCommentContent={editingCommentContent}
                   onDeleteComment={onDeleteComment}
@@ -313,6 +335,8 @@ export function PostCard({
                   onSaveEdit={onSaveCommentEdit}
                   onEditContentChange={onEditCommentContentChange}
                   onReply={onReply}
+                  onToggleCommentLike={onToggleCommentLike}
+                  onViewProfile={onViewProfile}
                 />
               ))
             )}

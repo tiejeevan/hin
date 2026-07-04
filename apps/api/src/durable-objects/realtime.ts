@@ -60,6 +60,40 @@ export class RealtimeDO implements DurableObject {
       return new Response('OK');
     }
 
+    if (url.pathname === '/broadcast-notifications-batch') {
+      if (request.method !== 'POST') {
+        return new Response('Method Not Allowed', { status: 405 });
+      }
+      const { notifications } = await request.json() as { notifications: Notification[] };
+      const byUserId = new Map<number, Notification>();
+      for (const notification of notifications) {
+        byUserId.set(notification.userId, notification);
+      }
+
+      for (const [ws, session] of this.sessions.entries()) {
+        const notification = byUserId.get(session.userId);
+        if (!notification) continue;
+        try {
+          ws.send(JSON.stringify({ type: 'notification', payload: notification }));
+        } catch (e) {}
+      }
+      return new Response('OK');
+    }
+
+    if (url.pathname === '/broadcast-system-toast') {
+      if (request.method !== 'POST') {
+        return new Response('Method Not Allowed', { status: 405 });
+      }
+      const { content } = await request.json() as { content: string };
+      const msg = JSON.stringify({ type: 'system_toast', payload: { content } });
+      for (const ws of this.sessions.keys()) {
+        try {
+          ws.send(msg);
+        } catch (e) {}
+      }
+      return new Response('OK');
+    }
+
     if (url.pathname === '/broadcast-read-status') {
       if (request.method !== 'POST') {
         return new Response('Method Not Allowed', { status: 405 });

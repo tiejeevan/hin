@@ -3,7 +3,7 @@ import { Comment, User as UserType } from '@hin/types';
 export interface Toast {
   id: string;
   content: string;
-  type: 'like' | 'comment' | 'message' | 'system';
+  type: 'like' | 'comment' | 'message' | 'mention' | 'system';
 }
 
 export interface AdminData {

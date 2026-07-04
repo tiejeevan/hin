@@ -1,22 +1,41 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, desc, and, count, sql, isNull } from 'drizzle-orm';
+import { eq, desc, and, count, sql, isNull, lt, inArray } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { Post, Comment, Notification } from '@hin/types';
+import { Post, Comment, Notification, PostsPage } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { linkPostMedia, parseMediaUrls, serializeMediaUrls, validateOwnedPostMedia } from '../lib/media';
+import { notifyMentions } from '../lib/mentions';
 
 const posts = new Hono<{ Bindings: Env }>();
 
-// Get posts
+const DEFAULT_FEED_LIMIT = 10;
+const MAX_FEED_LIMIT = 50;
+
+// Get posts (cursor-paginated; order by id desc for stable cursors)
 posts.get('/', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const authUser = await getAuthUser(c);
   const currentUserId = authUser ? authUser.id : null;
 
-  // Let's fetch posts with author details, likes count, and comments count.
   const filterUserId = c.req.query('userId');
+  const limitParam = c.req.query('limit');
+  const cursorParam = c.req.query('cursor');
+
+  let limit = DEFAULT_FEED_LIMIT;
+  if (limitParam !== undefined) {
+    const parsed = parseInt(limitParam, 10);
+    if (isNaN(parsed) || parsed < 1) return c.json({ error: 'Invalid limit' }, 400);
+    limit = Math.min(parsed, MAX_FEED_LIMIT);
+  }
+
+  let cursor: number | null = null;
+  if (cursorParam !== undefined && cursorParam !== '') {
+    cursor = parseInt(cursorParam, 10);
+    if (isNaN(cursor)) return c.json({ error: 'Invalid cursor' }, 400);
+  }
+
   const postConditions = [
     sql`${schema.posts.deletedAt} IS NULL`,
     sql`${schema.users.deletedAt} IS NULL`,
@@ -28,7 +47,11 @@ posts.get('/', async (c) => {
     postConditions.push(eq(schema.posts.userId, uid));
   }
 
-  const allPosts = await db.select({
+  if (cursor !== null) {
+    postConditions.push(lt(schema.posts.id, cursor));
+  }
+
+  const rows = await db.select({
     id: schema.posts.id,
     userId: schema.posts.userId,
     content: schema.posts.content,
@@ -39,12 +62,16 @@ posts.get('/', async (c) => {
   .from(schema.posts)
   .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
   .where(and(...postConditions))
-  .orderBy(desc(schema.posts.createdAt))
+  .orderBy(desc(schema.posts.id))
+  .limit(limit + 1)
   .all();
 
+  const hasMore = rows.length > limit;
+  const pageRows = hasMore ? rows.slice(0, limit) : rows;
+  const nextCursor = hasMore ? pageRows[pageRows.length - 1].id : null;
+
   const postsWithMetadata: Post[] = await Promise.all(
-    allPosts.map(async (post) => {
-      // Likes count
+    pageRows.map(async (post) => {
       const likesRes = await db
         .select({ value: count() })
         .from(schema.likes)
@@ -57,7 +84,6 @@ posts.get('/', async (c) => {
         .get();
       const likesCount = likesRes?.value || 0;
 
-      // Comments count
       const commentsRes = await db
         .select({ value: count() })
         .from(schema.comments)
@@ -70,7 +96,6 @@ posts.get('/', async (c) => {
         .get();
       const commentsCount = commentsRes?.value || 0;
 
-      // Checked if current user liked it
       let hasLiked = false;
       if (currentUserId) {
         const likeRecord = await db
@@ -101,7 +126,8 @@ posts.get('/', async (c) => {
     })
   );
 
-  return c.json(postsWithMetadata);
+  const page: PostsPage = { posts: postsWithMetadata, nextCursor };
+  return c.json(page);
 });
 
 // Create post
@@ -147,6 +173,14 @@ posts.post('/', async (c) => {
     commentsCount: 0,
     hasLiked: false,
   };
+
+  await notifyMentions(db, c.env, {
+    content: inserted.content,
+    senderId: authUser.id,
+    senderUsername: authUser.username,
+    entityId: inserted.id,
+    context: 'post',
+  });
 
   // Broadcast new post in real-time
   try {
@@ -290,6 +324,7 @@ posts.post('/:id/like', async (c) => {
         userId: post.userId,
         senderId: authUser.id,
         type: 'like',
+        entityType: 'post',
         entityId: postId,
         content: notificationContent,
         read: 0,
@@ -301,7 +336,9 @@ posts.post('/:id/like', async (c) => {
         senderId: authUser.id,
         senderUsername: authUser.username,
         type: 'like',
+        entityType: 'post',
         entityId: postId,
+        commentId: null,
         content: notificationContent,
         read: false,
         createdAt: notif.createdAt,
@@ -345,6 +382,8 @@ posts.post('/:id/like', async (c) => {
 posts.get('/:id/comments', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const postId = parseInt(c.req.param('id'));
+  const authUser = await getAuthUser(c);
+  const currentUserId = authUser ? authUser.id : null;
 
   const postComments = await db
     .select({
@@ -363,16 +402,46 @@ posts.get('/:id/comments', async (c) => {
     .orderBy(desc(schema.comments.createdAt))
     .all();
 
+  const commentIds = postComments.map(c => c.id);
+  const activeLikes = commentIds.length
+    ? await db
+        .select({
+          commentId: schema.commentLikes.commentId,
+          userId: schema.commentLikes.userId,
+        })
+        .from(schema.commentLikes)
+        .where(
+          and(
+            inArray(schema.commentLikes.commentId, commentIds),
+            isNull(schema.commentLikes.deletedAt)
+          )
+        )
+        .all()
+    : [];
+
+  const likesCountByComment = new Map<number, number>();
+  const likedByCurrentUser = new Set<number>();
+  for (const like of activeLikes) {
+    likesCountByComment.set(like.commentId, (likesCountByComment.get(like.commentId) || 0) + 1);
+    if (currentUserId && like.userId === currentUserId) {
+      likedByCurrentUser.add(like.commentId);
+    }
+  }
+
   // Redact soft deleted comments content
-  const redactedComments = postComments.map(comment => {
+  const redactedComments: Comment[] = postComments.map(comment => {
+    const likesCount = likesCountByComment.get(comment.id) || 0;
+    const hasLiked = likedByCurrentUser.has(comment.id);
     if (comment.deletedAt) {
       return {
         ...comment,
         content: '[Comment deleted]',
         username: 'deleted',
+        likesCount,
+        hasLiked,
       };
     }
-    return comment;
+    return { ...comment, likesCount, hasLiked };
   });
 
   return c.json(redactedComments);
@@ -411,6 +480,8 @@ posts.post('/:id/comments', async (c) => {
     content: inserted.content,
     createdAt: inserted.createdAt,
     deletedAt: inserted.deletedAt,
+    likesCount: 0,
+    hasLiked: false,
   };
 
   // Determine recipient
@@ -431,7 +502,9 @@ posts.post('/:id/comments', async (c) => {
       userId: recipientId,
       senderId: authUser.id,
       type: 'comment',
+      entityType: 'post',
       entityId: postId,
+      commentId: inserted.id,
       content: notificationContent,
       read: 0,
     }).returning();
@@ -442,7 +515,9 @@ posts.post('/:id/comments', async (c) => {
       senderId: authUser.id,
       senderUsername: authUser.username,
       type: 'comment',
+      entityType: 'post',
       entityId: postId,
+      commentId: inserted.id,
       content: notificationContent,
       read: false,
       createdAt: notif.createdAt,
@@ -458,6 +533,15 @@ posts.post('/:id/comments', async (c) => {
       }));
     } catch (e) {}
   }
+
+  await notifyMentions(db, c.env, {
+    content: inserted.content,
+    senderId: authUser.id,
+    senderUsername: authUser.username,
+    entityId: postId,
+    commentId: inserted.id,
+    context: 'comment',
+  });
 
   // Broadcast comment creation
   try {

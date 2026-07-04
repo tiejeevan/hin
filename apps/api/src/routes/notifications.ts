@@ -21,7 +21,9 @@ notifications.get('/', async (c) => {
       userId: schema.notifications.userId,
       senderId: schema.notifications.senderId,
       type: schema.notifications.type,
+      entityType: schema.notifications.entityType,
       entityId: schema.notifications.entityId,
+      commentId: schema.notifications.commentId,
       content: schema.notifications.content,
       read: schema.notifications.read,
       createdAt: schema.notifications.createdAt,
@@ -34,13 +36,23 @@ notifications.get('/', async (c) => {
   const populatedNotifs: Notification[] = await Promise.all(
     rawNotifs.map(async (notif) => {
       const sender = await db.select({ username: schema.users.username }).from(schema.users).where(eq(schema.users.id, notif.senderId)).get();
+      const entityType =
+        notif.entityType === 'post' || notif.entityType === 'message' || notif.entityType === 'system'
+          ? notif.entityType
+          : notif.type === 'message'
+            ? 'message'
+            : notif.type === 'system'
+              ? 'system'
+              : 'post';
       return {
         id: notif.id,
         userId: notif.userId,
         senderId: notif.senderId,
         senderUsername: sender?.username || 'Someone',
-        type: notif.type as any,
+        type: notif.type as Notification['type'],
+        entityType,
         entityId: notif.entityId,
+        commentId: notif.commentId ?? null,
         content: notif.content,
         read: notif.read === 1,
         createdAt: notif.createdAt,
@@ -49,6 +61,27 @@ notifications.get('/', async (c) => {
   );
 
   return c.json(populatedNotifs);
+});
+
+// Mark all notifications as read
+notifications.post('/read-all', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+
+  await db
+    .update(schema.notifications)
+    .set({ read: 1 })
+    .where(
+      and(
+        eq(schema.notifications.userId, authUser.id),
+        eq(schema.notifications.read, 0)
+      )
+    )
+    .run();
+
+  return c.json({ success: true });
 });
 
 // Mark notification as read

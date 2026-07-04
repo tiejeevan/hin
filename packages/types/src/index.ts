@@ -46,6 +46,8 @@ export interface Comment {
   parentId: number | null; // For nesting comment replies
   createdAt: string;
   deletedAt?: string | null;
+  likesCount: number;
+  hasLiked?: boolean;
 }
 
 export interface Message {
@@ -78,11 +80,32 @@ export interface Notification {
   userId: number;
   senderId: number;
   senderUsername: string;
-  type: 'like' | 'comment' | 'message';
-  entityId: number; // postId for likes/comments, messageId for messages
+  type: 'like' | 'comment' | 'message' | 'mention' | 'system';
+  /** What entityId points at. Optional for older rows written before migration. */
+  entityType?: 'post' | 'message' | 'system' | null;
+  entityId: number; // postId for likes/comments/mentions, messageId for messages, system_broadcasts.id for system
+  /** Set for comment / mention-in-comment notifications. Optional for older rows. */
+  commentId?: number | null;
   content: string;
   read: boolean;
   createdAt: string;
+}
+
+export type BroadcastDelivery = 'notification' | 'toast' | 'both';
+
+export interface SystemBroadcast {
+  id: number;
+  senderId: number;
+  senderUsername: string;
+  content: string;
+  delivery: BroadcastDelivery;
+  notificationsCreated: number;
+  createdAt: string;
+}
+
+export interface PostsPage {
+  posts: Post[];
+  nextCursor: number | null;
 }
 
 // Zod schemas for input validation
@@ -131,6 +154,7 @@ export type ServerMessage =
   | { type: 'post_created'; payload: { post: Post } }
   | { type: 'post_deleted'; payload: { postId: number } }
   | { type: 'like_update'; payload: { postId: number; likesCount: number; userId: number; liked: boolean } }
+  | { type: 'comment_like_update'; payload: { commentId: number; postId: number; likesCount: number; userId: number; liked: boolean } }
   | { type: 'comment_created'; payload: { comment: Comment } }
   | { type: 'comment_deleted'; payload: { commentId: number; postId: number } }
   | { type: 'post_updated'; payload: { post: Post } }
@@ -139,4 +163,10 @@ export type ServerMessage =
   | { type: 'messages_read'; payload: { senderId: number; receiverId: number } }
   | { type: 'presence_snapshot'; payload: { onlineUserIds: number[] } }
   | { type: 'user_online'; payload: { userId: number } }
-  | { type: 'user_offline'; payload: { userId: number } };
+  | { type: 'user_offline'; payload: { userId: number } }
+  | { type: 'system_toast'; payload: { content: string } };
+
+export const BroadcastSystemMessageSchema = z.object({
+  message: z.string().min(1, 'Message cannot be empty').max(500, 'Message is too long'),
+  delivery: z.enum(['notification', 'toast', 'both']),
+});

@@ -1,4 +1,4 @@
-import { Heart, MessageSquare, MessageCircle, Sparkles } from 'lucide-react';
+import { AtSign, Heart, Megaphone, MessageSquare, MessageCircle } from 'lucide-react';
 import { Toast } from '../../types/ui';
 
 interface ToastContainerProps {
@@ -11,7 +11,9 @@ export function ToastContainer({ toasts }: ToastContainerProps) {
       {toasts.map(t => (
         <div
           key={t.id}
-          className="bg-bg-secondary/90 text-text-primary border border-border-custom rounded-xl p-3.5 shadow-2xl flex items-center gap-3 animate-pulse-ring max-w-sm pointer-events-auto backdrop-blur-md"
+          className={`bg-bg-secondary/90 text-text-primary border rounded-xl p-3.5 shadow-2xl flex items-center gap-3 animate-pulse-ring max-w-sm pointer-events-auto backdrop-blur-md ${
+            t.type === 'system' ? 'border-violet-500/30' : 'border-border-custom'
+          }`}
         >
           <div className="shrink-0">
             {t.type === 'like' && (
@@ -24,19 +26,31 @@ export function ToastContainer({ toasts }: ToastContainerProps) {
                 <MessageSquare className="h-4.5 w-4.5" />
               </div>
             )}
+            {t.type === 'mention' && (
+              <div className="h-8 w-8 rounded-lg bg-violet-500/10 text-violet-400 flex items-center justify-center">
+                <AtSign className="h-4.5 w-4.5" />
+              </div>
+            )}
             {t.type === 'message' && (
               <div className="h-8 w-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
                 <MessageCircle className="h-4.5 w-4.5" />
               </div>
             )}
             {t.type === 'system' && (
-              <div className="h-8 w-8 rounded-lg bg-indigo-500/15 text-indigo-400 flex items-center justify-center">
-                <Sparkles className="h-4.5 w-4.5" />
+              <div className="h-8 w-8 rounded-lg bg-violet-500/15 text-violet-400 flex items-center justify-center">
+                <Megaphone className="h-4.5 w-4.5" />
               </div>
             )}
           </div>
           <div className="flex-grow text-left">
-            <p className="text-xs font-medium text-text-secondary leading-relaxed">{t.content}</p>
+            {t.type === 'system' && (
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-400 mb-0.5">
+                System
+              </p>
+            )}
+            <p className="text-xs font-medium text-text-secondary leading-relaxed whitespace-pre-wrap break-words">
+              {t.content}
+            </p>
           </div>
         </div>
       ))}

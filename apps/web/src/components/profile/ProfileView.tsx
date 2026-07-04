@@ -42,6 +42,7 @@ interface ProfileViewProps {
   onSaveCommentEdit: (postId: number, commentId: number) => void;
   onEditCommentContentChange: (content: string) => void;
   onReply: (postId: number, comment: CommentNode) => void;
+  onToggleCommentLike: (postId: number, commentId: number) => void;
   onViewProfile: (userId: number) => void;
 }
 
@@ -83,6 +84,7 @@ export function ProfileView({
   onSaveCommentEdit,
   onEditCommentContentChange,
   onReply,
+  onToggleCommentLike,
   onViewProfile,
 }: ProfileViewProps) {
   const isOwnProfile = profileUser?.id === currentUser.id;
@@ -143,6 +145,7 @@ export function ProfileView({
               onSaveCommentEdit={onSaveCommentEdit}
               onEditCommentContentChange={onEditCommentContentChange}
               onReply={onReply}
+              onToggleCommentLike={onToggleCommentLike}
               onViewProfile={onViewProfile}
             />
           )}

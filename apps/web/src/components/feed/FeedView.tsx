@@ -1,4 +1,5 @@
-import { Plus } from 'lucide-react';
+import { useEffect, useRef } from 'react';
+import { Loader2, Plus } from 'lucide-react';
 import { Post, Comment, User as UserType } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { CreatePostForm } from './CreatePostForm';
@@ -24,6 +25,9 @@ interface FeedViewProps {
   editingPostContent: string;
   editingCommentId: number | null;
   editingCommentContent: string;
+  isLoadingMore: boolean;
+  hasMorePosts: boolean;
+  onLoadMore: () => void;
   onOpenCreatePost: () => void;
   onCloseCreatePost: () => void;
   onToggleMessages: () => void;
@@ -46,6 +50,7 @@ interface FeedViewProps {
   onSaveCommentEdit: (postId: number, commentId: number) => void;
   onEditCommentContentChange: (content: string) => void;
   onReply: (postId: number, comment: CommentNode) => void;
+  onToggleCommentLike: (postId: number, commentId: number) => void;
 }
 
 export function FeedView({
@@ -67,6 +72,9 @@ export function FeedView({
   editingPostContent,
   editingCommentId,
   editingCommentContent,
+  isLoadingMore,
+  hasMorePosts,
+  onLoadMore,
   onOpenCreatePost,
   onCloseCreatePost,
   onToggleMessages,
@@ -89,9 +97,31 @@ export function FeedView({
   onSaveCommentEdit,
   onEditCommentContentChange,
   onReply,
+  onToggleCommentLike,
 }: FeedViewProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const root = scrollRef.current;
+    const sentinel = sentinelRef.current;
+    if (!root || !sentinel || !hasMorePosts) return;
+
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0]?.isIntersecting && !isLoadingMore) {
+          onLoadMore();
+        }
+      },
+      { root, rootMargin: '200px', threshold: 0 }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMorePosts, isLoadingMore, onLoadMore, posts.length]);
+
   return (
-    <div className="flex-grow overflow-y-auto p-4 md:p-6 space-y-4 relative">
+    <div ref={scrollRef} className="flex-grow overflow-y-auto p-4 md:p-6 space-y-4 relative">
       <div className="hidden md:flex justify-end">
         <button
           onClick={onOpenCreatePost}
@@ -118,40 +148,53 @@ export function FeedView({
             No posts yet. Be the first to publish!
           </div>
         ) : (
-          posts.map(post => (
-            <PostCard
-              key={post.id}
-              post={post}
-              currentUser={currentUser}
-              users={users}
-              commentsList={postComments[post.id] || []}
-              isCommentsExpanded={expandedComments[post.id] || false}
-              isNewlyCreated={newlyCreatedPostId === post.id}
-              editingPostId={editingPostId}
-              editingPostContent={editingPostContent}
-              newCommentText={newCommentText[post.id] || ''}
-              replyingTo={replyingTo[post.id] || null}
-              editingCommentId={editingCommentId}
-              editingCommentContent={editingCommentContent}
-              onToggleLike={onToggleLike}
-              onToggleComments={onToggleComments}
-              onDeletePost={onDeletePost}
-              onStartPostEdit={onStartPostEdit}
-              onCancelPostEdit={onCancelPostEdit}
-              onSavePostEdit={onSavePostEdit}
-              onEditPostContentChange={onEditPostContentChange}
-              onCreateComment={onCreateComment}
-              onCommentTextChange={onCommentTextChange}
-              onCancelReply={onCancelReply}
-              onViewProfile={onViewProfile}
-              onDeleteComment={onDeleteComment}
-              onStartCommentEdit={onStartCommentEdit}
-              onCancelCommentEdit={onCancelCommentEdit}
-              onSaveCommentEdit={onSaveCommentEdit}
-              onEditCommentContentChange={onEditCommentContentChange}
-              onReply={onReply}
-            />
-          ))
+          <>
+            {posts.map(post => (
+              <PostCard
+                key={post.id}
+                post={post}
+                currentUser={currentUser}
+                users={users}
+                commentsList={postComments[post.id] || []}
+                isCommentsExpanded={expandedComments[post.id] || false}
+                isNewlyCreated={newlyCreatedPostId === post.id}
+                editingPostId={editingPostId}
+                editingPostContent={editingPostContent}
+                newCommentText={newCommentText[post.id] || ''}
+                replyingTo={replyingTo[post.id] || null}
+                editingCommentId={editingCommentId}
+                editingCommentContent={editingCommentContent}
+                onToggleLike={onToggleLike}
+                onToggleComments={onToggleComments}
+                onDeletePost={onDeletePost}
+                onStartPostEdit={onStartPostEdit}
+                onCancelPostEdit={onCancelPostEdit}
+                onSavePostEdit={onSavePostEdit}
+                onEditPostContentChange={onEditPostContentChange}
+                onCreateComment={onCreateComment}
+                onCommentTextChange={onCommentTextChange}
+                onCancelReply={onCancelReply}
+                onViewProfile={onViewProfile}
+                onDeleteComment={onDeleteComment}
+                onStartCommentEdit={onStartCommentEdit}
+                onCancelCommentEdit={onCancelCommentEdit}
+                onSaveCommentEdit={onSaveCommentEdit}
+                onEditCommentContentChange={onEditCommentContentChange}
+                onReply={onReply}
+                onToggleCommentLike={onToggleCommentLike}
+              />
+            ))}
+            <div ref={sentinelRef} className="h-1" aria-hidden />
+            {isLoadingMore && (
+              <div className="flex items-center justify-center gap-2 py-4 text-text-muted text-sm">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading more posts…
+              </div>
+            )}
+            {!hasMorePosts && posts.length > 0 && (
+              <p className="text-center text-text-muted text-xs py-3">You're all caught up</p>
+            )}
+          </>
         )}
       </div>
 

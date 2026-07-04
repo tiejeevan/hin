@@ -16,6 +16,7 @@ interface AppHeaderProps {
   onToggleNotifications: () => void;
   onCloseNotifications: () => void;
   onNotificationClick: (notification: Notification) => void;
+  onMarkAllNotificationsRead: () => void;
   onOpenProfile: (userId: number) => void;
   onLogout: () => void;
 }
@@ -31,6 +32,7 @@ export function AppHeader({
   onToggleNotifications,
   onCloseNotifications,
   onNotificationClick,
+  onMarkAllNotificationsRead,
   onOpenProfile,
   onLogout,
 }: AppHeaderProps) {
@@ -88,6 +90,7 @@ export function AppHeader({
               anchorRef={bellRef}
               onClose={onCloseNotifications}
               onNotificationClick={onNotificationClick}
+              onMarkAllRead={onMarkAllNotificationsRead}
             />
           </div>
 

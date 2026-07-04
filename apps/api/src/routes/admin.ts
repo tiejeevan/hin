@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, count, sql } from 'drizzle-orm';
+import { eq, count, sql, isNull, desc } from 'drizzle-orm';
 import * as schema from '@hin/db';
+import { BroadcastDelivery, BroadcastSystemMessageSchema, Notification, SystemBroadcast } from '@hin/types';
 import { sign } from 'hono/jwt';
 import type { Env } from '../types';
 import { getAuthUser, JWT_SECRET } from '../lib/auth';
@@ -110,6 +111,174 @@ admin.put('/users/:id/role', async (c) => {
     .run();
 
   return c.json({ success: true });
+});
+
+// List system broadcast audit history
+admin.get('/broadcasts', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const rows = await db
+    .select({
+      id: schema.systemBroadcasts.id,
+      senderId: schema.systemBroadcasts.senderId,
+      content: schema.systemBroadcasts.content,
+      delivery: schema.systemBroadcasts.delivery,
+      notificationsCreated: schema.systemBroadcasts.notificationsCreated,
+      createdAt: schema.systemBroadcasts.createdAt,
+      senderUsername: schema.users.username,
+    })
+    .from(schema.systemBroadcasts)
+    .leftJoin(schema.users, eq(schema.systemBroadcasts.senderId, schema.users.id))
+    .orderBy(desc(schema.systemBroadcasts.createdAt))
+    .limit(50)
+    .all();
+
+  const broadcasts: SystemBroadcast[] = rows.map(row => ({
+    id: row.id,
+    senderId: row.senderId,
+    senderUsername: row.senderUsername || 'Unknown',
+    content: row.content,
+    delivery: row.delivery as BroadcastDelivery,
+    notificationsCreated: row.notificationsCreated,
+    createdAt: row.createdAt,
+  }));
+
+  return c.json(broadcasts);
+});
+
+// Broadcast a system message to all users (notification, toast, or both).
+// Always writes a system_broadcasts audit row, including toast-only sends.
+admin.post('/broadcast', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = BroadcastSystemMessageSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, 400);
+  }
+
+  const { message, delivery } = parsed.data;
+  const content = message.trim();
+  const sendNotification = delivery === 'notification' || delivery === 'both';
+  const sendToast = delivery === 'toast' || delivery === 'both';
+
+  const db = drizzle(c.env.DB, { schema });
+
+  const [broadcast] = await db
+    .insert(schema.systemBroadcasts)
+    .values({
+      senderId: authUser.id,
+      content,
+      delivery,
+      notificationsCreated: 0,
+    })
+    .returning();
+
+  let notificationsCreated = 0;
+
+  if (sendNotification) {
+    const recipients = await db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(isNull(schema.users.deletedAt))
+      .all();
+
+    const BATCH_SIZE = 50;
+    const createdNotifs: Notification[] = [];
+
+    for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
+      const batch = recipients.slice(i, i + BATCH_SIZE);
+      const inserted = await db
+        .insert(schema.notifications)
+        .values(
+          batch.map(recipient => ({
+            userId: recipient.id,
+            senderId: authUser.id,
+            type: 'system',
+            entityType: 'system',
+            entityId: broadcast.id,
+            content,
+            read: 0,
+          }))
+        )
+        .returning();
+
+      for (const notif of inserted) {
+        createdNotifs.push({
+          id: notif.id,
+          userId: notif.userId,
+          senderId: authUser.id,
+          senderUsername: authUser.username,
+          type: 'system',
+          entityType: 'system',
+          entityId: broadcast.id,
+          commentId: null,
+          content,
+          read: false,
+          createdAt: notif.createdAt,
+        });
+      }
+    }
+
+    notificationsCreated = createdNotifs.length;
+
+    await db
+      .update(schema.systemBroadcasts)
+      .set({ notificationsCreated })
+      .where(eq(schema.systemBroadcasts.id, broadcast.id))
+      .run();
+
+    try {
+      const doId = c.env.REALTIME_DO.idFromName('global');
+      const doStub = c.env.REALTIME_DO.get(doId);
+      await doStub.fetch(
+        new Request('http://realtime/broadcast-notifications-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notifications: createdNotifs }),
+        })
+      );
+    } catch (e) {}
+  }
+
+  if (sendToast) {
+    try {
+      const doId = c.env.REALTIME_DO.idFromName('global');
+      const doStub = c.env.REALTIME_DO.get(doId);
+      await doStub.fetch(
+        new Request('http://realtime/broadcast-system-toast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content }),
+        })
+      );
+    } catch (e) {}
+  }
+
+  const auditRecord: SystemBroadcast = {
+    id: broadcast.id,
+    senderId: authUser.id,
+    senderUsername: authUser.username,
+    content,
+    delivery,
+    notificationsCreated,
+    createdAt: broadcast.createdAt,
+  };
+
+  return c.json({
+    success: true,
+    delivery,
+    notificationsCreated,
+    message: content,
+    broadcast: auditRecord,
+  });
 });
 
 // Admin User Soft Delete

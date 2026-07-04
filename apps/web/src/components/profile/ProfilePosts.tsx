@@ -30,6 +30,7 @@ interface ProfilePostsProps {
   onSaveCommentEdit: (postId: number, commentId: number) => void;
   onEditCommentContentChange: (content: string) => void;
   onReply: (postId: number, comment: CommentNode) => void;
+  onToggleCommentLike: (postId: number, commentId: number) => void;
   onViewProfile: (userId: number) => void;
 }
 
@@ -61,6 +62,7 @@ export function ProfilePosts({
   onSaveCommentEdit,
   onEditCommentContentChange,
   onReply,
+  onToggleCommentLike,
   onViewProfile,
 }: ProfilePostsProps) {
   return (
@@ -104,6 +106,7 @@ export function ProfilePosts({
             onSaveCommentEdit={onSaveCommentEdit}
             onEditCommentContentChange={onEditCommentContentChange}
             onReply={onReply}
+            onToggleCommentLike={onToggleCommentLike}
             onViewProfile={onViewProfile}
           />
         ))

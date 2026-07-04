@@ -10,6 +10,7 @@ interface NotificationPanelProps {
   anchorRef: React.RefObject<HTMLDivElement | null>;
   onClose: () => void;
   onNotificationClick: (notification: Notification) => void;
+  onMarkAllRead: () => void;
 }
 
 export function NotificationPanel({
@@ -19,6 +20,7 @@ export function NotificationPanel({
   anchorRef,
   onClose,
   onNotificationClick,
+  onMarkAllRead,
 }: NotificationPanelProps) {
   useEffect(() => {
     if (!isOpen) return;
@@ -70,7 +72,7 @@ export function NotificationPanel({
         role="dialog"
         aria-label="Notifications"
       >
-        <PanelHeader unreadCount={unreadCount} onClose={onClose} />
+        <PanelHeader unreadCount={unreadCount} onClose={onClose} onMarkAllRead={onMarkAllRead} />
 
         <div className="overflow-y-auto divide-y divide-border-custom/40 flex-1 min-h-0">
           {notifications.length === 0 ? (
@@ -92,7 +94,15 @@ export function NotificationPanel({
   );
 }
 
-function PanelHeader({ unreadCount, onClose }: { unreadCount: number; onClose: () => void }) {
+function PanelHeader({
+  unreadCount,
+  onClose,
+  onMarkAllRead,
+}: {
+  unreadCount: number;
+  onClose: () => void;
+  onMarkAllRead: () => void;
+}) {
   return (
     <div className="px-3.5 py-2.5 flex items-center justify-between border-b border-border-custom/50 shrink-0 bg-bg-primary/40">
       <div className="flex items-center gap-2">
@@ -103,14 +113,27 @@ function PanelHeader({ unreadCount, onClose }: { unreadCount: number; onClose: (
           </span>
         )}
       </div>
-      <button
-        onClick={onClose}
-        className="h-7 w-7 flex items-center justify-center rounded-full text-text-muted hover:text-text-primary hover:bg-bg-tertiary cursor-pointer transition-colors"
-        aria-label="Dismiss notifications"
-        title="Dismiss"
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
+      <div className="flex items-center gap-1">
+        {unreadCount > 0 && (
+          <button
+            type="button"
+            onClick={onMarkAllRead}
+            className="px-2 h-7 text-[11px] font-medium text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 rounded-full cursor-pointer transition-colors"
+            aria-label="Mark all notifications as read"
+          >
+            Read all
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          className="h-7 w-7 flex items-center justify-center rounded-full text-text-muted hover:text-text-primary hover:bg-bg-tertiary cursor-pointer transition-colors"
+          aria-label="Dismiss notifications"
+          title="Dismiss"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
   );
 }

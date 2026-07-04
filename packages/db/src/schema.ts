@@ -84,6 +84,17 @@ export const likes = sqliteTable('likes', {
   deletedAtIdx: index('likes_deleted_at_idx').on(table.deletedAt),
 }));
 
+export const commentLikes = sqliteTable('comment_likes', {
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  commentId: integer('comment_id').notNull().references(() => comments.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text('deleted_at'), // Soft delete
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.commentId] }),
+  commentIdIdx: index('comment_likes_comment_id_idx').on(table.commentId),
+  deletedAtIdx: index('comment_likes_deleted_at_idx').on(table.deletedAt),
+}));
+
 export const messages = sqliteTable('messages', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   senderId: integer('sender_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -102,12 +113,33 @@ export const notifications = sqliteTable('notifications', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }), // recipient
   senderId: integer('sender_id').notNull().references(() => users.id, { onDelete: 'cascade' }), // actor
-  type: text('type').notNull(), // 'like', 'comment', 'message'
+  type: text('type').notNull(), // 'like', 'comment', 'message', 'mention', 'system'
+  /** What `entity_id` points at: 'post' | 'message' | 'system' (nullable for pre-migration rows) */
+  entityType: text('entity_type'),
+  /** post id, message id, or system_broadcasts.id when type/entity_type is system */
   entityId: integer('entity_id').notNull(),
+  /** Optional comment for deep-link (comment / mention-in-comment). No FK — keep leaf-table flexibility. */
+  commentId: integer('comment_id'),
   content: text('content').notNull(),
   read: integer('read').default(0).notNull(), // 0 = unread, 1 = read
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => ({
   userIdIdx: index('notifications_user_id_idx').on(table.userId),
   createdAtIdx: index('notifications_created_at_idx').on(table.createdAt),
+  userIdReadIdx: index('notifications_user_id_read_idx').on(table.userId, table.read),
+}));
+
+/** Admin system message broadcasts — always persisted for audit, regardless of delivery mode. */
+export const systemBroadcasts = sqliteTable('system_broadcasts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  senderId: integer('sender_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  /** 'notification' | 'toast' | 'both' */
+  delivery: text('delivery').notNull(),
+  /** Recipients who received an inbox notification row (0 for toast-only). */
+  notificationsCreated: integer('notifications_created').default(0).notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  senderIdIdx: index('system_broadcasts_sender_id_idx').on(table.senderId),
+  createdAtIdx: index('system_broadcasts_created_at_idx').on(table.createdAt),
 }));

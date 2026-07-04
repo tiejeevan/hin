@@ -1,5 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
-import { Comment, Message, Notification, User as UserType } from '@hin/types';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  BroadcastDelivery,
+  Comment,
+  Message,
+  Notification,
+  PostsPage,
+  SystemBroadcast,
+  User as UserType,
+} from '@hin/types';
 import { API_URL, WS_URL } from './config';
 import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode } from './types/ui';
 import { AppShell } from './components/layout/AppShell';
@@ -20,7 +28,12 @@ export default function App() {
   });
   const [users, setUsers] = useState<UserType[]>([]);
   const [posts, setPosts] = useState<import('@hin/types').Post[]>([]);
+  const [feedNextCursor, setFeedNextCursor] = useState<number | null>(null);
+  const [isLoadingMorePosts, setIsLoadingMorePosts] = useState(false);
+  const feedLoadingRef = useRef(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('feed');
+
+  const FEED_PAGE_SIZE = 10;
 
   const [adminToken, setAdminToken] = useState<string | null>(() => localStorage.getItem('hin_admin_token'));
   const [adminUser, setAdminUser] = useState<UserType | null>(() => {
@@ -67,6 +80,7 @@ export default function App() {
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [adminData, setAdminData] = useState<AdminData | null>(null);
+  const [broadcastHistory, setBroadcastHistory] = useState<SystemBroadcast[] | null>(null);
 
   const [profileUserId, setProfileUserId] = useState<number | null>(null);
   const [profileUser, setProfileUser] = useState<UserType | null>(null);
@@ -78,6 +92,9 @@ export default function App() {
   const ws = useRef<WebSocket | null>(null);
   const wsReadyRef = useRef(false);
   const processedNotifIdsRef = useRef<Set<number>>(new Set());
+  /** Sync dedupe for comment create/delete (HTTP + WS). setState updaters are async in React 18. */
+  const appliedCommentCreatesRef = useRef(new Set<number>());
+  const appliedCommentDeletesRef = useRef(new Set<number>());
   const showMessagesDropdownRef = useRef(showMessagesDropdown);
   const chatRecipientRef = useRef(chatRecipient);
 
@@ -98,7 +115,8 @@ export default function App() {
   const addToast = (content: string, type: Toast['type']) => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts(prev => [...prev, { id, content, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+    const duration = type === 'system' ? 7000 : 4000;
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
   };
 
   const goHome = () => {
@@ -172,8 +190,13 @@ export default function App() {
   const fetchProfilePosts = async (userId: number) => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/posts?userId=${userId}`, { headers: getHeaders() });
-      if (res.ok) setProfilePosts(await res.json());
+      const res = await fetch(`${API_URL}/api/posts?userId=${userId}&limit=50`, {
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        const data: PostsPage = await res.json();
+        setProfilePosts(data.posts);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -218,14 +241,43 @@ export default function App() {
     }
   };
 
-  const fetchPosts = async () => {
+  const fetchPosts = async (opts?: { cursor?: number | null; append?: boolean }) => {
+    const append = opts?.append ?? false;
+    const cursor = opts?.cursor ?? null;
+    if (append) {
+      if (feedLoadingRef.current || cursor === null) return;
+      feedLoadingRef.current = true;
+      setIsLoadingMorePosts(true);
+    }
     try {
-      const res = await fetch(`${API_URL}/api/posts`, { headers: getHeaders() });
-      if (res.ok) setPosts(await res.json());
+      const params = new URLSearchParams({ limit: String(FEED_PAGE_SIZE) });
+      if (cursor !== null) params.set('cursor', String(cursor));
+      const res = await fetch(`${API_URL}/api/posts?${params}`, { headers: getHeaders() });
+      if (res.ok) {
+        const data: PostsPage = await res.json();
+        setPosts(prev => {
+          if (!append) return data.posts;
+          const seen = new Set(prev.map(p => p.id));
+          const merged = [...prev];
+          for (const post of data.posts) {
+            if (!seen.has(post.id)) merged.push(post);
+          }
+          return merged;
+        });
+        setFeedNextCursor(data.nextCursor);
+      }
     } catch (e) {
       console.error('Error fetching posts:', e);
+    } finally {
+      feedLoadingRef.current = false;
+      setIsLoadingMorePosts(false);
     }
   };
+
+  const loadMorePosts = useCallback(() => {
+    if (feedNextCursor === null || feedLoadingRef.current) return;
+    fetchPosts({ cursor: feedNextCursor, append: true });
+  }, [feedNextCursor, token]);
 
   const fetchComments = async (postId: number) => {
     try {
@@ -284,6 +336,16 @@ export default function App() {
     }
   };
 
+  const fetchBroadcastHistory = async () => {
+    if (!currentUser || currentUser.role !== 'admin' || !token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/broadcasts`, { headers: getHeaders() });
+      if (res.ok) setBroadcastHistory(await res.json());
+    } catch (e) {
+      console.error('Error fetching broadcast history:', e);
+    }
+  };
+
   const handleUserTyping = (recipientId: number) => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN || !wsReadyRef.current) return;
     const now = Date.now();
@@ -306,18 +368,16 @@ export default function App() {
       fetchPosts();
       fetchNotifications();
       fetchThreads();
-      if (currentUser?.role === 'admin') fetchAdminStats();
     } else {
       setUsers([]);
       setPosts([]);
+      setFeedNextCursor(null);
       setNotifications([]);
       setThreads([]);
+      setAdminData(null);
+      setBroadcastHistory(null);
     }
   }, [token]);
-
-  useEffect(() => {
-    if (activeTab === 'admin') fetchAdminStats();
-  }, [activeTab]);
 
   const sendActiveChat = () => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN || !wsReadyRef.current) return;
@@ -459,6 +519,12 @@ export default function App() {
               setUnreadNotifsCount(prev => prev + 1);
               if (notif.type === 'like') addToast(notif.content, 'like');
               else if (notif.type === 'comment') addToast(notif.content, 'comment');
+              else if (notif.type === 'mention') addToast(notif.content, 'mention');
+              // System notifications stay in the inbox; toasts are sent separately when requested.
+              break;
+            }
+            case 'system_toast': {
+              addToast(message.payload.content, 'system');
               break;
             }
             case 'post_created': {
@@ -490,10 +556,35 @@ export default function App() {
                     : p
                 )
               );
+              setProfilePosts(prev =>
+                prev.map(p =>
+                  p.id === postId
+                    ? { ...p, likesCount, hasLiked: userId === currentUser!.id ? liked : p.hasLiked }
+                    : p
+                )
+              );
+              break;
+            }
+            case 'comment_like_update': {
+              const { commentId, postId, likesCount, userId, liked } = message.payload;
+              setPostComments(prev => ({
+                ...prev,
+                [postId]: (prev[postId] || []).map(c =>
+                  c.id === commentId
+                    ? {
+                        ...c,
+                        likesCount,
+                        hasLiked: userId === currentUser!.id ? liked : c.hasLiked,
+                      }
+                    : c
+                ),
+              }));
               break;
             }
             case 'comment_created': {
               const { comment } = message.payload;
+              if (appliedCommentCreatesRef.current.has(comment.id)) break;
+              appliedCommentCreatesRef.current.add(comment.id);
               setPostComments(prev => {
                 const list = prev[comment.postId] || [];
                 if (list.some(c => c.id === comment.id)) return prev;
@@ -502,10 +593,15 @@ export default function App() {
               setPosts(prev =>
                 prev.map(p => (p.id === comment.postId ? { ...p, commentsCount: p.commentsCount + 1 } : p))
               );
+              setProfilePosts(prev =>
+                prev.map(p => (p.id === comment.postId ? { ...p, commentsCount: p.commentsCount + 1 } : p))
+              );
               break;
             }
             case 'comment_deleted': {
               const { commentId, postId } = message.payload;
+              if (appliedCommentDeletesRef.current.has(commentId)) break;
+              appliedCommentDeletesRef.current.add(commentId);
               setPostComments(prev => ({
                 ...prev,
                 [postId]: (prev[postId] || []).map(c =>
@@ -517,13 +613,25 @@ export default function App() {
               setPosts(prev =>
                 prev.map(p => (p.id === postId ? { ...p, commentsCount: Math.max(0, p.commentsCount - 1) } : p))
               );
+              setProfilePosts(prev =>
+                prev.map(p => (p.id === postId ? { ...p, commentsCount: Math.max(0, p.commentsCount - 1) } : p))
+              );
               break;
             }
             case 'comment_updated': {
               const { comment } = message.payload;
               setPostComments(prev => ({
                 ...prev,
-                [comment.postId]: (prev[comment.postId] || []).map(c => (c.id === comment.id ? comment : c)),
+                [comment.postId]: (prev[comment.postId] || []).map(c =>
+                  c.id === comment.id
+                    ? {
+                        ...c,
+                        ...comment,
+                        likesCount: comment.likesCount ?? c.likesCount ?? 0,
+                        hasLiked: comment.hasLiked ?? c.hasLiked,
+                      }
+                    : c
+                ),
               }));
               break;
             }
@@ -662,7 +770,7 @@ export default function App() {
           setProfileUser(prev => prev ? { ...prev, postCount: Math.max(0, (prev.postCount || 1) - 1) } : prev);
         }
         addToast('Post deleted successfully', 'system');
-        if (currentUser.role === 'admin') fetchAdminStats();
+        if (currentUser.role === 'admin' && adminData) fetchAdminStats();
       }
     } catch (e) {
       console.error(e);
@@ -681,6 +789,27 @@ export default function App() {
         setProfilePosts(prev =>
           prev.map(p => (p.id === postId ? { ...p, hasLiked: data.liked, likesCount: data.likesCount } : p))
         );
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleToggleCommentLike = async (postId: number, commentId: number) => {
+    if (!currentUser) return;
+    try {
+      const res = await fetch(`${API_URL}/api/comments/${commentId}/like`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPostComments(prev => ({
+          ...prev,
+          [postId]: (prev[postId] || []).map(c =>
+            c.id === commentId ? { ...c, hasLiked: data.liked, likesCount: data.likesCount } : c
+          ),
+        }));
       }
     } catch (e) {
       console.error(e);
@@ -709,12 +838,23 @@ export default function App() {
       });
       if (res.ok) {
         const newComment = await res.json();
-        setPostComments(prev => ({ ...prev, [postId]: [newComment, ...(prev[postId] || [])] }));
+        // Realtime may have already applied this comment; avoid duplicates.
+        if (!appliedCommentCreatesRef.current.has(newComment.id)) {
+          appliedCommentCreatesRef.current.add(newComment.id);
+          setPostComments(prev => {
+            const list = prev[postId] || [];
+            if (list.some(c => c.id === newComment.id)) return prev;
+            return { ...prev, [postId]: [newComment, ...list] };
+          });
+          setPosts(prev =>
+            prev.map(p => (p.id === postId ? { ...p, commentsCount: p.commentsCount + 1 } : p))
+          );
+          setProfilePosts(prev =>
+            prev.map(p => (p.id === postId ? { ...p, commentsCount: p.commentsCount + 1 } : p))
+          );
+        }
         setNewCommentText(prev => ({ ...prev, [postId]: '' }));
         setReplyingTo(prev => ({ ...prev, [postId]: null }));
-        setPosts(prev =>
-          prev.map(p => (p.id === postId ? { ...p, commentsCount: p.commentsCount + 1 } : p))
-        );
       }
     } catch (e) {
       console.error(e);
@@ -748,19 +888,26 @@ export default function App() {
     try {
       const res = await fetch(`${API_URL}/api/comments/${commentId}`, { method: 'DELETE', headers: getHeaders() });
       if (res.ok) {
-        setPostComments(prev => ({
-          ...prev,
-          [postId]: (prev[postId] || []).map(c =>
-            c.id === commentId
-              ? { ...c, deletedAt: new Date().toISOString(), username: 'deleted', content: '[Comment deleted]' }
-              : c
-          ),
-        }));
-        setPosts(prev =>
-          prev.map(p => (p.id === postId ? { ...p, commentsCount: Math.max(0, p.commentsCount - 1) } : p))
-        );
+        // Realtime may have already applied this delete; avoid double-decrement.
+        if (!appliedCommentDeletesRef.current.has(commentId)) {
+          appliedCommentDeletesRef.current.add(commentId);
+          setPostComments(prev => ({
+            ...prev,
+            [postId]: (prev[postId] || []).map(c =>
+              c.id === commentId
+                ? { ...c, deletedAt: new Date().toISOString(), username: 'deleted', content: '[Comment deleted]' }
+                : c
+            ),
+          }));
+          setPosts(prev =>
+            prev.map(p => (p.id === postId ? { ...p, commentsCount: Math.max(0, p.commentsCount - 1) } : p))
+          );
+          setProfilePosts(prev =>
+            prev.map(p => (p.id === postId ? { ...p, commentsCount: Math.max(0, p.commentsCount - 1) } : p))
+          );
+        }
         addToast('Comment deleted', 'system');
-        if (currentUser.role === 'admin') fetchAdminStats();
+        if (currentUser.role === 'admin' && adminData) fetchAdminStats();
       }
     } catch (e) {
       console.error(e);
@@ -825,14 +972,57 @@ export default function App() {
     }
   };
 
+  const handleMarkAllNotifsRead = async () => {
+    if (!currentUser || unreadNotifsCount === 0) return;
+    try {
+      const res = await fetch(`${API_URL}/api/notifications/read-all`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        setNotifications(prev => prev.map(n => (n.read ? n : { ...n, read: true })));
+        setUnreadNotifsCount(0);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleNotificationClick = (n: Notification) => {
     handleMarkNotifRead(n.id);
     setShowNotifications(false);
+    if (n.type === 'system') return;
     if (n.type === 'message') {
       const sender = users.find(u => u.id === n.senderId);
       if (sender) startChat(sender);
     } else {
       goHome();
+    }
+  };
+
+  const handleSystemBroadcast = async (message: string, delivery: BroadcastDelivery) => {
+    if (!currentUser || currentUser.role !== 'admin' || !token) {
+      return { success: false, error: 'Unauthorized' };
+    }
+    try {
+      const res = await fetch(`${API_URL}/api/admin/broadcast`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ message, delivery }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Failed to send broadcast' };
+      }
+      // Refresh audit log only if it was already loaded.
+      if (broadcastHistory !== null) await fetchBroadcastHistory();
+      return {
+        success: true,
+        notificationsCreated: data.notificationsCreated as number | undefined,
+      };
+    } catch (e) {
+      console.error(e);
+      return { success: false, error: 'Failed to send broadcast' };
     }
   };
 
@@ -895,7 +1085,7 @@ export default function App() {
       });
       if (res.ok) {
         addToast('User role updated successfully', 'system');
-        fetchAdminStats();
+        if (adminData) fetchAdminStats();
       }
     } catch (e) {
       console.error(e);
@@ -909,7 +1099,7 @@ export default function App() {
       const res = await fetch(`${API_URL}/api/admin/users/${userId}`, { method: 'DELETE', headers: getHeaders() });
       if (res.ok) {
         addToast(`Account @${targetUsername} has been soft-deleted`, 'system');
-        fetchAdminStats();
+        if (adminData) fetchAdminStats();
         fetchUsers();
       }
     } catch (e) {
@@ -945,6 +1135,7 @@ export default function App() {
           }}
           onCloseNotifications={() => setShowNotifications(false)}
           onNotificationClick={handleNotificationClick}
+          onMarkAllNotificationsRead={handleMarkAllNotifsRead}
           onOpenProfile={openProfile}
           onLogout={handleLogout}
         />
@@ -986,6 +1177,9 @@ export default function App() {
             editingPostContent={editingPostContent}
             editingCommentId={editingCommentId}
             editingCommentContent={editingCommentContent}
+            isLoadingMore={isLoadingMorePosts}
+            hasMorePosts={feedNextCursor !== null}
+            onLoadMore={loadMorePosts}
             onOpenCreatePost={() => {
               setShowMessagesDropdown(false);
               setShowNewPostForm(true);
@@ -1017,6 +1211,7 @@ export default function App() {
             onSaveCommentEdit={handleSaveCommentEdit}
             onEditCommentContentChange={setEditingCommentContent}
             onReply={(postId, comment: CommentNode) => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
+            onToggleCommentLike={handleToggleCommentLike}
           />
         ) : activeTab === 'profile' && profileUserId && token ? (
           <ProfileView
@@ -1063,15 +1258,20 @@ export default function App() {
             onSaveCommentEdit={handleSaveCommentEdit}
             onEditCommentContentChange={setEditingCommentContent}
             onReply={(postId, comment: CommentNode) => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
+            onToggleCommentLike={handleToggleCommentLike}
             onViewProfile={openProfile}
           />
         ) : activeTab === 'admin' ? (
           <AdminDashboard
             adminData={adminData}
+            broadcastHistory={broadcastHistory}
             currentUser={currentUser}
             onImpersonateUser={handleImpersonateUser}
             onUpdateUserRole={handleUpdateUserRole}
             onDeleteUser={handleAdminDeleteUser}
+            onLoadAdminData={fetchAdminStats}
+            onLoadBroadcastHistory={fetchBroadcastHistory}
+            onBroadcast={handleSystemBroadcast}
           />
         ) : null}
 

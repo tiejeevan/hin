@@ -1,0 +1,62 @@
+import { ChevronDown } from 'lucide-react';
+import { ReactNode } from 'react';
+
+interface AdminCollapsibleSectionProps {
+  title: string;
+  description: string;
+  icon: ReactNode;
+  iconClassName?: string;
+  headerClassName?: string;
+  open: boolean;
+  loading?: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}
+
+export function AdminCollapsibleSection({
+  title,
+  description,
+  icon,
+  iconClassName = 'bg-bg-tertiary text-text-muted border-border-custom',
+  headerClassName = 'bg-bg-primary/20',
+  open,
+  loading = false,
+  onToggle,
+  children,
+}: AdminCollapsibleSectionProps) {
+  return (
+    <div className="bg-bg-secondary border border-border-custom rounded-2xl overflow-hidden shadow-sm">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className={`w-full p-4 text-left flex items-start gap-3 cursor-pointer transition-colors hover:bg-bg-tertiary/30 ${headerClassName} ${
+          open ? 'border-b border-border-custom' : ''
+        }`}
+      >
+        <div
+          className={`h-10 w-10 shrink-0 border flex items-center justify-center rounded-xl ${iconClassName}`}
+        >
+          {icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-bold text-text-primary">{title}</h3>
+          <p className="text-xs text-text-muted mt-0.5 leading-relaxed">{description}</p>
+        </div>
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 mt-1 text-text-muted transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {open && (
+        <div>
+          {loading ? (
+            <div className="p-6 text-center text-xs text-text-muted">Loading…</div>
+          ) : (
+            children
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
