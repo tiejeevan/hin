@@ -261,10 +261,13 @@ Account profiles.
 | `bio` | text | nullable | |
 | `avatar_url` | text | nullable | |
 | `cover_url` | text | nullable | |
+| `is_private` | integer | not null, default `0` | `0` = public, `1` = private |
 | `created_at` | text | not null, default `CURRENT_TIMESTAMP` | |
 | `deleted_at` | text | nullable | soft delete |
 
-**Indexes:** `users_deleted_at_idx` (`deleted_at`)
+**Indexes:** `users_deleted_at_idx` (`deleted_at`), `users_is_private_idx` (`is_private`)
+
+**Evolution notes:** `is_private` added in migration `0015`. Existing rows default to public (`0`).
 
 ---
 
@@ -279,12 +282,13 @@ Feed posts authored by users.
 | `type` | text | not null, default `'text'` | `'text'` \| `'poll'` — extensible post kind |
 | `content` | text | not null | |
 | `media_urls` | text | nullable | JSON array of media URLs (max 5) |
+| `visibility` | text | not null, default `'public'` | `'public'` \| `'followers'` \| `'only_me'` |
 | `created_at` | text | not null, default `CURRENT_TIMESTAMP` | |
 | `deleted_at` | text | nullable | soft delete |
 
-**Indexes:** `posts_user_id_idx`, `posts_created_at_idx`, `posts_deleted_at_idx`, `posts_type_idx`
+**Indexes:** `posts_user_id_idx`, `posts_created_at_idx`, `posts_deleted_at_idx`, `posts_type_idx`, `posts_visibility_idx`
 
-**Evolution notes:** `type` added in migration `0012`. Existing rows backfilled to `'text'`.
+**Evolution notes:** `type` added in migration `0012`. Existing rows backfilled to `'text'`. `visibility` added in migration `0016`. Existing rows default to `'public'`.
 
 ---
 
@@ -360,6 +364,40 @@ One like per user per comment (composite primary key).
 
 ---
 
+### `user_follows`
+
+Accepted follow relationships (follower → following).
+
+| Column | Type | Constraints | Notes |
+| --- | --- | --- | --- |
+| `follower_id` | integer | PK, FK → `users.id` | cascade on delete |
+| `following_id` | integer | PK, FK → `users.id` | cascade on delete |
+| `created_at` | text | not null, default `CURRENT_TIMESTAMP` | |
+| `deleted_at` | text | nullable | soft delete (unfollow) |
+
+**Primary key:** (`follower_id`, `following_id`)
+
+**Indexes:** `user_follows_following_id_idx`, `user_follows_deleted_at_idx`
+
+---
+
+### `follow_requests`
+
+Pending follow requests for private accounts.
+
+| Column | Type | Constraints | Notes |
+| --- | --- | --- | --- |
+| `requester_id` | integer | PK, FK → `users.id` | cascade on delete |
+| `target_id` | integer | PK, FK → `users.id` | cascade on delete |
+| `created_at` | text | not null, default `CURRENT_TIMESTAMP` | |
+| `deleted_at` | text | nullable | null = pending; set on approve/reject/cancel |
+
+**Primary key:** (`requester_id`, `target_id`)
+
+**Indexes:** `follow_requests_target_id_idx`, `follow_requests_deleted_at_idx`
+
+---
+
 ### `likes`
 
 One like per user per post (composite primary key).
@@ -404,8 +442,8 @@ In-app notifications for likes, comments, messages, mentions, and system broadca
 | `id` | integer | PK, autoincrement | |
 | `user_id` | integer | not null, FK → `users.id` | recipient; cascade on delete |
 | `sender_id` | integer | not null, FK → `users.id` | actor; cascade on delete |
-| `type` | text | not null | `'like'` \| `'comment'` \| `'message'` \| `'mention'` \| `'system'` |
-| `entity_type` | text | nullable | `'post'` \| `'message'` \| `'system'` — what `entity_id` points at |
+| `type` | text | not null | `'like'` \| `'comment'` \| `'message'` \| `'mention'` \| `'system'` \| `'follow'` \| `'follow_request'` \| `'follow_accepted'` |
+| `entity_type` | text | nullable | `'post'` \| `'message'` \| `'system'` \| `'user'` — what `entity_id` points at |
 | `entity_id` | integer | not null | post id, message id, or `system_broadcasts.id` (no FK) |
 | `comment_id` | integer | nullable | optional deep-link for comment / mention-in-comment (no FK) |
 | `content` | text | not null | display text |
@@ -493,6 +531,27 @@ User votes on poll options. Composite PK supports multi-select.
 **Indexes:** `poll_votes_poll_id_idx`, `poll_votes_user_poll_idx`, `poll_votes_deleted_at_idx`
 
 **Evolution notes:** poll tables added in migration `0012`.
+
+---
+
+## Permalinks and deep links
+
+Post permalinks use integer primary keys — no extra column is required.
+
+| Resource | URL pattern | API |
+| --- | --- | --- |
+| Post | `/post/{posts.id}` | `GET /api/posts/:id` |
+| Comment anchor | `/post/{postId}#comment-{comments.id}` | `GET /api/posts/:id/comments` |
+
+**Notification → URL mapping** (semantic fields on `notifications`, not stored URLs):
+
+| `type` | `entity_type` | `entity_id` | `comment_id` | Resolves to |
+| --- | --- | --- | --- | --- |
+| `like`, `comment`, `mention` | `post` | post id | optional comment id | `/post/{entity_id}` or `#comment-{comment_id}` |
+| `follow`, `follow_request`, `follow_accepted` | `user` | user id | — | profile (future `/profile/:id`) |
+| `system` | `system` | broadcast id | — | inbox only |
+
+**Future extension:** optional `posts.slug` for SEO-friendly URLs (e.g. `/post/my-title-abc123`) with numeric-id redirect; optional `posts.public_uuid` for non-enumerable share links.
 
 ---
 

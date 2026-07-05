@@ -1,4 +1,4 @@
-import { AtSign, Heart, Megaphone, MessageSquare, MessageCircle } from 'lucide-react';
+import { AtSign, Heart, Megaphone, MessageSquare, MessageCircle, UserPlus, UserCheck } from 'lucide-react';
 import { Notification } from '@hin/types';
 
 interface NotificationItemProps {
@@ -6,10 +6,55 @@ interface NotificationItemProps {
   onClick: () => void;
 }
 
+function iconForType(type: Notification['type']) {
+  switch (type) {
+    case 'like':
+      return <Heart className="h-3 w-3 text-rose-500 fill-rose-500" />;
+    case 'comment':
+      return <MessageSquare className="h-3 w-3 text-indigo-400" />;
+    case 'mention':
+      return <AtSign className="h-3 w-3 text-violet-400" />;
+    case 'message':
+      return <MessageCircle className="h-3 w-3 text-emerald-400" />;
+    case 'system':
+      return <Megaphone className="h-3 w-3 text-violet-400" />;
+    case 'follow':
+    case 'follow_request':
+      return <UserPlus className="h-3 w-3 text-sky-400" />;
+    case 'follow_accepted':
+      return <UserCheck className="h-3 w-3 text-emerald-400" />;
+    default:
+      return <MessageSquare className="h-3 w-3 text-indigo-400" />;
+  }
+}
+
+function bgForType(type: Notification['type']) {
+  switch (type) {
+    case 'like':
+      return 'bg-rose-500/10';
+    case 'comment':
+      return 'bg-indigo-500/10';
+    case 'mention':
+      return 'bg-violet-500/10';
+    case 'message':
+      return 'bg-emerald-500/10';
+    case 'system':
+      return 'bg-violet-500/15';
+    case 'follow':
+    case 'follow_request':
+      return 'bg-sky-500/10';
+    case 'follow_accepted':
+      return 'bg-emerald-500/10';
+    default:
+      return 'bg-emerald-500/10';
+  }
+}
+
 export function NotificationItem({ notification: n, onClick }: NotificationItemProps) {
   return (
     <button
       type="button"
+      data-notification-item
       onClick={onClick}
       className={`w-full px-3.5 py-2.5 flex gap-2.5 text-left cursor-pointer transition-colors ${
         n.read
@@ -19,24 +64,8 @@ export function NotificationItem({ notification: n, onClick }: NotificationItemP
             : 'bg-indigo-500/[0.06] hover:bg-indigo-500/10'
       }`}
     >
-      <div
-        className={`mt-0.5 shrink-0 h-6 w-6 rounded-full flex items-center justify-center ${
-          n.type === 'like'
-            ? 'bg-rose-500/10'
-            : n.type === 'comment'
-              ? 'bg-indigo-500/10'
-              : n.type === 'mention'
-                ? 'bg-violet-500/10'
-                : n.type === 'system'
-                  ? 'bg-violet-500/15'
-                  : 'bg-emerald-500/10'
-        }`}
-      >
-        {n.type === 'like' && <Heart className="h-3 w-3 text-rose-500 fill-rose-500" />}
-        {n.type === 'comment' && <MessageSquare className="h-3 w-3 text-indigo-400" />}
-        {n.type === 'mention' && <AtSign className="h-3 w-3 text-violet-400" />}
-        {n.type === 'message' && <MessageCircle className="h-3 w-3 text-emerald-400" />}
-        {n.type === 'system' && <Megaphone className="h-3 w-3 text-violet-400" />}
+      <div className={`mt-0.5 shrink-0 h-6 w-6 rounded-full flex items-center justify-center ${bgForType(n.type)}`}>
+        {iconForType(n.type)}
       </div>
       <div className="flex-1 min-w-0">
         <p

@@ -5,6 +5,12 @@ import * as schema from '@hin/db';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { toPublicUser, USER_PUBLIC_FIELDS } from '../lib/users';
+import {
+  canViewUserPosts,
+  getFollowStatus,
+  getFollowerCount,
+  getFollowingCount,
+} from '../lib/follows';
 
 const users = new Hono<{ Bindings: Env }>();
 
@@ -27,8 +33,18 @@ users.patch('/me', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
 
-  const body = await c.req.json<{ bio?: string | null; avatarUrl?: string | null; coverUrl?: string | null }>();
-  const updates: Partial<{ bio: string | null; avatarUrl: string | null; coverUrl: string | null }> = {};
+  const body = await c.req.json<{
+    bio?: string | null;
+    avatarUrl?: string | null;
+    coverUrl?: string | null;
+    isPrivate?: boolean;
+  }>();
+  const updates: Partial<{
+    bio: string | null;
+    avatarUrl: string | null;
+    coverUrl: string | null;
+    isPrivate: number;
+  }> = {};
 
   if (body.bio !== undefined) {
     if (body.bio !== null && body.bio.length > 500) {
@@ -38,6 +54,7 @@ users.patch('/me', async (c) => {
   }
   if (body.avatarUrl !== undefined) updates.avatarUrl = body.avatarUrl;
   if (body.coverUrl !== undefined) updates.coverUrl = body.coverUrl;
+  if (body.isPrivate !== undefined) updates.isPrivate = body.isPrivate ? 1 : 0;
 
   if (Object.keys(updates).length === 0) {
     return c.json({ error: 'No valid fields to update' }, 400);
@@ -73,17 +90,34 @@ users.get('/:id', async (c) => {
 
   if (!user) return c.json({ error: 'User not found' }, 404);
 
+  const [followerCount, followingCount, followStatus, canView] = await Promise.all([
+    getFollowerCount(db, userId),
+    getFollowingCount(db, userId),
+    getFollowStatus(db, authUser.id, userId),
+    canViewUserPosts(db, authUser.id, { id: user.id, isPrivate: user.isPrivate }),
+  ]);
+
+  let postCount: number | null = null;
+  const postCountConditions = [
+    eq(schema.posts.userId, userId),
+    sql`${schema.posts.deletedAt} IS NULL`,
+  ];
+  if (!canView) {
+    postCountConditions.push(eq(schema.posts.visibility, 'public'));
+  }
   const postCountRes = await db.select({ value: count() })
     .from(schema.posts)
-    .where(
-      and(
-        eq(schema.posts.userId, userId),
-        sql`${schema.posts.deletedAt} IS NULL`
-      )
-    )
+    .where(and(...postCountConditions))
     .get();
+  postCount = postCountRes?.value || 0;
 
-  return c.json(toPublicUser(user, postCountRes?.value || 0));
+  return c.json(toPublicUser(user, {
+    postCount,
+    followerCount,
+    followingCount,
+    followStatus,
+    canViewPosts: canView,
+  }));
 });
 
 export default users;

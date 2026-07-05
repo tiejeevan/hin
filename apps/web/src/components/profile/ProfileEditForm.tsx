@@ -13,6 +13,7 @@ interface ProfileEditFormProps {
 
 export function ProfileEditForm({ user, token, onSave, onCancel }: ProfileEditFormProps) {
   const [bio, setBio] = useState(user.bio || '');
+  const [isPrivate, setIsPrivate] = useState(!!user.isPrivate);
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl || '');
   const [coverUrl, setCoverUrl] = useState(user.coverUrl || '');
   const [avatarImages, setAvatarImages] = useState<PickedImage[]>(
@@ -87,6 +88,7 @@ export function ProfileEditForm({ user, token, onSave, onCancel }: ProfileEditFo
           bio: bio.trim() || null,
           avatarUrl: avatarUrl || null,
           coverUrl: coverUrl || null,
+          isPrivate,
         }),
       });
 
@@ -148,6 +150,29 @@ export function ProfileEditForm({ user, token, onSave, onCancel }: ProfileEditFo
           className="w-full bg-bg-primary border border-border-custom rounded-xl p-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors resize-none"
         />
         <p className="text-[10px] text-text-muted text-right">{bio.length}/500</p>
+      </div>
+
+      <div className="flex items-start justify-between gap-3 p-3 rounded-xl border border-border-custom bg-bg-primary/50">
+        <div>
+          <p className="text-sm font-medium text-text-primary">Private account</p>
+          <p className="text-xs text-text-muted mt-0.5">Only approved followers can see your posts.</p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-label="Private account"
+          aria-checked={isPrivate}
+          onClick={() => setIsPrivate(v => !v)}
+          className={`relative shrink-0 w-11 h-6 rounded-full transition-colors cursor-pointer ${
+            isPrivate ? 'bg-indigo-600' : 'bg-bg-tertiary border border-border-custom'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+              isPrivate ? 'translate-x-5' : 'translate-x-0'
+            }`}
+          />
+        </button>
       </div>
 
       {error && <p className="text-xs text-rose-400">{error}</p>}

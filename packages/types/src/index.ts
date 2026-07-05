@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export type FollowStatus = 'none' | 'following' | 'requested' | 'follows_you';
+
 export interface User {
   id: number;
   username: string;
@@ -9,10 +11,35 @@ export interface User {
   coverUrl?: string | null;
   createdAt: string;
   deletedAt?: string | null;
-  postCount?: number;
+  postCount?: number | null;
+  isPrivate?: boolean;
+  followerCount?: number;
+  followingCount?: number;
+  followStatus?: FollowStatus;
+  canViewPosts?: boolean;
+}
+
+export interface FollowRequest {
+  requesterId: number;
+  requesterUsername: string;
+  requesterAvatarUrl?: string | null;
+  createdAt: string;
+}
+
+export interface FollowListUser {
+  id: number;
+  username: string;
+  avatarUrl?: string | null;
+  followStatus?: FollowStatus;
+}
+
+export interface FollowListPage {
+  users: FollowListUser[];
+  nextCursor: number | null;
 }
 
 export type PostType = 'text' | 'poll';
+export type PostVisibility = 'public' | 'followers' | 'only_me';
 export type PollResultsVisibility = 'always' | 'after_vote' | 'after_close';
 export type PollStatus = 'open' | 'closed';
 
@@ -54,6 +81,7 @@ export interface Post {
   commentsCount: number;
   hasLiked?: boolean;
   deletedAt?: string | null;
+  visibility?: PostVisibility;
   poll?: Poll;
 }
 
@@ -112,9 +140,9 @@ export interface Notification {
   userId: number;
   senderId: number;
   senderUsername: string;
-  type: 'like' | 'comment' | 'message' | 'mention' | 'system';
+  type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted';
   /** What entityId points at. Optional for older rows written before migration. */
-  entityType?: 'post' | 'message' | 'system' | null;
+  entityType?: 'post' | 'message' | 'system' | 'user' | null;
   entityId: number; // postId for likes/comments/mentions, messageId for messages, system_broadcasts.id for system
   /** Set for comment / mention-in-comment notifications. Optional for older rows. */
   commentId?: number | null;
@@ -140,6 +168,20 @@ export interface PostsPage {
   nextCursor: number | null;
 }
 
+/** Resolve post deep-link target from a notification (handles legacy rows missing entityType). */
+export function notificationPostTarget(
+  n: Notification,
+): { postId: number; commentId?: number } | null {
+  if (n.type === 'like' || n.type === 'comment' || n.type === 'mention') {
+    if (n.entityType && n.entityType !== 'post') return null;
+    return {
+      postId: n.entityId,
+      commentId: n.commentId ?? undefined,
+    };
+  }
+  return null;
+}
+
 // Zod schemas for input validation
 export const PollOptionInputSchema = z.object({
   label: z.string().min(1, 'Option cannot be empty').max(200, 'Option is too long'),
@@ -149,6 +191,7 @@ export const CreateTextPostSchema = z.object({
   type: z.literal('text').optional(),
   content: z.string().min(1, 'Post content cannot be empty').max(1000, 'Post is too long'),
   mediaUrls: z.array(z.string().url()).max(5, 'Maximum 5 images allowed').optional(),
+  visibility: z.enum(['public', 'followers', 'only_me']).optional().default('public'),
 });
 
 export const CreatePollPostSchema = z.object({
@@ -163,6 +206,7 @@ export const CreatePollPostSchema = z.object({
   isAnonymous: z.boolean().optional().default(false),
   resultsVisibility: z.enum(['always', 'after_vote', 'after_close']).optional().default('always'),
   mediaUrls: z.array(z.string().url()).max(5, 'Maximum 5 images allowed').optional(),
+  visibility: z.enum(['public', 'followers', 'only_me']).optional().default('public'),
 }).superRefine((data, ctx) => {
   const maxSel = data.maxSelections ?? 1;
   if (maxSel > data.options.length) {
@@ -210,6 +254,7 @@ export const UpdateProfileSchema = z.object({
   bio: z.string().max(500, 'Bio is too long').nullable().optional(),
   avatarUrl: z.string().url().nullable().optional(),
   coverUrl: z.string().url().nullable().optional(),
+  isPrivate: z.boolean().optional(),
 });
 
 // WebSocket Message Types

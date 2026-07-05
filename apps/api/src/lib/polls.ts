@@ -5,6 +5,10 @@ import type { Poll, PollOption, PollResultsVisibility, PollStatus } from '@hin/t
 
 type Db = DrizzleD1Database<typeof schema>;
 
+type PollErrorStatus = 400 | 403 | 404;
+
+type PollResult = { poll: Poll; error?: string; status?: PollErrorStatus };
+
 export interface PollSettings {
   question: string;
   endsAt?: string | null;
@@ -254,7 +258,7 @@ export async function castVote(
   postId: number,
   userId: number,
   optionIds: number[],
-): Promise<{ poll: Poll; error?: string; status?: number }> {
+): Promise<PollResult> {
   const pollRow = await db.select()
     .from(schema.polls)
     .where(eq(schema.polls.postId, postId))
@@ -392,7 +396,7 @@ export async function retractVote(
   db: Db,
   postId: number,
   userId: number,
-): Promise<{ poll: Poll; error?: string; status?: number }> {
+): Promise<PollResult> {
   const pollRow = await db.select()
     .from(schema.polls)
     .where(eq(schema.polls.postId, postId))
@@ -459,7 +463,7 @@ export async function retractVote(
 export async function closePoll(
   db: Db,
   postId: number,
-): Promise<{ poll: Poll; error?: string; status?: number }> {
+): Promise<PollResult> {
   const pollRow = await db.select()
     .from(schema.polls)
     .where(eq(schema.polls.postId, postId))

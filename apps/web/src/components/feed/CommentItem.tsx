@@ -8,8 +8,9 @@ interface CommentItemProps {
   comment: CommentNode;
   depth: number;
   postId: number;
-  currentUser: UserType;
+  currentUser: UserType | null;
   users: UserType[];
+  readOnly?: boolean;
   editingCommentId: number | null;
   editingCommentContent: string;
   onDeleteComment: (postId: number, commentId: number) => void;
@@ -20,6 +21,7 @@ interface CommentItemProps {
   onReply: (postId: number, comment: CommentNode) => void;
   onToggleCommentLike: (postId: number, commentId: number) => void;
   onViewProfile: (userId: number) => void;
+  onSignInRequired?: () => void;
 }
 
 export function CommentItem({
@@ -28,6 +30,7 @@ export function CommentItem({
   postId,
   currentUser,
   users,
+  readOnly = false,
   editingCommentId,
   editingCommentContent,
   onDeleteComment,
@@ -38,10 +41,11 @@ export function CommentItem({
   onReply,
   onToggleCommentLike,
   onViewProfile,
+  onSignInRequired,
 }: CommentItemProps) {
   const isDeleted = !!comment.deletedAt || comment.username === 'deleted';
   const isEditing = editingCommentId === comment.id;
-  const canManage = !isDeleted && (currentUser.role === 'admin' || currentUser.id === comment.userId);
+  const canManage = !readOnly && !isDeleted && currentUser && (currentUser.role === 'admin' || currentUser.id === comment.userId);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -67,7 +71,8 @@ export function CommentItem({
 
   return (
     <div
-      className="space-y-2 text-left"
+      id={`comment-${comment.id}`}
+      className="space-y-2 text-left scroll-mt-24"
       style={{ marginLeft: depth > 0 ? `${Math.min(depth * 14, 56)}px` : '0px' }}
     >
       <div
@@ -176,7 +181,7 @@ export function CommentItem({
             )}
           </div>
 
-          {!isDeleted && !isEditing && (
+          {!isDeleted && !isEditing && !readOnly && (
             <div className="flex items-center gap-3 mt-1.5">
               <button
                 type="button"
@@ -197,6 +202,12 @@ export function CommentItem({
               </button>
             </div>
           )}
+          {!isDeleted && !isEditing && readOnly && (
+            <div className="flex items-center gap-1 mt-1.5 text-[10px] text-text-muted">
+              <Heart className="h-3.5 w-3.5" />
+              <span>{comment.likesCount || 0}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -208,6 +219,7 @@ export function CommentItem({
           postId={postId}
           currentUser={currentUser}
           users={users}
+          readOnly={readOnly}
           editingCommentId={editingCommentId}
           editingCommentContent={editingCommentContent}
           onDeleteComment={onDeleteComment}
@@ -218,6 +230,7 @@ export function CommentItem({
           onReply={onReply}
           onToggleCommentLike={onToggleCommentLike}
           onViewProfile={onViewProfile}
+          onSignInRequired={onSignInRequired}
         />
       ))}
     </div>

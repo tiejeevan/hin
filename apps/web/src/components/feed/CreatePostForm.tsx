@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { BarChart3, Loader2, MoreVertical, Send, X } from 'lucide-react';
+import { BarChart3, Globe, Loader2, Lock, MoreVertical, Send, Users, X } from 'lucide-react';
+import type { PostVisibility } from '@hin/types';
 import { ImagePicker, PickedImage } from '../ui/ImagePicker';
 import { uploadCompressedImage } from '../../lib/compressImage';
 import { API_URL } from '../../config';
@@ -11,9 +12,15 @@ import {
   type PollDraft,
 } from './PollCreatorFields';
 
+const VISIBILITY_OPTIONS: { value: PostVisibility; label: string; Icon: typeof Globe }[] = [
+  { value: 'public', label: 'Public', Icon: Globe },
+  { value: 'followers', label: 'Followers', Icon: Users },
+  { value: 'only_me', label: 'Only me', Icon: Lock },
+];
+
 export type CreatePostSubmitPayload =
-  | { kind: 'text'; mediaUrls: string[] }
-  | { kind: 'poll'; mediaUrls: string[]; poll: ReturnType<typeof pollDraftToApiFields> };
+  | { kind: 'text'; mediaUrls: string[]; visibility: PostVisibility }
+  | { kind: 'poll'; mediaUrls: string[]; poll: ReturnType<typeof pollDraftToApiFields>; visibility: PostVisibility };
 
 interface CreatePostFormProps {
   content: string;
@@ -34,6 +41,7 @@ export function CreatePostForm({
   const [images, setImages] = useState<PickedImage[]>([]);
   const [pollDraft, setPollDraft] = useState<PollDraft>(defaultPollDraft);
   const [showPollSettings, setShowPollSettings] = useState(false);
+  const [visibility, setVisibility] = useState<PostVisibility>('public');
   const [menuOpen, setMenuOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -126,21 +134,25 @@ export function CreatePostForm({
     const mediaUrls = images.map(img => img.remoteUrl);
     try {
       if (hasPoll) {
-        await onSubmit(e, { kind: 'poll', mediaUrls, poll: pollDraftToApiFields(pollDraft) });
+        await onSubmit(e, { kind: 'poll', mediaUrls, poll: pollDraftToApiFields(pollDraft), visibility });
       } else {
-        await onSubmit(e, { kind: 'text', mediaUrls });
+        await onSubmit(e, { kind: 'text', mediaUrls, visibility });
       }
       images.forEach(img => URL.revokeObjectURL(img.previewUrl));
       setImages([]);
       setPollDraft(defaultPollDraft());
       setHasPoll(false);
       setShowPollSettings(false);
+      setVisibility('public');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to publish');
     } finally {
       setSubmitting(false);
     }
   };
+
+  const currentVisibility = VISIBILITY_OPTIONS.find(o => o.value === visibility) ?? VISIBILITY_OPTIONS[0];
+  const VisibilityIcon = currentVisibility.Icon;
 
   return (
     <div className="bg-bg-secondary border border-border-custom rounded-2xl p-4 space-y-3">
@@ -178,7 +190,13 @@ export function CreatePostForm({
           disabled={submitting}
           actions={
             <div className="flex items-center gap-0.5">
-              <div ref={menuRef} className="relative">
+              <div ref={menuRef} className="relative flex items-center gap-0.5">
+                <span
+                  className="text-text-muted flex items-center justify-center p-1"
+                  title={`Visibility: ${currentVisibility.label}`}
+                >
+                  <VisibilityIcon className="h-3.5 w-3.5" />
+                </span>
                 <button
                   type="button"
                   onClick={() => setMenuOpen(prev => !prev)}
@@ -193,8 +211,32 @@ export function CreatePostForm({
                 {menuOpen && (
                   <div
                     role="menu"
-                    className="absolute right-0 bottom-full mb-1 w-40 rounded-xl border border-border-custom bg-bg-secondary shadow-lg overflow-hidden z-10"
+                    className="absolute right-0 bottom-full mb-1 w-44 rounded-xl border border-border-custom bg-bg-secondary shadow-lg overflow-hidden z-10"
                   >
+                    <div className="px-3 py-2 text-[10px] font-semibold text-text-muted uppercase tracking-wide border-b border-border-custom/60">
+                      Visibility
+                    </div>
+                    {VISIBILITY_OPTIONS.map(({ value, label, Icon }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={visibility === value}
+                        onClick={() => {
+                          setVisibility(value);
+                          setMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs transition-colors cursor-pointer min-h-[44px] ${
+                          visibility === value
+                            ? 'text-indigo-400 bg-indigo-500/10'
+                            : 'text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
+                        }`}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        {label}
+                      </button>
+                    ))}
+                    <div className="border-t border-border-custom/60" />
                     <button
                       type="button"
                       role="menuitem"

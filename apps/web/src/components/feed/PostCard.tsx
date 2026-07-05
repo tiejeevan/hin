@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { Heart, MessageSquare, Shield, Trash2, Send, X, MoreVertical, Pencil } from 'lucide-react';
-import { Post, Comment, User as UserType } from '@hin/types';
+import { Heart, MessageSquare, Shield, Trash2, Send, X, MoreVertical, Pencil, Globe, Users, Lock, Link2 } from 'lucide-react';
+import { Post, Comment, User as UserType, PostVisibility } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { buildCommentTree } from '../../utils/comments';
 import { CommentItem } from './CommentItem';
@@ -12,7 +12,7 @@ import { UserAvatar } from '../profile/UserAvatar';
 
 interface PostCardProps {
   post: Post;
-  currentUser: UserType;
+  currentUser: UserType | null;
   users: UserType[];
   commentsList: Comment[];
   isCommentsExpanded: boolean;
@@ -24,6 +24,10 @@ interface PostCardProps {
   editingCommentId: number | null;
   editingCommentContent: string;
   hideAuthorHeader?: boolean;
+  readOnly?: boolean;
+  highlightCommentId?: number | null;
+  onSignInRequired?: () => void;
+  onCopyPermalink?: () => void;
   onToggleLike: (postId: number) => void;
   onToggleComments: (postId: number) => void;
   onDeletePost: (postId: number) => void;
@@ -47,6 +51,12 @@ interface PostCardProps {
   onClosePoll: (postId: number) => Promise<void>;
 }
 
+const VISIBILITY_META: Record<PostVisibility, { Icon: typeof Globe; title: string }> = {
+  public: { Icon: Globe, title: 'Public' },
+  followers: { Icon: Users, title: 'Followers only' },
+  only_me: { Icon: Lock, title: 'Only me' },
+};
+
 export function PostCard({
   post,
   currentUser,
@@ -61,6 +71,10 @@ export function PostCard({
   editingCommentId,
   editingCommentContent,
   hideAuthorHeader = false,
+  readOnly = false,
+  highlightCommentId = null,
+  onSignInRequired,
+  onCopyPermalink,
   onToggleLike,
   onToggleComments,
   onDeletePost,
@@ -87,8 +101,29 @@ export function PostCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const canManagePost = currentUser.role === 'admin' || currentUser.id === post.userId;
+  const canManagePost = !readOnly && currentUser && (currentUser.role === 'admin' || currentUser.id === post.userId);
   const author = users.find(u => u.id === post.userId);
+  const visibility = (post.visibility ?? 'public') as PostVisibility;
+  const { Icon: VisibilityIcon, title: visibilityTitle } = VISIBILITY_META[visibility];
+
+  const requireAuth = (action: () => void) => {
+    if (readOnly || !currentUser) {
+      onSignInRequired?.();
+      return;
+    }
+    action();
+  };
+
+  useEffect(() => {
+    if (!highlightCommentId || !isCommentsExpanded || commentsList.length === 0) return;
+    const t = setTimeout(() => {
+      const el = document.getElementById(`comment-${highlightCommentId}`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el?.classList.add('ring-2', 'ring-indigo-500/50', 'rounded-xl');
+      setTimeout(() => el?.classList.remove('ring-2', 'ring-indigo-500/50', 'rounded-xl'), 2000);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [highlightCommentId, isCommentsExpanded, commentsList.length]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -178,9 +213,30 @@ export function PostCard({
                 {post.username}
                 {author?.role === 'admin' && <Shield className="h-3 w-3 text-amber-500" />}
               </button>
-              <span className="text-[9px] text-text-muted block">
-                {new Date(post.createdAt).toLocaleDateString()}{' '}
-                {new Date(post.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              <span className="text-[9px] text-text-muted flex items-center gap-1">
+                <span title={visibilityTitle} aria-label={visibilityTitle}>
+                  <VisibilityIcon className="h-3 w-3" />
+                </span>
+                <button
+                  type="button"
+                  onClick={onCopyPermalink}
+                  className="hover:text-indigo-400 transition-colors cursor-pointer"
+                  title="Copy link"
+                >
+                  {new Date(post.createdAt).toLocaleDateString()}{' '}
+                  {new Date(post.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </button>
+                {onCopyPermalink && (
+                  <button
+                    type="button"
+                    onClick={onCopyPermalink}
+                    className="p-0.5 hover:text-indigo-400 transition-colors cursor-pointer"
+                    title="Copy link to post"
+                    aria-label="Copy link to post"
+                  >
+                    <Link2 className="h-3 w-3" />
+                  </button>
+                )}
               </span>
             </div>
           </div>
@@ -225,10 +281,10 @@ export function PostCard({
               <PostPollBody
                 post={post}
                 poll={post.poll}
-                isAuthor={currentUser.id === post.userId}
-                onVote={onVotePoll}
-                onRetractVote={onRetractPollVote}
-                onClosePoll={onClosePoll}
+                isAuthor={!!currentUser && currentUser.id === post.userId}
+                onVote={readOnly ? async () => { onSignInRequired?.(); } : onVotePoll}
+                onRetractVote={readOnly ? async () => { onSignInRequired?.(); } : onRetractPollVote}
+                onClosePoll={readOnly ? async () => {} : onClosePoll}
               />
             )}
           </>
@@ -252,7 +308,7 @@ export function PostCard({
 
       <div className="flex items-center gap-6">
         <button
-          onClick={() => onToggleLike(post.id)}
+          onClick={() => requireAuth(() => onToggleLike(post.id))}
           className={`flex items-center gap-1.5 text-xs transition-colors py-1 cursor-pointer min-h-[44px] ${
             post.hasLiked ? 'text-rose-500 font-semibold' : 'text-text-muted hover:text-rose-400'
           }`}
@@ -274,7 +330,7 @@ export function PostCard({
 
       {isCommentsExpanded && (
         <div className="border-t border-border-custom pt-4 mt-3 space-y-4 bg-bg-primary/20 p-3 rounded-xl border border-border-custom/60">
-          {replyingTo && (
+          {replyingTo && !readOnly && (
             <div className="flex items-center justify-between bg-indigo-950/20 border border-indigo-900/30 rounded-xl px-3 py-1.5 text-[11px] text-indigo-300">
               <span>
                 Replying to <strong>{replyingTo.username}</strong>
@@ -288,6 +344,7 @@ export function PostCard({
             </div>
           )}
 
+          {!readOnly && (
           <form onSubmit={e => onCreateComment(post.id, e)} className="flex items-center gap-2">
             <input
               type="text"
@@ -304,6 +361,16 @@ export function PostCard({
               <Send className="h-3.5 w-3.5" />
             </button>
           </form>
+          )}
+
+          {readOnly && (
+            <p className="text-[11px] text-text-muted text-center">
+              <button type="button" onClick={onSignInRequired} className="text-indigo-400 hover:underline cursor-pointer">
+                Sign in
+              </button>{' '}
+              to comment
+            </p>
+          )}
 
           <div className="space-y-3.5 max-h-80 overflow-y-auto pr-1">
             {nestedComments.length === 0 ? (
@@ -317,6 +384,7 @@ export function PostCard({
                   postId={post.id}
                   currentUser={currentUser}
                   users={users}
+                  readOnly={readOnly}
                   editingCommentId={editingCommentId}
                   editingCommentContent={editingCommentContent}
                   onDeleteComment={onDeleteComment}
@@ -327,6 +395,7 @@ export function PostCard({
                   onReply={onReply}
                   onToggleCommentLike={onToggleCommentLike}
                   onViewProfile={onViewProfile}
+                  onSignInRequired={onSignInRequired}
                 />
               ))
             )}

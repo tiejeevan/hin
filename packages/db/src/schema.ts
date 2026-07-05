@@ -9,10 +9,13 @@ export const users = sqliteTable('users', {
   bio: text('bio'),
   avatarUrl: text('avatar_url'),
   coverUrl: text('cover_url'),
+  /** 0 = public, 1 = private (follow approval required) */
+  isPrivate: integer('is_private').default(0).notNull(),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
   deletedAt: text('deleted_at'), // Soft delete for users
 }, (table) => ({
   deletedAtIdx: index('users_deleted_at_idx').on(table.deletedAt),
+  isPrivateIdx: index('users_is_private_idx').on(table.isPrivate),
 }));
 
 export const posts = sqliteTable('posts', {
@@ -23,6 +26,8 @@ export const posts = sqliteTable('posts', {
   content: text('content').notNull(),
   /** JSON array of media URLs (max 5) */
   mediaUrls: text('media_urls'),
+  /** 'public' | 'followers' | 'only_me' */
+  visibility: text('visibility').default('public').notNull(),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
   deletedAt: text('deleted_at'), // Soft delete
 }, (table) => ({
@@ -30,6 +35,7 @@ export const posts = sqliteTable('posts', {
   createdAtIdx: index('posts_created_at_idx').on(table.createdAt),
   deletedAtIdx: index('posts_deleted_at_idx').on(table.deletedAt),
   typeIdx: index('posts_type_idx').on(table.type),
+  visibilityIdx: index('posts_visibility_idx').on(table.visibility),
 }));
 
 export const polls = sqliteTable('polls', {
@@ -120,6 +126,28 @@ export const comments = sqliteTable('comments', {
   parentIdIdx: index('comments_parent_id_idx').on(table.parentId),
   userIdIdx: index('comments_user_id_idx').on(table.userId),
   deletedAtIdx: index('comments_deleted_at_idx').on(table.deletedAt),
+}));
+
+export const userFollows = sqliteTable('user_follows', {
+  followerId: integer('follower_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  followingId: integer('following_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text('deleted_at'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.followerId, table.followingId] }),
+  followingIdIdx: index('user_follows_following_id_idx').on(table.followingId),
+  deletedAtIdx: index('user_follows_deleted_at_idx').on(table.deletedAt),
+}));
+
+export const followRequests = sqliteTable('follow_requests', {
+  requesterId: integer('requester_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  targetId: integer('target_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text('deleted_at'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.requesterId, table.targetId] }),
+  targetIdIdx: index('follow_requests_target_id_idx').on(table.targetId),
+  deletedAtIdx: index('follow_requests_deleted_at_idx').on(table.deletedAt),
 }));
 
 export const likes = sqliteTable('likes', {

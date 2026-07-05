@@ -1,17 +1,23 @@
-import { ArrowLeft } from 'lucide-react';
-import { Post, Comment, User as UserType } from '@hin/types';
+import { ArrowLeft, Lock } from 'lucide-react';
+import { FollowRequest, Post, Comment, User as UserType } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { ProfileHeader } from './ProfileHeader';
 import { ProfilePosts } from './ProfilePosts';
+import { ProfileSettingsPanel } from './ProfileSettingsPanel';
 
 interface ProfileViewProps {
   profileUser: UserType | null;
   profilePosts: Post[];
+  followRequests: FollowRequest[];
   isLoading: boolean;
   loadError: string | null;
+  profilePostsError: string | null;
   currentUser: UserType;
   token: string;
   isEditing: boolean;
+  isSettingsOpen: boolean;
+  highlightSettings?: boolean;
+  followBusy: boolean;
   users: UserType[];
   expandedComments: Record<number, boolean>;
   postComments: Record<number, Comment[]>;
@@ -26,6 +32,15 @@ interface ProfileViewProps {
   onCancelEdit: () => void;
   onProfileSaved: (updated: UserType) => void;
   onStartChat: (user: UserType) => void;
+  onFollow: (userId: number) => void;
+  onUnfollow: (userId: number) => void;
+  onCancelFollowRequest: (userId: number) => void;
+  onApproveFollowRequest: (requesterId: number) => Promise<void>;
+  onRejectFollowRequest: (requesterId: number) => Promise<void>;
+  onShowFollowers: () => void;
+  onShowFollowing: () => void;
+  onOpenSettings: () => void;
+  onCloseSettings: () => void;
   onToggleLike: (postId: number) => void;
   onToggleComments: (postId: number) => void;
   onDeletePost: (postId: number) => void;
@@ -52,11 +67,16 @@ interface ProfileViewProps {
 export function ProfileView({
   profileUser,
   profilePosts,
+  followRequests,
   isLoading,
   loadError,
+  profilePostsError,
   currentUser,
   token,
   isEditing,
+  isSettingsOpen,
+  highlightSettings = false,
+  followBusy,
   users,
   expandedComments,
   postComments,
@@ -71,6 +91,15 @@ export function ProfileView({
   onCancelEdit,
   onProfileSaved,
   onStartChat,
+  onFollow,
+  onUnfollow,
+  onCancelFollowRequest,
+  onApproveFollowRequest,
+  onRejectFollowRequest,
+  onShowFollowers,
+  onShowFollowing,
+  onOpenSettings,
+  onCloseSettings,
   onToggleLike,
   onToggleComments,
   onDeletePost,
@@ -94,6 +123,10 @@ export function ProfileView({
   onClosePoll,
 }: ProfileViewProps) {
   const isOwnProfile = profileUser?.id === currentUser.id;
+  const canViewPosts = profileUser?.canViewPosts !== false;
+  const hasVisiblePosts = profilePosts.length > 0;
+  const showPostsSection = !isEditing && !isSettingsOpen && (canViewPosts || hasVisiblePosts);
+  const showPrivateEmptyState = !isEditing && !isSettingsOpen && !canViewPosts && !hasVisiblePosts;
 
   return (
     <div className="flex-grow overflow-y-auto p-4 md:p-6">
@@ -117,47 +150,83 @@ export function ProfileView({
             isOwnProfile={isOwnProfile}
             isEditing={isEditing}
             token={token}
+            followBusy={followBusy}
             onStartEdit={onStartEdit}
             onCancelEdit={onCancelEdit}
             onProfileSaved={onProfileSaved}
             onStartChat={onStartChat}
+            onFollow={onFollow}
+            onUnfollow={onUnfollow}
+            onCancelFollowRequest={onCancelFollowRequest}
+            onShowFollowers={onShowFollowers}
+            onShowFollowing={onShowFollowing}
+            pendingRequestCount={followRequests.length}
+            isSettingsOpen={isSettingsOpen}
+            onOpenSettings={onOpenSettings}
           />
 
-          {!isEditing && (
-            <ProfilePosts
-              posts={profilePosts}
-              users={users}
-              currentUser={currentUser}
-              expandedComments={expandedComments}
-              postComments={postComments}
-              newCommentText={newCommentText}
-              replyingTo={replyingTo}
-              editingPostId={editingPostId}
-              editingPostContent={editingPostContent}
-              editingCommentId={editingCommentId}
-              editingCommentContent={editingCommentContent}
-              onToggleLike={onToggleLike}
-              onToggleComments={onToggleComments}
-              onDeletePost={onDeletePost}
-              onStartPostEdit={onStartPostEdit}
-              onCancelPostEdit={onCancelPostEdit}
-              onSavePostEdit={onSavePostEdit}
-              onEditPostContentChange={onEditPostContentChange}
-              onCreateComment={onCreateComment}
-              onCommentTextChange={onCommentTextChange}
-              onCancelReply={onCancelReply}
-              onDeleteComment={onDeleteComment}
-              onStartCommentEdit={onStartCommentEdit}
-              onCancelCommentEdit={onCancelCommentEdit}
-              onSaveCommentEdit={onSaveCommentEdit}
-              onEditCommentContentChange={onEditCommentContentChange}
-              onReply={onReply}
-              onToggleCommentLike={onToggleCommentLike}
+          {isOwnProfile && isSettingsOpen && !isEditing && (
+            <ProfileSettingsPanel
+              requests={followRequests}
+              highlighted={highlightSettings}
+              onApprove={onApproveFollowRequest}
+              onReject={onRejectFollowRequest}
               onViewProfile={onViewProfile}
-              onVotePoll={onVotePoll}
-              onRetractPollVote={onRetractPollVote}
-              onClosePoll={onClosePoll}
+              onClose={onCloseSettings}
             />
+          )}
+
+          {showPrivateEmptyState && (
+            <div className="flex flex-col items-center justify-center py-16 border border-dashed border-border-custom rounded-2xl text-text-muted gap-3">
+              <Lock className="h-8 w-8 text-text-muted/70" />
+              <p className="text-sm font-medium text-text-secondary">This account is private</p>
+              <p className="text-xs">Follow this account to see their posts.</p>
+            </div>
+          )}
+
+          {showPostsSection && (
+            <>
+              {!canViewPosts && hasVisiblePosts && (
+                <p className="text-xs text-text-muted text-center">Follow this account to see more posts.</p>
+              )}
+              {profilePostsError && (
+                <p className="text-xs text-rose-400 text-center">{profilePostsError}</p>
+              )}
+              <ProfilePosts
+                posts={profilePosts}
+                users={users}
+                currentUser={currentUser}
+                expandedComments={expandedComments}
+                postComments={postComments}
+                newCommentText={newCommentText}
+                replyingTo={replyingTo}
+                editingPostId={editingPostId}
+                editingPostContent={editingPostContent}
+                editingCommentId={editingCommentId}
+                editingCommentContent={editingCommentContent}
+                onToggleLike={onToggleLike}
+                onToggleComments={onToggleComments}
+                onDeletePost={onDeletePost}
+                onStartPostEdit={onStartPostEdit}
+                onCancelPostEdit={onCancelPostEdit}
+                onSavePostEdit={onSavePostEdit}
+                onEditPostContentChange={onEditPostContentChange}
+                onCreateComment={onCreateComment}
+                onCommentTextChange={onCommentTextChange}
+                onCancelReply={onCancelReply}
+                onDeleteComment={onDeleteComment}
+                onStartCommentEdit={onStartCommentEdit}
+                onCancelCommentEdit={onCancelCommentEdit}
+                onSaveCommentEdit={onSaveCommentEdit}
+                onEditCommentContentChange={onEditCommentContentChange}
+                onReply={onReply}
+                onToggleCommentLike={onToggleCommentLike}
+                onViewProfile={onViewProfile}
+                onVotePoll={onVotePoll}
+                onRetractPollVote={onRetractPollVote}
+                onClosePoll={onClosePoll}
+              />
+            </>
           )}
         </>
       ) : null}

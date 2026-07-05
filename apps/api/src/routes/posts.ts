@@ -8,6 +8,9 @@ import { getAuthUser } from '../lib/auth';
 import { linkPostMedia, parseMediaUrls, serializeMediaUrls, validateOwnedPostMedia } from '../lib/media';
 import { notifyMentions } from '../lib/mentions';
 import { createPollWithOptions, loadPollsForPosts, castVote, retractVote, closePoll, getPollByPostId } from '../lib/polls';
+import { getFollowingFeedUserIds } from '../lib/follows';
+import { buildVisibilitySqlConditions, assertCanViewPost } from '../lib/postVisibility';
+import type { PostVisibility } from '@hin/types';
 
 const posts = new Hono<{ Bindings: Env }>();
 
@@ -34,6 +37,7 @@ async function buildPostResponse(
     type?: string | null;
     content: string;
     mediaUrls: string | null;
+    visibility?: string | null;
     createdAt: string;
     username: string;
   },
@@ -80,6 +84,7 @@ async function buildPostResponse(
     likesCount,
     commentsCount,
     hasLiked,
+    visibility: (post.visibility ?? 'public') as PostVisibility,
   };
 
   if (postType === 'poll') {
@@ -96,8 +101,13 @@ posts.get('/', async (c) => {
   const currentUserId = authUser ? authUser.id : null;
 
   const filterUserId = c.req.query('userId');
+  const followingFeed = c.req.query('following') === 'true';
   const limitParam = c.req.query('limit');
   const cursorParam = c.req.query('cursor');
+
+  if (followingFeed && !authUser) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
 
   let limit = DEFAULT_FEED_LIMIT;
   if (limitParam !== undefined) {
@@ -120,7 +130,33 @@ posts.get('/', async (c) => {
   if (filterUserId) {
     const uid = parseInt(filterUserId);
     if (isNaN(uid)) return c.json({ error: 'Invalid userId' }, 400);
+
+    const targetUser = await db.select({
+      id: schema.users.id,
+      deletedAt: schema.users.deletedAt,
+    })
+      .from(schema.users)
+      .where(eq(schema.users.id, uid))
+      .get();
+
+    if (!targetUser || targetUser.deletedAt) {
+      return c.json({ error: 'User not found' }, 404);
+    }
+
     postConditions.push(eq(schema.posts.userId, uid));
+    const visibilityCond = buildVisibilitySqlConditions(currentUserId, 'profile', uid);
+    if (visibilityCond) postConditions.push(visibilityCond);
+  } else if (followingFeed && authUser) {
+    const feedUserIds = await getFollowingFeedUserIds(db, authUser.id);
+    if (feedUserIds.length === 0) {
+      return c.json({ posts: [], nextCursor: null } satisfies PostsPage);
+    }
+    postConditions.push(inArray(schema.posts.userId, feedUserIds));
+    const visibilityCond = buildVisibilitySqlConditions(currentUserId, 'following');
+    if (visibilityCond) postConditions.push(visibilityCond);
+  } else {
+    const visibilityCond = buildVisibilitySqlConditions(currentUserId, 'everyone');
+    if (visibilityCond) postConditions.push(visibilityCond);
   }
 
   if (cursor !== null) {
@@ -133,6 +169,7 @@ posts.get('/', async (c) => {
     type: schema.posts.type,
     content: schema.posts.content,
     mediaUrls: schema.posts.mediaUrls,
+    visibility: schema.posts.visibility,
     createdAt: schema.posts.createdAt,
     username: schema.users.username,
   })
@@ -191,6 +228,7 @@ posts.post('/', async (c) => {
     type: postType,
     content: (data.content ?? '').trim(),
     mediaUrls: serializeMediaUrls(mediaUrls),
+    visibility: data.visibility ?? 'public',
   }).returning();
 
   if (mediaUrls.length > 0) {
@@ -220,6 +258,7 @@ posts.post('/', async (c) => {
     type: postType,
     content: inserted.content,
     mediaUrls: inserted.mediaUrls,
+    visibility: inserted.visibility,
     createdAt: inserted.createdAt,
     username: authUser.username,
   }, authUser.id);
@@ -280,6 +319,7 @@ posts.put('/:id', async (c) => {
     type: updated.type,
     content: updated.content,
     mediaUrls: updated.mediaUrls,
+    visibility: updated.visibility,
     createdAt: updated.createdAt,
     username: author?.username || 'Unknown',
   }, authUser.id);
@@ -297,9 +337,9 @@ posts.post('/:id/like', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const postId = parseInt(c.req.param('id'));
 
-  // Get post details
-  const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
-  if (!post) return c.json({ error: 'Post not found' }, 404);
+  const access = await assertCanViewPost(db, authUser.id, postId);
+  if (!access.ok) return c.json({ error: access.error }, access.status);
+  const post = access.post;
 
   // Check if already liked
   const existingLike = await db.select().from(schema.likes).where(
@@ -411,6 +451,9 @@ posts.get('/:id/comments', async (c) => {
   const authUser = await getAuthUser(c);
   const currentUserId = authUser ? authUser.id : null;
 
+  const access = await assertCanViewPost(db, currentUserId, postId);
+  if (!access.ok) return c.json({ error: access.error }, access.status);
+
   const postComments = await db
     .select({
       id: schema.comments.id,
@@ -473,6 +516,40 @@ posts.get('/:id/comments', async (c) => {
   return c.json(redactedComments);
 });
 
+// Get single post (permalink)
+posts.get('/:id', async (c) => {
+  const postId = parseInt(c.req.param('id'), 10);
+  if (isNaN(postId)) return c.json({ error: 'Invalid post id' }, 400);
+
+  const db = drizzle(c.env.DB, { schema });
+  const authUser = await getAuthUser(c);
+  const currentUserId = authUser ? authUser.id : null;
+
+  const access = await assertCanViewPost(db, currentUserId, postId);
+  if (!access.ok) return c.json({ error: access.error }, access.status);
+
+  const row = await db
+    .select({
+      id: schema.posts.id,
+      userId: schema.posts.userId,
+      type: schema.posts.type,
+      content: schema.posts.content,
+      mediaUrls: schema.posts.mediaUrls,
+      visibility: schema.posts.visibility,
+      createdAt: schema.posts.createdAt,
+      username: schema.users.username,
+    })
+    .from(schema.posts)
+    .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
+    .where(and(eq(schema.posts.id, postId), sql`${schema.users.deletedAt} IS NULL`))
+    .get();
+
+  if (!row) return c.json({ error: 'Post not found' }, 404);
+
+  const post = await buildPostResponse(db, row, currentUserId);
+  return c.json(post);
+});
+
 // Create comment
 posts.post('/:id/comments', async (c) => {
   const authUser = await getAuthUser(c);
@@ -481,15 +558,15 @@ posts.post('/:id/comments', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const postId = parseInt(c.req.param('id'));
 
+  const access = await assertCanViewPost(db, authUser.id, postId);
+  if (!access.ok) return c.json({ error: access.error }, access.status);
+  const post = access.post;
+
   const { content, parentId } = await c.req.json<{ content: string; parentId?: number | null }>();
   if (!content || content.trim() === '') {
     return c.json({ error: 'Content cannot be empty' }, 400);
   }
 
-  const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
-  if (!post) return c.json({ error: 'Post not found' }, 404);
-
-  // Insert comment
   const [inserted] = await db.insert(schema.comments).values({
     postId,
     userId: authUser.id,
@@ -595,8 +672,9 @@ posts.post('/:id/poll/vote', async (c) => {
   const postId = parseInt(c.req.param('id'));
   if (isNaN(postId)) return c.json({ error: 'Invalid post id' }, 400);
 
-  const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
-  if (!post || post.deletedAt) return c.json({ error: 'Post not found' }, 404);
+  const access = await assertCanViewPost(db, authUser.id, postId);
+  if (!access.ok) return c.json({ error: access.error }, access.status);
+  const post = access.post;
   if (post.type !== 'poll') return c.json({ error: 'Not a poll post' }, 400);
 
   const body = await c.req.json();
@@ -606,7 +684,7 @@ posts.post('/:id/poll/vote', async (c) => {
   }
 
   const result = await castVote(db, postId, authUser.id, parsed.data.optionIds);
-  if (result.error) return c.json({ error: result.error }, result.status || 400);
+  if (result.error) return c.json({ error: result.error }, result.status ?? 400);
 
   await broadcastEvent(c.env, {
     type: 'poll_vote_update',
@@ -625,12 +703,13 @@ posts.delete('/:id/poll/vote', async (c) => {
   const postId = parseInt(c.req.param('id'));
   if (isNaN(postId)) return c.json({ error: 'Invalid post id' }, 400);
 
-  const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
-  if (!post || post.deletedAt) return c.json({ error: 'Post not found' }, 404);
+  const access = await assertCanViewPost(db, authUser.id, postId);
+  if (!access.ok) return c.json({ error: access.error }, access.status);
+  const post = access.post;
   if (post.type !== 'poll') return c.json({ error: 'Not a poll post' }, 400);
 
   const result = await retractVote(db, postId, authUser.id);
-  if (result.error) return c.json({ error: result.error }, result.status || 400);
+  if (result.error) return c.json({ error: result.error }, result.status ?? 400);
 
   await broadcastEvent(c.env, {
     type: 'poll_vote_update',
@@ -658,7 +737,7 @@ posts.post('/:id/poll/close', async (c) => {
   }
 
   const result = await closePoll(db, postId);
-  if (result.error) return c.json({ error: result.error }, result.status || 400);
+  if (result.error) return c.json({ error: result.error }, result.status ?? 400);
 
   await broadcastEvent(c.env, {
     type: 'poll_closed',

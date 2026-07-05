@@ -124,6 +124,22 @@ export class RealtimeDO implements DurableObject {
       return new Response('OK');
     }
 
+    if (url.pathname === '/broadcast-user-event') {
+      if (request.method !== 'POST') {
+        return new Response('Method Not Allowed', { status: 405 });
+      }
+      const { recipientId, ...event } = await request.json() as { recipientId: number } & Record<string, unknown>;
+
+      for (const [ws, session] of this.sessions.entries()) {
+        if (session.userId === recipientId) {
+          try {
+            ws.send(JSON.stringify(event));
+          } catch (e) {}
+        }
+      }
+      return new Response('OK');
+    }
+
     const upgradeHeader = request.headers.get('Upgrade');
     if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
       return new Response('Expected WebSocket upgrade', { status: 426 });

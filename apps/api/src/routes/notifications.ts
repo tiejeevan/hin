@@ -37,13 +37,15 @@ notifications.get('/', async (c) => {
     rawNotifs.map(async (notif) => {
       const sender = await db.select({ username: schema.users.username }).from(schema.users).where(eq(schema.users.id, notif.senderId)).get();
       const entityType =
-        notif.entityType === 'post' || notif.entityType === 'message' || notif.entityType === 'system'
+        notif.entityType === 'post' || notif.entityType === 'message' || notif.entityType === 'system' || notif.entityType === 'user'
           ? notif.entityType
           : notif.type === 'message'
             ? 'message'
             : notif.type === 'system'
               ? 'system'
-              : 'post';
+              : notif.type === 'follow' || notif.type === 'follow_request' || notif.type === 'follow_accepted'
+                ? 'user'
+                : 'post';
       return {
         id: notif.id,
         userId: notif.userId,

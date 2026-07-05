@@ -1,19 +1,31 @@
-import { AtSign, Heart, Megaphone, MessageSquare, MessageCircle } from 'lucide-react';
+import { AtSign, Heart, Megaphone, MessageSquare, MessageCircle, UserPlus, UserCheck } from 'lucide-react';
 import { Toast } from '../../types/ui';
 
 interface ToastContainerProps {
   toasts: Toast[];
+  onToastClick?: (toast: Toast) => void;
 }
 
-export function ToastContainer({ toasts }: ToastContainerProps) {
+export function ToastContainer({ toasts, onToastClick }: ToastContainerProps) {
   return (
     <div className="fixed bottom-16 md:bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none pb-safe">
       {toasts.map(t => (
         <div
           key={t.id}
+          role={onToastClick && t.postId ? 'button' : undefined}
+          tabIndex={onToastClick && t.postId ? 0 : undefined}
+          onClick={() => {
+            if (onToastClick && t.postId) onToastClick(t);
+          }}
+          onKeyDown={e => {
+            if (onToastClick && t.postId && (e.key === 'Enter' || e.key === ' ')) {
+              e.preventDefault();
+              onToastClick(t);
+            }
+          }}
           className={`bg-bg-secondary/90 text-text-primary border rounded-xl p-3.5 shadow-2xl flex items-center gap-3 animate-pulse-ring max-w-sm pointer-events-auto backdrop-blur-md ${
             t.type === 'system' ? 'border-violet-500/30' : 'border-border-custom'
-          }`}
+          } ${onToastClick && t.postId ? 'cursor-pointer hover:border-indigo-500/40' : ''}`}
         >
           <div className="shrink-0">
             {t.type === 'like' && (
@@ -39,6 +51,16 @@ export function ToastContainer({ toasts }: ToastContainerProps) {
             {t.type === 'system' && (
               <div className="h-8 w-8 rounded-lg bg-violet-500/15 text-violet-400 flex items-center justify-center">
                 <Megaphone className="h-4.5 w-4.5" />
+              </div>
+            )}
+            {(t.type === 'follow' || t.type === 'follow_request') && (
+              <div className="h-8 w-8 rounded-lg bg-sky-500/10 text-sky-400 flex items-center justify-center">
+                <UserPlus className="h-4.5 w-4.5" />
+              </div>
+            )}
+            {t.type === 'follow_accepted' && (
+              <div className="h-8 w-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                <UserCheck className="h-4.5 w-4.5" />
               </div>
             )}
           </div>
