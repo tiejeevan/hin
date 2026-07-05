@@ -65,10 +65,9 @@ export function NotificationPanel({
         className="fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-border-custom/80 bg-bg-secondary/95 shadow-[0_16px_40px_-10px_rgba(0,0,0,0.35)] backdrop-blur-xl animate-notification-drop
           top-[calc(3.75rem+env(safe-area-inset-top,0px))]
           right-4
-          w-[calc(50vw-1rem)]
+          w-[calc(80vw-1rem)]
           max-h-[50vh]
-          origin-top-right
-          md:w-[min(20rem,calc(50vw-2rem))]"
+          origin-top-right"
         role="dialog"
         aria-label="Notifications"
       >
