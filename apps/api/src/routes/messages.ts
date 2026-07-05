@@ -5,6 +5,7 @@ import * as schema from '@hin/db';
 import { Message } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
+import { isBlocked } from '../lib/blocks';
 
 const messages = new Hono<{ Bindings: Env }>();
 
@@ -34,7 +35,14 @@ messages.get('/threads', async (c) => {
     messagePartners.flatMap(m => [m.senderId, m.receiverId]).filter(id => id !== authUser.id)
   ));
 
-  if (partnerIds.length === 0) {
+  const visiblePartnerIds: number[] = [];
+  for (const partnerId of partnerIds) {
+    if (!await isBlocked(db, authUser.id, partnerId)) {
+      visiblePartnerIds.push(partnerId);
+    }
+  }
+
+  if (visiblePartnerIds.length === 0) {
     return c.json([]);
   }
 
@@ -47,7 +55,7 @@ messages.get('/threads', async (c) => {
   .from(schema.users)
   .where(
     and(
-      inArray(schema.users.id, partnerIds),
+      inArray(schema.users.id, visiblePartnerIds),
       sql`${schema.users.deletedAt} IS NULL`
     )
   )
@@ -138,6 +146,10 @@ messages.get('/:otherUserId', async (c) => {
 
   const db = drizzle(c.env.DB, { schema });
   const otherUserId = parseInt(c.req.param('otherUserId'));
+
+  if (await isBlocked(db, authUser.id, otherUserId)) {
+    return c.json({ error: 'Cannot message this user' }, 403);
+  }
 
   // Mark received messages as read
   await db.update(schema.messages)

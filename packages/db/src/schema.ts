@@ -18,6 +18,22 @@ export const users = sqliteTable('users', {
   isPrivateIdx: index('users_is_private_idx').on(table.isPrivate),
 }));
 
+export const userSettings = sqliteTable('user_settings', {
+  userId: integer('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  notifyLikes: integer('notify_likes').default(1).notNull(),
+  notifyComments: integer('notify_comments').default(1).notNull(),
+  notifyMentions: integer('notify_mentions').default(1).notNull(),
+  notifyDms: integer('notify_dms').default(1).notNull(),
+  notifySystem: integer('notify_system').default(1).notNull(),
+  muteAllToasts: integer('mute_all_toasts').default(0).notNull(),
+  /** 'global' | 'selected_pages' */
+  chatIconMode: text('chat_icon_mode').default('global').notNull(),
+  /** JSON array of page keys: feed, profile, post */
+  chatIconPages: text('chat_icon_pages').default('[]').notNull(),
+  extensionsJson: text('extensions_json').default('{}').notNull(),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const posts = sqliteTable('posts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -150,6 +166,28 @@ export const followRequests = sqliteTable('follow_requests', {
   deletedAtIdx: index('follow_requests_deleted_at_idx').on(table.deletedAt),
 }));
 
+export const userBlocks = sqliteTable('user_blocks', {
+  blockerId: integer('blocker_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  blockedId: integer('blocked_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text('deleted_at'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.blockerId, table.blockedId] }),
+  blockedIdIdx: index('user_blocks_blocked_id_idx').on(table.blockedId),
+  deletedAtIdx: index('user_blocks_deleted_at_idx').on(table.deletedAt),
+}));
+
+export const userMutes = sqliteTable('user_mutes', {
+  muterId: integer('muter_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  mutedId: integer('muted_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text('deleted_at'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.muterId, table.mutedId] }),
+  mutedIdIdx: index('user_mutes_muted_id_idx').on(table.mutedId),
+  deletedAtIdx: index('user_mutes_deleted_at_idx').on(table.deletedAt),
+}));
+
 export const likes = sqliteTable('likes', {
   userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
@@ -159,6 +197,27 @@ export const likes = sqliteTable('likes', {
   pk: primaryKey({ columns: [table.userId, table.postId] }),
   postIdIdx: index('likes_post_id_idx').on(table.postId),
   deletedAtIdx: index('likes_deleted_at_idx').on(table.deletedAt),
+}));
+
+export const postBookmarks = sqliteTable('post_bookmarks', {
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text('deleted_at'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.postId] }),
+  postIdIdx: index('post_bookmarks_post_id_idx').on(table.postId),
+  deletedAtIdx: index('post_bookmarks_deleted_at_idx').on(table.deletedAt),
+}));
+
+export const postShares = sqliteTable('post_shares', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  postIdIdx: index('post_shares_post_id_idx').on(table.postId),
+  userIdIdx: index('post_shares_user_id_idx').on(table.userId),
 }));
 
 export const commentLikes = sqliteTable('comment_likes', {

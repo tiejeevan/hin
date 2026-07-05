@@ -3,6 +3,8 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '@hin/db';
 import { Notification } from '@hin/types';
 import type { Env } from '../types';
+import { getOrCreateUserSettings, isNotificationEnabled } from '../lib/user-settings';
+import { shouldDeliverNotification } from './blocks';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -64,6 +66,10 @@ export async function notifyMentions(
   const commentId = opts.commentId ?? null;
 
   for (const recipient of recipients) {
+    const recipientSettings = await getOrCreateUserSettings(db, recipient.id);
+    if (!isNotificationEnabled(recipientSettings, 'mention')) continue;
+    if (!await shouldDeliverNotification(db, recipient.id, opts.senderId)) continue;
+
     const [notif] = await db
       .insert(schema.notifications)
       .values({

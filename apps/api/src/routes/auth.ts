@@ -42,6 +42,8 @@ auth.post('/register', async (c) => {
     role: 'user',
   }).returning();
 
+  await db.insert(schema.userSettings).values({ userId: inserted.id });
+
   // Generate JWT token
   const token = await sign({ 
     id: inserted.id, 

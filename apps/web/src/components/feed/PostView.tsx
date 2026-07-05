@@ -54,6 +54,8 @@ interface PostViewProps {
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
   onCopyPermalink: () => void;
+  onToggleBookmark: () => void;
+  onShare: () => void;
 }
 
 export function PostView({
@@ -106,6 +108,8 @@ export function PostView({
   onRetractPollVote,
   onClosePoll,
   onCopyPermalink,
+  onToggleBookmark,
+  onShare,
 }: PostViewProps) {
   if (isLoading) {
     return (
@@ -210,6 +214,8 @@ export function PostView({
         highlightCommentId={highlightCommentId}
         onSignInRequired={onSignIn}
         onCopyPermalink={onCopyPermalink}
+        onToggleBookmark={onToggleBookmark}
+        onShare={onShare}
         onToggleLike={onToggleLike}
         onToggleComments={onToggleComments}
         onDeletePost={onDeletePost}

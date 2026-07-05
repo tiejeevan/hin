@@ -10,6 +10,8 @@ import messagesRoutes from './routes/messages';
 import notificationsRoutes from './routes/notifications';
 import adminRoutes from './routes/admin';
 import followsRoutes from './routes/follows';
+import blocksRoutes from './routes/blocks';
+import mutesRoutes from './routes/mutes';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -31,6 +33,8 @@ app.route('/api/comments', commentsRoutes);
 app.route('/api/messages', messagesRoutes);
 app.route('/api/notifications', notificationsRoutes);
 app.route('/api/follows', followsRoutes);
+app.route('/api/blocks', blocksRoutes);
+app.route('/api/mutes', mutesRoutes);
 app.route('/api/admin', adminRoutes);
 
 // WebSocket entrypoint -> route to Durable Object

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, desc, and, count, sql, isNull, lt, inArray } from 'drizzle-orm';
+import { eq, desc, and, count, sql, isNull, lt, inArray, notInArray } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import { Post, Comment, Notification, PostsPage, parseCreatePostBody, VotePollSchema } from '@hin/types';
 import type { Env } from '../types';
@@ -9,7 +9,9 @@ import { linkPostMedia, parseMediaUrls, serializeMediaUrls, validateOwnedPostMed
 import { notifyMentions } from '../lib/mentions';
 import { createPollWithOptions, loadPollsForPosts, castVote, retractVote, closePoll, getPollByPostId } from '../lib/polls';
 import { getFollowingFeedUserIds } from '../lib/follows';
+import { getHiddenAuthorIds, shouldDeliverNotification } from '../lib/blocks';
 import { buildVisibilitySqlConditions, assertCanViewPost } from '../lib/postVisibility';
+import { getOrCreateUserSettings, isNotificationEnabled } from '../lib/user-settings';
 import type { PostVisibility } from '@hin/types';
 
 const posts = new Hono<{ Bindings: Env }>();
@@ -72,6 +74,34 @@ async function buildPostResponse(
     hasLiked = !!likeRecord;
   }
 
+  const bookmarksRes = await db
+    .select({ value: count() })
+    .from(schema.postBookmarks)
+    .where(and(eq(schema.postBookmarks.postId, post.id), isNull(schema.postBookmarks.deletedAt)))
+    .get();
+  const bookmarksCount = bookmarksRes?.value || 0;
+
+  const sharesRes = await db
+    .select({ value: count() })
+    .from(schema.postShares)
+    .where(eq(schema.postShares.postId, post.id))
+    .get();
+  const sharesCount = sharesRes?.value || 0;
+
+  let hasBookmarked = false;
+  if (currentUserId) {
+    const bookmarkRecord = await db
+      .select()
+      .from(schema.postBookmarks)
+      .where(and(
+        eq(schema.postBookmarks.postId, post.id),
+        eq(schema.postBookmarks.userId, currentUserId),
+        isNull(schema.postBookmarks.deletedAt),
+      ))
+      .get();
+    hasBookmarked = !!bookmarkRecord;
+  }
+
   const postType = (post.type ?? 'text') as Post['type'];
   const response: Post = {
     id: post.id,
@@ -84,6 +114,9 @@ async function buildPostResponse(
     likesCount,
     commentsCount,
     hasLiked,
+    hasBookmarked,
+    bookmarksCount,
+    sharesCount,
     visibility: (post.visibility ?? 'public') as PostVisibility,
   };
 
@@ -159,6 +192,13 @@ posts.get('/', async (c) => {
     if (visibilityCond) postConditions.push(visibilityCond);
   }
 
+  if (currentUserId) {
+    const hiddenIds = await getHiddenAuthorIds(db, currentUserId);
+    if (hiddenIds.length > 0) {
+      postConditions.push(notInArray(schema.posts.userId, hiddenIds));
+    }
+  }
+
   if (cursor !== null) {
     postConditions.push(lt(schema.posts.id, cursor));
   }
@@ -194,6 +234,75 @@ posts.get('/', async (c) => {
 
   const page: PostsPage = { posts: postsWithMetadata, nextCursor };
   return c.json(page);
+});
+
+// Get bookmarked posts for the current user (cursor = bookmark createdAt ISO string)
+posts.get('/bookmarks', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const limitParam = c.req.query('limit');
+  const cursorParam = c.req.query('cursor');
+
+  let limit = DEFAULT_FEED_LIMIT;
+  if (limitParam !== undefined) {
+    const parsed = parseInt(limitParam, 10);
+    if (isNaN(parsed) || parsed < 1) return c.json({ error: 'Invalid limit' }, 400);
+    limit = Math.min(parsed, MAX_FEED_LIMIT);
+  }
+
+  const conditions = [
+    eq(schema.postBookmarks.userId, authUser.id),
+    isNull(schema.postBookmarks.deletedAt),
+    sql`${schema.posts.deletedAt} IS NULL`,
+    sql`${schema.users.deletedAt} IS NULL`,
+  ];
+
+  if (cursorParam) {
+    conditions.push(lt(schema.postBookmarks.createdAt, cursorParam));
+  }
+
+  const hiddenIds = await getHiddenAuthorIds(db, authUser.id);
+  if (hiddenIds.length > 0) {
+    conditions.push(notInArray(schema.posts.userId, hiddenIds));
+  }
+
+  const rows = await db
+    .select({
+      id: schema.posts.id,
+      userId: schema.posts.userId,
+      type: schema.posts.type,
+      content: schema.posts.content,
+      mediaUrls: schema.posts.mediaUrls,
+      visibility: schema.posts.visibility,
+      createdAt: schema.posts.createdAt,
+      username: schema.users.username,
+      bookmarkCreatedAt: schema.postBookmarks.createdAt,
+    })
+    .from(schema.postBookmarks)
+    .innerJoin(schema.posts, eq(schema.postBookmarks.postId, schema.posts.id))
+    .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
+    .where(and(...conditions))
+    .orderBy(desc(schema.postBookmarks.createdAt))
+    .limit(limit + 1)
+    .all();
+
+  const hasMore = rows.length > limit;
+  const pageRows = hasMore ? rows.slice(0, limit) : rows;
+  const nextCursor = hasMore ? pageRows[pageRows.length - 1].bookmarkCreatedAt : null;
+
+  const pollPostIds = pageRows.filter(p => p.type === 'poll').map(p => p.id);
+  const postAuthorMap = new Map(pageRows.map(p => [p.id, p.userId]));
+  const pollMap = await loadPollsForPosts(db, pollPostIds, postAuthorMap, authUser.id);
+
+  const postsWithMetadata: Post[] = await Promise.all(
+    pageRows.map(({ bookmarkCreatedAt: _bc, ...post }) =>
+      buildPostResponse(db, post, authUser.id, pollMap),
+    ),
+  );
+
+  return c.json({ posts: postsWithMetadata, nextCursor } satisfies PostsPage);
 });
 
 // Create post
@@ -384,42 +493,48 @@ posts.post('/:id/like', async (c) => {
 
     // Send real-time notification to post owner if it's someone else
     if (post.userId !== authUser.id) {
-      const notificationContent = `${authUser.username} liked your post.`;
-      
-      const [notif] = await db.insert(schema.notifications).values({
-        userId: post.userId,
-        senderId: authUser.id,
-        type: 'like',
-        entityType: 'post',
-        entityId: postId,
-        content: notificationContent,
-        read: 0,
-      }).returning();
+      const recipientSettings = await getOrCreateUserSettings(db, post.userId);
+      if (
+        isNotificationEnabled(recipientSettings, 'like')
+        && await shouldDeliverNotification(db, post.userId, authUser.id)
+      ) {
+        const notificationContent = `${authUser.username} liked your post.`;
+        
+        const [notif] = await db.insert(schema.notifications).values({
+          userId: post.userId,
+          senderId: authUser.id,
+          type: 'like',
+          entityType: 'post',
+          entityId: postId,
+          content: notificationContent,
+          read: 0,
+        }).returning();
 
-      const notifPayload: Notification = {
-        id: notif.id,
-        userId: post.userId,
-        senderId: authUser.id,
-        senderUsername: authUser.username,
-        type: 'like',
-        entityType: 'post',
-        entityId: postId,
-        commentId: null,
-        content: notificationContent,
-        read: false,
-        createdAt: notif.createdAt,
-      };
+        const notifPayload: Notification = {
+          id: notif.id,
+          userId: post.userId,
+          senderId: authUser.id,
+          senderUsername: authUser.username,
+          type: 'like',
+          entityType: 'post',
+          entityId: postId,
+          commentId: null,
+          content: notificationContent,
+          read: false,
+          createdAt: notif.createdAt,
+        };
 
-      // Call Durable Object to send real-time update
-      try {
-        const doId = c.env.REALTIME_DO.idFromName('global');
-        const doStub = c.env.REALTIME_DO.get(doId);
-        await doStub.fetch(new Request('http://realtime/broadcast-notification', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ recipientId: post.userId, notification: notifPayload }),
-        }));
-      } catch (e) {}
+        // Call Durable Object to send real-time update
+        try {
+          const doId = c.env.REALTIME_DO.idFromName('global');
+          const doStub = c.env.REALTIME_DO.get(doId);
+          await doStub.fetch(new Request('http://realtime/broadcast-notification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ recipientId: post.userId, notification: notifPayload }),
+          }));
+        } catch (e) {}
+      }
     }
   }
 
@@ -442,6 +557,90 @@ posts.post('/:id/like', async (c) => {
   } catch (e) {}
 
   return c.json({ liked, likesCount });
+});
+
+// Toggle bookmark
+posts.post('/:id/bookmark', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const postId = parseInt(c.req.param('id'), 10);
+  if (isNaN(postId)) return c.json({ error: 'Invalid post id' }, 400);
+
+  const access = await assertCanViewPost(db, authUser.id, postId);
+  if (!access.ok) return c.json({ error: access.error }, access.status);
+
+  const existing = await db.select().from(schema.postBookmarks).where(
+    and(
+      eq(schema.postBookmarks.postId, postId),
+      eq(schema.postBookmarks.userId, authUser.id),
+    ),
+  ).get();
+
+  let bookmarked = false;
+  if (existing) {
+    if (!existing.deletedAt) {
+      await db.update(schema.postBookmarks)
+        .set({ deletedAt: new Date().toISOString() })
+        .where(and(
+          eq(schema.postBookmarks.postId, postId),
+          eq(schema.postBookmarks.userId, authUser.id),
+        ))
+        .run();
+    } else {
+      await db.update(schema.postBookmarks)
+        .set({ deletedAt: null })
+        .where(and(
+          eq(schema.postBookmarks.postId, postId),
+          eq(schema.postBookmarks.userId, authUser.id),
+        ))
+        .run();
+      bookmarked = true;
+    }
+  } else {
+    await db.insert(schema.postBookmarks).values({
+      postId,
+      userId: authUser.id,
+    }).run();
+    bookmarked = true;
+  }
+
+  const bookmarksCountRes = await db
+    .select({ value: count() })
+    .from(schema.postBookmarks)
+    .where(and(eq(schema.postBookmarks.postId, postId), isNull(schema.postBookmarks.deletedAt)))
+    .get();
+  const bookmarksCount = bookmarksCountRes?.value || 0;
+
+  return c.json({ bookmarked, bookmarksCount });
+});
+
+// Record share and return permalink
+posts.post('/:id/share', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const postId = parseInt(c.req.param('id'), 10);
+  if (isNaN(postId)) return c.json({ error: 'Invalid post id' }, 400);
+
+  const access = await assertCanViewPost(db, authUser.id, postId);
+  if (!access.ok) return c.json({ error: access.error }, access.status);
+
+  await db.insert(schema.postShares).values({
+    postId,
+    userId: authUser.id,
+  }).run();
+
+  const sharesCountRes = await db
+    .select({ value: count() })
+    .from(schema.postShares)
+    .where(eq(schema.postShares.postId, postId))
+    .get();
+  const sharesCount = sharesCountRes?.value || 0;
+
+  return c.json({ sharesCount, postId });
 });
 
 // Get post comments
@@ -498,7 +697,12 @@ posts.get('/:id/comments', async (c) => {
   }
 
   // Redact soft deleted comments content
-  const redactedComments: Comment[] = postComments.map(comment => {
+  const hiddenIds = currentUserId ? await getHiddenAuthorIds(db, currentUserId) : [];
+  const visibleComments = hiddenIds.length > 0
+    ? postComments.filter(comment => !hiddenIds.includes(comment.userId))
+    : postComments;
+
+  const redactedComments: Comment[] = visibleComments.map(comment => {
     const likesCount = likesCountByComment.get(comment.id) || 0;
     const hasLiked = likedByCurrentUser.has(comment.id);
     if (comment.deletedAt) {
@@ -601,40 +805,46 @@ posts.post('/:id/comments', async (c) => {
 
   // Send real-time notification to recipient if it's someone else
   if (recipientId !== authUser.id) {
-    const [notif] = await db.insert(schema.notifications).values({
-      userId: recipientId,
-      senderId: authUser.id,
-      type: 'comment',
-      entityType: 'post',
-      entityId: postId,
-      commentId: inserted.id,
-      content: notificationContent,
-      read: 0,
-    }).returning();
+    const recipientSettings = await getOrCreateUserSettings(db, recipientId);
+    if (
+      isNotificationEnabled(recipientSettings, 'comment')
+      && await shouldDeliverNotification(db, recipientId, authUser.id)
+    ) {
+      const [notif] = await db.insert(schema.notifications).values({
+        userId: recipientId,
+        senderId: authUser.id,
+        type: 'comment',
+        entityType: 'post',
+        entityId: postId,
+        commentId: inserted.id,
+        content: notificationContent,
+        read: 0,
+      }).returning();
 
-    const notifPayload: Notification = {
-      id: notif.id,
-      userId: recipientId,
-      senderId: authUser.id,
-      senderUsername: authUser.username,
-      type: 'comment',
-      entityType: 'post',
-      entityId: postId,
-      commentId: inserted.id,
-      content: notificationContent,
-      read: false,
-      createdAt: notif.createdAt,
-    };
+      const notifPayload: Notification = {
+        id: notif.id,
+        userId: recipientId,
+        senderId: authUser.id,
+        senderUsername: authUser.username,
+        type: 'comment',
+        entityType: 'post',
+        entityId: postId,
+        commentId: inserted.id,
+        content: notificationContent,
+        read: false,
+        createdAt: notif.createdAt,
+      };
 
-    try {
-      const doId = c.env.REALTIME_DO.idFromName('global');
-      const doStub = c.env.REALTIME_DO.get(doId);
-      await doStub.fetch(new Request('http://realtime/broadcast-notification', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipientId, notification: notifPayload }),
-      }));
-    } catch (e) {}
+      try {
+        const doId = c.env.REALTIME_DO.idFromName('global');
+        const doStub = c.env.REALTIME_DO.get(doId);
+        await doStub.fetch(new Request('http://realtime/broadcast-notification', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recipientId, notification: notifPayload }),
+        }));
+      } catch (e) {}
+    }
   }
 
   await notifyMentions(db, c.env, {

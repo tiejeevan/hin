@@ -3,6 +3,7 @@ import { eq, and, count, isNull, inArray, desc, lt } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import type { FollowListUser, FollowRequest, FollowStatus, Notification } from '@hin/types';
 import type { Env } from '../types';
+import { isBlocked, shouldDeliverNotification } from './blocks';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -159,6 +160,8 @@ async function createFollowNotification(
     content: string;
   },
 ) {
+  if (!await shouldDeliverNotification(db, opts.recipientId, opts.senderId)) return;
+
   const [notif] = await db.insert(schema.notifications).values({
     userId: opts.recipientId,
     senderId: opts.senderId,
@@ -261,6 +264,10 @@ export async function followUser(
 
   const target = await getUserOrThrow(db, targetId);
   if (!target) return { ok: false, error: 'User not found', code: 404 };
+
+  if (await isBlocked(db, followerId, targetId)) {
+    return { ok: false, error: 'Cannot follow this user', code: 403 };
+  }
 
   if (await isFollowing(db, followerId, targetId)) {
     return { ok: true, result: { status: 'following' } };

@@ -1,5 +1,6 @@
-import { Shield, MessageCircle, Pencil, UserPlus, UserCheck, Clock, Settings } from 'lucide-react';
-import { FollowStatus, User as UserType } from '@hin/types';
+import { useEffect, useRef, useState } from 'react';
+import { Shield, MessageCircle, Pencil, UserPlus, UserCheck, Clock, Settings, MoreHorizontal, VolumeX, Volume2, Ban, UserX } from 'lucide-react';
+import { BlockStatus, FollowStatus, MuteStatus, User as UserType } from '@hin/types';
 import { UserAvatar } from './UserAvatar';
 import { ProfileEditForm } from './ProfileEditForm';
 
@@ -16,6 +17,10 @@ interface ProfileHeaderProps {
   onFollow: (userId: number) => void;
   onUnfollow: (userId: number) => void;
   onCancelFollowRequest: (userId: number) => void;
+  onBlockUser: (userId: number) => void;
+  onUnblockUser: (userId: number) => void;
+  onMuteUser: (userId: number) => void;
+  onUnmuteUser: (userId: number) => void;
   onShowFollowers: () => void;
   onShowFollowing: () => void;
   pendingRequestCount?: number;
@@ -42,12 +47,30 @@ export function ProfileHeader({
   onFollow,
   onUnfollow,
   onCancelFollowRequest,
+  onBlockUser,
+  onUnblockUser,
+  onMuteUser,
+  onUnmuteUser,
   onShowFollowers,
   onShowFollowing,
   pendingRequestCount = 0,
   isSettingsOpen = false,
   onOpenSettings,
 }: ProfileHeaderProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [menuOpen]);
+
   if (isEditing && isOwnProfile) {
     return (
       <ProfileEditForm
@@ -63,8 +86,13 @@ export function ProfileHeader({
   }
 
   const followStatus = user.followStatus ?? 'none';
+  const blockStatus: BlockStatus = user.blockStatus ?? 'none';
+  const muteStatus: MuteStatus = user.muteStatus ?? 'none';
   const isFollowing = followStatus === 'following';
   const isRequested = followStatus === 'requested';
+  const youBlocked = blockStatus === 'you_blocked';
+  const isMuted = muteStatus === 'muted';
+  const canInteract = blockStatus === 'none';
 
   const handleFollowClick = () => {
     if (followBusy) return;
@@ -126,6 +154,16 @@ export function ProfileHeader({
                   Edit Profile
                 </button>
               </>
+            ) : youBlocked ? (
+              <button
+                type="button"
+                disabled={followBusy}
+                onClick={() => onUnblockUser(user.id)}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border border-border-custom bg-bg-tertiary hover:bg-bg-tertiary/80 text-text-primary transition-colors cursor-pointer min-h-[44px] disabled:opacity-50"
+              >
+                <UserX className="h-3.5 w-3.5" />
+                Unblock
+              </button>
             ) : (
               <>
                 <button
@@ -147,25 +185,89 @@ export function ProfileHeader({
                   )}
                   {followButtonLabel(followStatus, user.isPrivate)}
                 </button>
-                <button
-                  onClick={() => onStartChat(user)}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border border-border-custom bg-bg-tertiary hover:bg-bg-tertiary/80 text-text-primary transition-colors cursor-pointer min-h-[44px]"
-                >
-                  <MessageCircle className="h-3.5 w-3.5" />
-                  Message
-                </button>
+                {canInteract && (
+                  <button
+                    type="button"
+                    onClick={() => onStartChat(user)}
+                    className="flex items-center justify-center w-11 h-11 rounded-xl border border-border-custom bg-bg-tertiary hover:bg-bg-tertiary/80 text-text-primary transition-colors cursor-pointer"
+                    aria-label="Message"
+                    title="Message"
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                  </button>
+                )}
+                <div className="relative" ref={menuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setMenuOpen(prev => !prev)}
+                    className="flex items-center justify-center w-11 h-11 rounded-xl border border-border-custom bg-bg-tertiary hover:bg-bg-tertiary/80 text-text-primary transition-colors cursor-pointer"
+                    aria-label="More actions"
+                    aria-expanded={menuOpen}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                  {menuOpen && (
+                    <div className="absolute right-0 top-full mt-1 z-20 min-w-[160px] py-1 rounded-xl border border-border-custom bg-bg-secondary shadow-lg">
+                      <button
+                        type="button"
+                        disabled={followBusy}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          if (isMuted) onUnmuteUser(user.id);
+                          else onMuteUser(user.id);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-text-primary hover:bg-bg-tertiary transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {isMuted ? (
+                          <>
+                            <Volume2 className="h-3.5 w-3.5" />
+                            Unmute
+                          </>
+                        ) : (
+                          <>
+                            <VolumeX className="h-3.5 w-3.5" />
+                            Mute
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={followBusy}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onBlockUser(user.id);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        <Ban className="h-3.5 w-3.5" />
+                        Block
+                      </button>
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </div>
         </div>
 
+        {youBlocked && (
+          <p className="mt-3 text-xs text-text-muted bg-bg-tertiary border border-border-custom rounded-lg px-3 py-2">
+            You blocked this user. Their posts are hidden from your feed.
+          </p>
+        )}
+
         <div className="mt-3 space-y-1 text-left">
           <h1 className="text-lg font-bold text-text-primary flex items-center gap-1.5 flex-wrap">
             {user.username}
             {user.role === 'admin' && <Shield className="h-4 w-4 text-amber-500" />}
-            {followStatus === 'follows_you' && !isOwnProfile && (
+            {followStatus === 'follows_you' && !isOwnProfile && canInteract && (
               <span className="text-[10px] font-semibold text-text-muted bg-bg-tertiary px-2 py-0.5 rounded-md">
                 Follows you
+              </span>
+            )}
+            {isMuted && !isOwnProfile && !youBlocked && (
+              <span className="text-[10px] font-semibold text-text-muted bg-bg-tertiary px-2 py-0.5 rounded-md">
+                Muted
               </span>
             )}
           </h1>

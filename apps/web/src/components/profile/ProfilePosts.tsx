@@ -35,6 +35,7 @@ interface ProfilePostsProps {
   onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
+  onOpenPost: (postId: number) => void;
 }
 
 export function ProfilePosts({
@@ -70,6 +71,7 @@ export function ProfilePosts({
   onVotePoll,
   onRetractPollVote,
   onClosePoll,
+  onOpenPost,
 }: ProfilePostsProps) {
   return (
     <div className="space-y-3">
@@ -117,6 +119,7 @@ export function ProfilePosts({
             onVotePoll={onVotePoll}
             onRetractPollVote={onRetractPollVote}
             onClosePoll={onClosePoll}
+            onOpenPost={onOpenPost}
           />
         ))
       )}

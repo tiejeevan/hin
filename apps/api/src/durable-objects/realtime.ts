@@ -5,6 +5,7 @@ import { Message, Notification } from '@hin/types';
 import { verify } from 'hono/jwt';
 import type { Env } from '../types';
 import { JWT_SECRET } from '../lib/auth';
+import { isBlocked } from '../lib/blocks';
 
 export class RealtimeDO implements DurableObject {
   state: DurableObjectState;
@@ -243,6 +244,13 @@ export class RealtimeDO implements DurableObject {
       if (!session) return;
 
       const { receiverId, content } = message.payload;
+
+      if (await isBlocked(db, session.userId, receiverId)) {
+        try {
+          ws.send(JSON.stringify({ type: 'error', payload: { message: 'Cannot message this user' } }));
+        } catch (e) {}
+        return;
+      }
       
       // Determine if receiver has active chat open with sender
       let receiverIsViewingChat = false;

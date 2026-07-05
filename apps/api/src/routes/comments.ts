@@ -5,6 +5,8 @@ import * as schema from '@hin/db';
 import { Comment, Notification } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
+import { getOrCreateUserSettings, isNotificationEnabled } from '../lib/user-settings';
+import { shouldDeliverNotification } from '../lib/blocks';
 
 const comments = new Hono<{ Bindings: Env }>();
 
@@ -98,46 +100,52 @@ comments.post('/:id/like', async (c) => {
     liked = true;
 
     if (comment.userId !== authUser.id) {
-      const notificationContent = `${authUser.username} liked your comment.`;
-      const [notif] = await db
-        .insert(schema.notifications)
-        .values({
+      const recipientSettings = await getOrCreateUserSettings(db, comment.userId);
+      if (
+        isNotificationEnabled(recipientSettings, 'like')
+        && await shouldDeliverNotification(db, comment.userId, authUser.id)
+      ) {
+        const notificationContent = `${authUser.username} liked your comment.`;
+        const [notif] = await db
+          .insert(schema.notifications)
+          .values({
+            userId: comment.userId,
+            senderId: authUser.id,
+            type: 'like',
+            entityType: 'post',
+            entityId: comment.postId,
+            commentId: comment.id,
+            content: notificationContent,
+            read: 0,
+          })
+          .returning();
+
+        const notifPayload: Notification = {
+          id: notif.id,
           userId: comment.userId,
           senderId: authUser.id,
+          senderUsername: authUser.username,
           type: 'like',
           entityType: 'post',
           entityId: comment.postId,
           commentId: comment.id,
           content: notificationContent,
-          read: 0,
-        })
-        .returning();
+          read: false,
+          createdAt: notif.createdAt,
+        };
 
-      const notifPayload: Notification = {
-        id: notif.id,
-        userId: comment.userId,
-        senderId: authUser.id,
-        senderUsername: authUser.username,
-        type: 'like',
-        entityType: 'post',
-        entityId: comment.postId,
-        commentId: comment.id,
-        content: notificationContent,
-        read: false,
-        createdAt: notif.createdAt,
-      };
-
-      try {
-        const doId = c.env.REALTIME_DO.idFromName('global');
-        const doStub = c.env.REALTIME_DO.get(doId);
-        await doStub.fetch(
-          new Request('http://realtime/broadcast-notification', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ recipientId: comment.userId, notification: notifPayload }),
-          })
-        );
-      } catch (e) {}
+        try {
+          const doId = c.env.REALTIME_DO.idFromName('global');
+          const doStub = c.env.REALTIME_DO.get(doId);
+          await doStub.fetch(
+            new Request('http://realtime/broadcast-notification', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ recipientId: comment.userId, notification: notifPayload }),
+            })
+          );
+        } catch (e) {}
+      }
     }
   }
 

@@ -1,5 +1,5 @@
 import { ArrowLeft, Lock } from 'lucide-react';
-import { FollowRequest, Post, Comment, User as UserType } from '@hin/types';
+import { FollowRequest, Post, Comment, User as UserType, UserSettings } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { ProfileHeader } from './ProfileHeader';
 import { ProfilePosts } from './ProfilePosts';
@@ -14,6 +14,8 @@ interface ProfileViewProps {
   profilePostsError: string | null;
   currentUser: UserType;
   token: string;
+  userSettings: UserSettings;
+  onSettingsChange: (settings: UserSettings) => void;
   isEditing: boolean;
   isSettingsOpen: boolean;
   highlightSettings?: boolean;
@@ -35,6 +37,10 @@ interface ProfileViewProps {
   onFollow: (userId: number) => void;
   onUnfollow: (userId: number) => void;
   onCancelFollowRequest: (userId: number) => void;
+  onBlockUser: (userId: number) => void;
+  onUnblockUser: (userId: number) => void;
+  onMuteUser: (userId: number) => void;
+  onUnmuteUser: (userId: number) => void;
   onApproveFollowRequest: (requesterId: number) => Promise<void>;
   onRejectFollowRequest: (requesterId: number) => Promise<void>;
   onShowFollowers: () => void;
@@ -62,6 +68,7 @@ interface ProfileViewProps {
   onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
+  onOpenPost: (postId: number) => void;
 }
 
 export function ProfileView({
@@ -73,6 +80,8 @@ export function ProfileView({
   profilePostsError,
   currentUser,
   token,
+  userSettings,
+  onSettingsChange,
   isEditing,
   isSettingsOpen,
   highlightSettings = false,
@@ -94,6 +103,10 @@ export function ProfileView({
   onFollow,
   onUnfollow,
   onCancelFollowRequest,
+  onBlockUser,
+  onUnblockUser,
+  onMuteUser,
+  onUnmuteUser,
   onApproveFollowRequest,
   onRejectFollowRequest,
   onShowFollowers,
@@ -121,6 +134,7 @@ export function ProfileView({
   onVotePoll,
   onRetractPollVote,
   onClosePoll,
+  onOpenPost,
 }: ProfileViewProps) {
   const isOwnProfile = profileUser?.id === currentUser.id;
   const canViewPosts = profileUser?.canViewPosts !== false;
@@ -158,6 +172,10 @@ export function ProfileView({
             onFollow={onFollow}
             onUnfollow={onUnfollow}
             onCancelFollowRequest={onCancelFollowRequest}
+            onBlockUser={onBlockUser}
+            onUnblockUser={onUnblockUser}
+            onMuteUser={onMuteUser}
+            onUnmuteUser={onUnmuteUser}
             onShowFollowers={onShowFollowers}
             onShowFollowing={onShowFollowing}
             pendingRequestCount={followRequests.length}
@@ -167,12 +185,17 @@ export function ProfileView({
 
           {isOwnProfile && isSettingsOpen && !isEditing && (
             <ProfileSettingsPanel
+              settings={userSettings}
+              token={token}
               requests={followRequests}
               highlighted={highlightSettings}
+              onSettingsChange={onSettingsChange}
               onApprove={onApproveFollowRequest}
               onReject={onRejectFollowRequest}
               onViewProfile={onViewProfile}
               onClose={onCloseSettings}
+              onUnblockUser={onUnblockUser}
+              onUnmuteUser={onUnmuteUser}
             />
           )}
 
@@ -225,6 +248,7 @@ export function ProfileView({
                 onVotePoll={onVotePoll}
                 onRetractPollVote={onRetractPollVote}
                 onClosePoll={onClosePoll}
+                onOpenPost={onOpenPost}
               />
             </>
           )}

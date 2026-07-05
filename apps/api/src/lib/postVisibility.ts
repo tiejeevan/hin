@@ -3,6 +3,7 @@ import { eq, and, or, sql, SQL } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import type { PostVisibility } from '@hin/types';
 import { isFollowing } from './follows';
+import { isAuthorHiddenFromViewer } from './blocks';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -80,6 +81,9 @@ export async function assertCanViewPost(
 > {
   const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
   if (!post || post.deletedAt) {
+    return { ok: false, status: 404, error: 'Post not found' };
+  }
+  if (await isAuthorHiddenFromViewer(db, viewerId, post.userId)) {
     return { ok: false, status: 404, error: 'Post not found' };
   }
   const allowed = await canViewPost(db, viewerId, { userId: post.userId, visibility: post.visibility });

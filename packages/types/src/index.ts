@@ -2,6 +2,9 @@ import { z } from 'zod';
 
 export type FollowStatus = 'none' | 'following' | 'requested' | 'follows_you';
 
+export type BlockStatus = 'none' | 'you_blocked' | 'blocked_you';
+export type MuteStatus = 'none' | 'muted';
+
 export interface User {
   id: number;
   username: string;
@@ -17,6 +20,8 @@ export interface User {
   followingCount?: number;
   followStatus?: FollowStatus;
   canViewPosts?: boolean;
+  blockStatus?: BlockStatus;
+  muteStatus?: MuteStatus;
 }
 
 export interface FollowRequest {
@@ -35,6 +40,30 @@ export interface FollowListUser {
 
 export interface FollowListPage {
   users: FollowListUser[];
+  nextCursor: number | null;
+}
+
+export interface BlockListUser {
+  id: number;
+  username: string;
+  avatarUrl?: string | null;
+  createdAt: string;
+}
+
+export interface MuteListUser {
+  id: number;
+  username: string;
+  avatarUrl?: string | null;
+  createdAt: string;
+}
+
+export interface BlockListPage {
+  users: BlockListUser[];
+  nextCursor: number | null;
+}
+
+export interface MuteListPage {
+  users: MuteListUser[];
   nextCursor: number | null;
 }
 
@@ -80,6 +109,9 @@ export interface Post {
   likesCount: number;
   commentsCount: number;
   hasLiked?: boolean;
+  hasBookmarked?: boolean;
+  bookmarksCount?: number;
+  sharesCount?: number;
   deletedAt?: string | null;
   visibility?: PostVisibility;
   poll?: Poll;
@@ -165,7 +197,7 @@ export interface SystemBroadcast {
 
 export interface PostsPage {
   posts: Post[];
-  nextCursor: number | null;
+  nextCursor: number | string | null;
 }
 
 /** Resolve post deep-link target from a notification (handles legacy rows missing entityType). */
@@ -254,8 +286,87 @@ export const UpdateProfileSchema = z.object({
   bio: z.string().max(500, 'Bio is too long').nullable().optional(),
   avatarUrl: z.string().url().nullable().optional(),
   coverUrl: z.string().url().nullable().optional(),
-  isPrivate: z.boolean().optional(),
 });
+
+export type ChatIconMode = 'global' | 'selected_pages';
+export type ChatIconPage = 'feed' | 'profile' | 'post';
+
+export type NotificationPrefType = 'like' | 'comment' | 'mention' | 'message' | 'system';
+
+export interface UserSettings {
+  isPrivate: boolean;
+  notifyLikes: boolean;
+  notifyComments: boolean;
+  notifyMentions: boolean;
+  notifyDms: boolean;
+  notifySystem: boolean;
+  muteAllToasts: boolean;
+  chatIconMode: ChatIconMode;
+  chatIconPages: ChatIconPage[];
+  updatedAt: string;
+}
+
+export const DEFAULT_USER_SETTINGS: Omit<UserSettings, 'isPrivate' | 'updatedAt'> = {
+  notifyLikes: true,
+  notifyComments: true,
+  notifyMentions: true,
+  notifyDms: true,
+  notifySystem: true,
+  muteAllToasts: false,
+  chatIconMode: 'global',
+  chatIconPages: [],
+};
+
+export const UpdateUserSettingsSchema = z.object({
+  isPrivate: z.boolean().optional(),
+  notifyLikes: z.boolean().optional(),
+  notifyComments: z.boolean().optional(),
+  notifyMentions: z.boolean().optional(),
+  notifyDms: z.boolean().optional(),
+  notifySystem: z.boolean().optional(),
+  muteAllToasts: z.boolean().optional(),
+  chatIconMode: z.enum(['global', 'selected_pages']).optional(),
+  chatIconPages: z.array(z.enum(['feed', 'profile', 'post'])).optional(),
+});
+
+/** Maps notification type to the corresponding user settings field. Follow types are always enabled. */
+export function isNotificationEnabledForSettings(
+  settings: UserSettings,
+  type: Notification['type'],
+): boolean {
+  switch (type) {
+    case 'like':
+      return settings.notifyLikes;
+    case 'comment':
+      return settings.notifyComments;
+    case 'mention':
+      return settings.notifyMentions;
+    case 'message':
+      return settings.notifyDms;
+    case 'system':
+      return settings.notifySystem;
+    default:
+      return true;
+  }
+}
+
+export function shouldShowNotificationToast(
+  settings: UserSettings,
+  type: Notification['type'] | 'system',
+): boolean {
+  if (settings.muteAllToasts) return false;
+  if (type === 'system') return settings.notifySystem;
+  return isNotificationEnabledForSettings(settings, type);
+}
+
+export function shouldShowChatIcon(
+  settings: UserSettings,
+  activeTab: ChatIconPage | 'admin',
+): boolean {
+  if (activeTab === 'admin') return false;
+  if (settings.chatIconMode === 'global') return true;
+  return settings.chatIconPages.includes(activeTab);
+}
 
 // WebSocket Message Types
 export type ClientMessage =

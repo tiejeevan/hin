@@ -15,6 +15,7 @@ import {
   sendFollowRequestViaApi,
   followViaApi,
 } from './helpers/follows';
+import { expandSettingsSection, setSwitchState } from './helpers/settings';
 
 test.describe('Public follow', () => {
   test('following feed shows posts from followed users', async ({ page }) => {
@@ -56,8 +57,6 @@ test.describe('Private account follow requests', () => {
     const ownerPage = await ownerContext.newPage();
     await loginUser(ownerPage, privateName);
     await ownerPage.locator('header').getByRole('button', { name: privateName }).click();
-    await openProfileSettings(ownerPage);
-    await expect(ownerPage.locator('#follow-requests-panel')).toBeVisible();
     await approveFollowRequest(ownerPage, viewerName);
     await ownerContext.close();
 
@@ -81,9 +80,9 @@ test.describe('Private account UI', () => {
     await registerUser(page, username);
 
     await page.locator('header').getByRole('button', { name: username }).click();
-    await page.getByRole('button', { name: 'Edit Profile' }).click();
-    await page.getByRole('switch', { name: 'Private account' }).click();
-    await page.getByRole('button', { name: 'Save Profile' }).click();
+    await openProfileSettings(page);
+    await expandSettingsSection(page, 'Privacy');
+    await setSwitchState(page, 'Private account', true);
     await expect(page.getByText('Private', { exact: true })).toBeVisible();
   });
 

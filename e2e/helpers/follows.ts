@@ -1,4 +1,11 @@
 import { expect, type Page } from '@playwright/test';
+import {
+  expandSettingsSection,
+  openProfileSettings,
+  settingsPanel,
+} from './settings';
+
+export { openProfileSettings, expandSettingsSection };
 
 const API_URL = process.env.PLAYWRIGHT_API_URL ?? 'http://localhost:8787';
 
@@ -21,28 +28,26 @@ export async function requestFollowFromProfile(page: Page) {
   await page.getByRole('button', { name: 'Request' }).click();
 }
 
-export async function openProfileSettings(page: Page) {
-  await page.getByRole('button', { name: 'Profile settings' }).click();
-}
-
 export async function approveFollowRequest(page: Page, requesterUsername: string) {
   await openProfileSettings(page);
-  const panel = page.locator('#follow-requests-panel');
+  await expandSettingsSection(page, 'Privacy');
+  const panel = settingsPanel(page).getByRole('list');
   await expect(panel).toBeVisible();
   const row = panel.locator('li').filter({ hasText: requesterUsername });
-  await row.getByRole('button', { name: 'Approve' }).click();
+  await row.getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(panel.locator('li').filter({ hasText: requesterUsername })).toHaveCount(0);
 }
 
 export async function setPrivateAccount(page: Page) {
-  await page.getByRole('button', { name: 'Edit Profile' }).click();
+  await openProfileSettings(page);
+  await expandSettingsSection(page, 'Privacy');
   await page.getByRole('switch', { name: 'Private account' }).click();
-  await page.getByRole('button', { name: 'Save Profile' }).click();
-  await expect(page.getByText('Private')).toBeVisible();
+  await expect(page.getByText('Private', { exact: true })).toBeVisible();
 }
 
-export async function switchFeedMode(page: Page, mode: 'Everyone' | 'Following') {
-  await page.getByRole('button', { name: mode, exact: true }).click();
+export async function switchFeedMode(page: Page, mode: 'Everyone' | 'Following' | 'Saved') {
+  await page.getByRole('button', { name: new RegExp(`^Feed: (Everyone|Following|Saved)$`) }).click();
+  await page.getByRole('menuitem', { name: mode, exact: true }).click();
 }
 
 export async function registerViaApi(username: string, password: string): Promise<{ token: string; userId: number }> {
@@ -77,7 +82,7 @@ export async function createPostViaApi(
 }
 
 export async function setPrivateViaApi(token: string) {
-  const res = await fetch(`${API_URL}/api/users/me`, {
+  const res = await fetch(`${API_URL}/api/users/me/settings`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',

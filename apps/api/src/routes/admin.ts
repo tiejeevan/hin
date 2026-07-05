@@ -6,6 +6,7 @@ import { BroadcastDelivery, BroadcastSystemMessageSchema, Notification, SystemBr
 import { sign } from 'hono/jwt';
 import type { Env } from '../types';
 import { getAuthUser, JWT_SECRET } from '../lib/auth';
+import { isNotificationEnabled, toPublicSettings } from '../lib/user-settings';
 
 const admin = new Hono<{ Bindings: Env }>();
 
@@ -184,17 +185,39 @@ admin.post('/broadcast', async (c) => {
   let notificationsCreated = 0;
 
   if (sendNotification) {
-    const recipients = await db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(isNull(schema.users.deletedAt))
-      .all();
+    const [recipients, allSettingsRows] = await Promise.all([
+      db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(isNull(schema.users.deletedAt))
+        .all(),
+      db.select().from(schema.userSettings).all(),
+    ]);
+
+    const settingsByUserId = new Map(allSettingsRows.map(row => [row.userId, row]));
+    const eligibleRecipients = recipients.filter(recipient => {
+      const row = settingsByUserId.get(recipient.id);
+      const settings = toPublicSettings(row ?? {
+        userId: recipient.id,
+        notifyLikes: 1,
+        notifyComments: 1,
+        notifyMentions: 1,
+        notifyDms: 1,
+        notifySystem: 1,
+        muteAllToasts: 0,
+        chatIconMode: 'global',
+        chatIconPages: '[]',
+        extensionsJson: '{}',
+        updatedAt: new Date().toISOString(),
+      }, false);
+      return isNotificationEnabled(settings, 'system');
+    });
 
     const BATCH_SIZE = 50;
     const createdNotifs: Notification[] = [];
 
-    for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
-      const batch = recipients.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < eligibleRecipients.length; i += BATCH_SIZE) {
+      const batch = eligibleRecipients.slice(i, i + BATCH_SIZE);
       const inserted = await db
         .insert(schema.notifications)
         .values(

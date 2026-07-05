@@ -5,16 +5,13 @@ import { CommentNode, FeedMode } from '../../types/ui';
 import { CreatePostForm } from './CreatePostForm';
 import type { CreatePostSubmitPayload } from './CreatePostForm';
 import { PostCard } from './PostCard';
-import { FloatingActionStack } from '../ui/FloatingActionStack';
+import { FeedModeSelector } from './FeedModeSelector';
 
 interface FeedViewProps {
   posts: Post[];
   users: UserType[];
   currentUser: UserType;
   showNewPostForm: boolean;
-  showMessagesDropdown: boolean;
-  unreadMessagesCount: number;
-  messageIconPulseAt: number;
   newPostContent: string;
   token: string;
   newlyCreatedPostId: number | null;
@@ -33,7 +30,6 @@ interface FeedViewProps {
   onLoadMore: () => void;
   onOpenCreatePost: () => void;
   onCloseCreatePost: () => void;
-  onToggleMessages: () => void;
   onNewPostContentChange: (value: string) => void;
   onCreatePost: (e: React.FormEvent, payload: CreatePostSubmitPayload) => void | Promise<void>;
   onToggleLike: (postId: number) => void;
@@ -57,6 +53,7 @@ interface FeedViewProps {
   onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
+  onOpenPost: (postId: number) => void;
 }
 
 export function FeedView({
@@ -64,9 +61,6 @@ export function FeedView({
   users,
   currentUser,
   showNewPostForm,
-  showMessagesDropdown,
-  unreadMessagesCount,
-  messageIconPulseAt,
   newPostContent,
   token,
   newlyCreatedPostId,
@@ -85,7 +79,6 @@ export function FeedView({
   onLoadMore,
   onOpenCreatePost,
   onCloseCreatePost,
-  onToggleMessages,
   onNewPostContentChange,
   onCreatePost,
   onToggleLike,
@@ -109,6 +102,7 @@ export function FeedView({
   onVotePoll,
   onRetractPollVote,
   onClosePoll,
+  onOpenPost,
 }: FeedViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -134,22 +128,7 @@ export function FeedView({
   return (
     <div ref={scrollRef} className="flex-grow overflow-y-auto p-4 md:p-6 relative">
       <div className="max-w-2xl mx-auto w-full space-y-4 pb-20 md:pb-4">
-      <div className="flex p-1 bg-bg-secondary border border-border-custom rounded-xl">
-        {(['all', 'following'] as FeedMode[]).map(mode => (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => onFeedModeChange(mode)}
-            className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition-colors cursor-pointer min-h-[40px] ${
-              feedMode === mode
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-text-muted hover:text-text-primary'
-            }`}
-          >
-            {mode === 'all' ? 'Everyone' : 'Following'}
-          </button>
-        ))}
-      </div>
+      <FeedModeSelector feedMode={feedMode} onFeedModeChange={onFeedModeChange} />
 
       <div className="hidden md:flex justify-end">
         <button
@@ -176,7 +155,9 @@ export function FeedView({
           <div className="text-center py-12 border border-dashed border-border-custom rounded-2xl text-text-muted text-sm">
             {feedMode === 'following'
               ? 'Follow people to see their posts here.'
-              : 'No posts yet. Be the first to publish!'}
+              : feedMode === 'bookmarks'
+                ? 'No saved posts yet. Bookmark posts to find them here.'
+                : 'No posts yet. Be the first to publish!'}
           </div>
         ) : (
           <>
@@ -216,6 +197,7 @@ export function FeedView({
                 onVotePoll={onVotePoll}
                 onRetractPollVote={onRetractPollVote}
                 onClosePoll={onClosePoll}
+                onOpenPost={onOpenPost}
               />
             ))}
             <div ref={sentinelRef} className="h-1" aria-hidden />
@@ -232,15 +214,6 @@ export function FeedView({
         )}
       </div>
       </div>
-
-      <FloatingActionStack
-        showNewPostForm={showNewPostForm}
-        showMessagesDropdown={showMessagesDropdown}
-        unreadMessagesCount={unreadMessagesCount}
-        messageIconPulseAt={messageIconPulseAt}
-        onOpenCreatePost={onOpenCreatePost}
-        onToggleMessages={onToggleMessages}
-      />
     </div>
   );
 }

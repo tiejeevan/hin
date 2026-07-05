@@ -43,21 +43,29 @@ export function CreatePostForm({
   const [showPollSettings, setShowPollSettings] = useState(false);
   const [visibility, setVisibility] = useState<PostVisibility>('public');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [visibilityOpen, setVisibilityOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const visibilityRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen && !visibilityOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
       }
+      if (visibilityRef.current && !visibilityRef.current.contains(e.target as Node)) {
+        setVisibilityOpen(false);
+      }
     };
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
+      if (e.key === 'Escape') {
+        setMenuOpen(false);
+        setVisibilityOpen(false);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -66,7 +74,7 @@ export function CreatePostForm({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscape);
     };
-  }, [menuOpen]);
+  }, [menuOpen, visibilityOpen]);
 
   const handleAddFiles = async (files: File[]) => {
     setError(null);
@@ -190,16 +198,58 @@ export function CreatePostForm({
           disabled={submitting}
           actions={
             <div className="flex items-center gap-0.5">
-              <div ref={menuRef} className="relative flex items-center gap-0.5">
-                <span
-                  className="text-text-muted flex items-center justify-center p-1"
-                  title={`Visibility: ${currentVisibility.label}`}
-                >
-                  <VisibilityIcon className="h-3.5 w-3.5" />
-                </span>
+              <div ref={visibilityRef} className="relative">
                 <button
                   type="button"
-                  onClick={() => setMenuOpen(prev => !prev)}
+                  onClick={() => {
+                    setVisibilityOpen(prev => !prev);
+                    setMenuOpen(false);
+                  }}
+                  className="text-text-muted hover:text-text-primary hover:bg-bg-tertiary rounded-lg transition-colors cursor-pointer p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                  title={`Visibility: ${currentVisibility.label}`}
+                  aria-haspopup="menu"
+                  aria-expanded={visibilityOpen}
+                  aria-label={`Visibility: ${currentVisibility.label}`}
+                >
+                  <VisibilityIcon className="h-4 w-4" />
+                </button>
+
+                {visibilityOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 bottom-full mb-1 w-44 rounded-xl border border-border-custom bg-bg-secondary shadow-lg overflow-hidden z-10"
+                  >
+                    {VISIBILITY_OPTIONS.map(({ value, label, Icon }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={visibility === value}
+                        onClick={() => {
+                          setVisibility(value);
+                          setVisibilityOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs transition-colors cursor-pointer min-h-[44px] ${
+                          visibility === value
+                            ? 'text-indigo-400 bg-indigo-500/10'
+                            : 'text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
+                        }`}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div ref={menuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(prev => !prev);
+                    setVisibilityOpen(false);
+                  }}
                   className="text-text-muted hover:text-text-primary hover:bg-bg-tertiary rounded-lg transition-colors cursor-pointer p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
                   title="Post options"
                   aria-haspopup="menu"
@@ -213,30 +263,6 @@ export function CreatePostForm({
                     role="menu"
                     className="absolute right-0 bottom-full mb-1 w-44 rounded-xl border border-border-custom bg-bg-secondary shadow-lg overflow-hidden z-10"
                   >
-                    <div className="px-3 py-2 text-[10px] font-semibold text-text-muted uppercase tracking-wide border-b border-border-custom/60">
-                      Visibility
-                    </div>
-                    {VISIBILITY_OPTIONS.map(({ value, label, Icon }) => (
-                      <button
-                        key={value}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={visibility === value}
-                        onClick={() => {
-                          setVisibility(value);
-                          setMenuOpen(false);
-                        }}
-                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs transition-colors cursor-pointer min-h-[44px] ${
-                          visibility === value
-                            ? 'text-indigo-400 bg-indigo-500/10'
-                            : 'text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
-                        }`}
-                      >
-                        <Icon className="h-3.5 w-3.5" />
-                        {label}
-                      </button>
-                    ))}
-                    <div className="border-t border-border-custom/60" />
                     <button
                       type="button"
                       role="menuitem"

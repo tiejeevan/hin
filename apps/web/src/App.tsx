@@ -9,6 +9,10 @@ import {
   PostsPage,
   SystemBroadcast,
   User as UserType,
+  UserSettings,
+  DEFAULT_USER_SETTINGS,
+  shouldShowNotificationToast,
+  shouldShowChatIcon,
   notificationPostTarget,
 } from '@hin/types';
 import { API_URL, WS_URL } from './config';
@@ -27,6 +31,7 @@ import { AdminDashboard } from './components/admin/AdminDashboard';
 import { ProfileView } from './components/profile/ProfileView';
 import { MessagesPanel } from './components/messages/MessagesPanel';
 import { ToastContainer } from './components/ui/ToastContainer';
+import { FloatingActionStack } from './components/ui/FloatingActionStack';
 import { FollowersModal } from './components/profile/FollowersModal';
 
 export default function App() {
@@ -37,10 +42,12 @@ export default function App() {
   });
   const [users, setUsers] = useState<UserType[]>([]);
   const [posts, setPosts] = useState<import('@hin/types').Post[]>([]);
-  const [feedNextCursor, setFeedNextCursor] = useState<number | null>(null);
+  const [feedNextCursor, setFeedNextCursor] = useState<number | string | null>(null);
   const [isLoadingMorePosts, setIsLoadingMorePosts] = useState(false);
   const [feedMode, setFeedMode] = useState<FeedMode>('all');
   const [followedUserIds, setFollowedUserIds] = useState<Set<number>>(new Set());
+  const [blockedUserIds, setBlockedUserIds] = useState<Set<number>>(new Set());
+  const [mutedUserIds, setMutedUserIds] = useState<Set<number>>(new Set());
   const [followRequests, setFollowRequests] = useState<FollowRequest[]>([]);
   const [followBusy, setFollowBusy] = useState(false);
   const [profilePostsError, setProfilePostsError] = useState<string | null>(null);
@@ -49,6 +56,8 @@ export default function App() {
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = useState(false);
   const feedModeRef = useRef<FeedMode>('all');
   const followedUserIdsRef = useRef<Set<number>>(new Set());
+  const blockedUserIdsRef = useRef<Set<number>>(new Set());
+  const mutedUserIdsRef = useRef<Set<number>>(new Set());
   const usersRef = useRef<UserType[]>([]);
   const feedLoadingRef = useRef(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('feed');
@@ -108,6 +117,12 @@ export default function App() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [isProfileEditing, setIsProfileEditing] = useState(false);
+  const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
+  const userSettingsRef = useRef<UserSettings | null>(null);
+
+  useEffect(() => {
+    userSettingsRef.current = userSettings;
+  }, [userSettings]);
 
   const [postViewId, setPostViewId] = useState<number | null>(null);
   const [postViewPost, setPostViewPost] = useState<import('@hin/types').Post | null>(null);
@@ -142,6 +157,14 @@ export default function App() {
   }, [followedUserIds]);
 
   useEffect(() => {
+    blockedUserIdsRef.current = blockedUserIds;
+  }, [blockedUserIds]);
+
+  useEffect(() => {
+    mutedUserIdsRef.current = mutedUserIds;
+  }, [mutedUserIds]);
+
+  useEffect(() => {
     usersRef.current = users;
   }, [users]);
 
@@ -155,9 +178,13 @@ export default function App() {
   const shouldShowPostInFeed = useCallback((post: import('@hin/types').Post, viewerId: number) => {
     const mode = feedModeRef.current;
     const followed = followedUserIdsRef.current;
+    const blocked = blockedUserIdsRef.current;
+    const muted = mutedUserIdsRef.current;
     const visibility = post.visibility ?? 'public';
 
-    if (post.userId === viewerId) return true;
+    if (blocked.has(post.userId) || muted.has(post.userId)) return false;
+    if (post.userId === viewerId) return mode !== 'bookmarks';
+    if (mode === 'bookmarks') return false;
     if (mode === 'following') {
       return followed.has(post.userId) && visibility !== 'only_me';
     }
@@ -174,7 +201,12 @@ export default function App() {
     content: string,
     type: Toast['type'],
     target?: { postId?: number; commentId?: number },
+    opts?: { skipPrefCheck?: boolean },
   ) => {
+    const settings = userSettingsRef.current;
+    if (!opts?.skipPrefCheck && settings && !shouldShowNotificationToast(settings, type)) {
+      return;
+    }
     const id = Math.random().toString(36).substring(2, 9);
     setToasts(prev => [...prev, { id, content, type, ...target }]);
     const duration = type === 'system' ? 7000 : 4000;
@@ -249,6 +281,32 @@ export default function App() {
     }
   };
 
+  const fetchBlockedIds = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/blocks/ids`, { headers: getHeaders() });
+      if (res.ok) {
+        const data: { ids: number[] } = await res.json();
+        setBlockedUserIds(new Set(data.ids));
+      }
+    } catch (e) {
+      console.error('Error fetching blocked ids:', e);
+    }
+  };
+
+  const fetchMutedIds = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/mutes/ids`, { headers: getHeaders() });
+      if (res.ok) {
+        const data: { ids: number[] } = await res.json();
+        setMutedUserIds(new Set(data.ids));
+      }
+    } catch (e) {
+      console.error('Error fetching muted ids:', e);
+    }
+  };
+
   const fetchFollowRequests = async () => {
     if (!token) return;
     try {
@@ -256,6 +314,29 @@ export default function App() {
       if (res.ok) setFollowRequests(await res.json());
     } catch (e) {
       console.error('Error fetching follow requests:', e);
+    }
+  };
+
+  const fetchUserSettings = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/users/me/settings`, { headers: getHeaders() });
+      if (res.ok) {
+        setUserSettings(await res.json());
+      }
+    } catch (e) {
+      console.error('Error fetching user settings:', e);
+    }
+  };
+
+  const handleSettingsChange = (settings: UserSettings) => {
+    setUserSettings(settings);
+    if (currentUser) {
+      const updatedUser = { ...currentUser, isPrivate: settings.isPrivate };
+      setCurrentUser(updatedUser);
+      localStorage.setItem('hin_user', JSON.stringify(updatedUser));
+      setProfileUser(prev => (prev?.id === currentUser.id ? { ...prev, isPrivate: settings.isPrivate } : prev));
+      setUsers(prev => prev.map(u => (u.id === currentUser.id ? { ...u, isPrivate: settings.isPrivate } : u)));
     }
   };
 
@@ -319,7 +400,7 @@ export default function App() {
       setCurrentUser(updated);
       localStorage.setItem('hin_user', JSON.stringify(updated));
     }
-    addToast('Profile updated successfully', 'system');
+    addToast('Profile updated successfully', 'system', undefined, { skipPrefCheck: true });
   };
 
   const openAdmin = () => {
@@ -339,7 +420,7 @@ export default function App() {
     }
   };
 
-  const fetchPosts = async (opts?: { cursor?: number | null; append?: boolean; mode?: FeedMode }) => {
+  const fetchPosts = async (opts?: { cursor?: number | string | null; append?: boolean; mode?: FeedMode }) => {
     const append = opts?.append ?? false;
     const cursor = opts?.cursor ?? null;
     const mode = opts?.mode ?? feedModeRef.current;
@@ -351,8 +432,11 @@ export default function App() {
     try {
       const params = new URLSearchParams({ limit: String(FEED_PAGE_SIZE) });
       if (cursor !== null) params.set('cursor', String(cursor));
-      if (mode === 'following') params.set('following', 'true');
-      const res = await fetch(`${API_URL}/api/posts?${params}`, { headers: getHeaders() });
+      const url =
+        mode === 'bookmarks'
+          ? `${API_URL}/api/posts/bookmarks?${params}`
+          : `${API_URL}/api/posts?${params}${mode === 'following' ? '&following=true' : ''}`;
+      const res = await fetch(url, { headers: getHeaders() });
       if (res.ok) {
         const data: PostsPage = await res.json();
         setPosts(prev => {
@@ -448,8 +532,8 @@ export default function App() {
   const handleCopyPostPermalink = (postId: number) => {
     const url = postPermalinkUrl(postId);
     navigator.clipboard.writeText(url).then(
-      () => addToast('Link copied to clipboard', 'system'),
-      () => addToast('Could not copy link', 'system'),
+      () => addToast('Link copied to clipboard', 'system', undefined, { skipPrefCheck: true }),
+      () => addToast('Could not copy link', 'system', undefined, { skipPrefCheck: true }),
     );
   };
 
@@ -542,7 +626,10 @@ export default function App() {
       fetchNotifications();
       fetchThreads();
       fetchFollowedIds();
+      fetchBlockedIds();
+      fetchMutedIds();
       fetchFollowRequests();
+      fetchUserSettings();
     } else {
       setUsers([]);
       setPosts([]);
@@ -552,7 +639,10 @@ export default function App() {
       setAdminData(null);
       setBroadcastHistory(null);
       setFollowedUserIds(new Set());
+      setBlockedUserIds(new Set());
+      setMutedUserIds(new Set());
       setFollowRequests([]);
+      setUserSettings(null);
     }
   }, [token]);
 
@@ -694,17 +784,23 @@ export default function App() {
               processedNotifIdsRef.current.add(notif.id);
               setNotifications(prev => (prev.some(n => n.id === notif.id) ? prev : [notif, ...prev]));
               setUnreadNotifsCount(prev => prev + 1);
-              if (notif.type === 'like') {
+              const settings = userSettingsRef.current;
+              const showToast = (type: Toast['type']) =>
+                !settings || shouldShowNotificationToast(settings, type);
+              if (notif.type === 'like' && showToast('like')) {
                 const target = notificationPostTarget(notif);
-                addToast(notif.content, 'like', target ? { postId: target.postId, commentId: target.commentId } : undefined);
-              } else if (notif.type === 'comment') {
+                addToast(notif.content, 'like', target ? { postId: target.postId, commentId: target.commentId } : undefined, { skipPrefCheck: true });
+              } else if (notif.type === 'comment' && showToast('comment')) {
                 const target = notificationPostTarget(notif);
-                addToast(notif.content, 'comment', target ? { postId: target.postId, commentId: target.commentId } : undefined);
-              } else if (notif.type === 'mention') {
+                addToast(notif.content, 'comment', target ? { postId: target.postId, commentId: target.commentId } : undefined, { skipPrefCheck: true });
+              } else if (notif.type === 'mention' && showToast('mention')) {
                 const target = notificationPostTarget(notif);
-                addToast(notif.content, 'mention', target ? { postId: target.postId, commentId: target.commentId } : undefined);
-              } else if (notif.type === 'follow' || notif.type === 'follow_request' || notif.type === 'follow_accepted') {
-                addToast(notif.content, notif.type);
+                addToast(notif.content, 'mention', target ? { postId: target.postId, commentId: target.commentId } : undefined, { skipPrefCheck: true });
+              } else if (
+                (notif.type === 'follow' || notif.type === 'follow_request' || notif.type === 'follow_accepted') &&
+                showToast(notif.type)
+              ) {
+                addToast(notif.content, notif.type, undefined, { skipPrefCheck: true });
               }
               if (notif.type === 'follow_request' && notif.userId === currentUser!.id) {
                 fetchFollowRequests();
@@ -747,7 +843,10 @@ export default function App() {
               break;
             }
             case 'system_toast': {
-              addToast(message.payload.content, 'system');
+              const settings = userSettingsRef.current;
+              if (!settings || shouldShowNotificationToast(settings, 'system')) {
+                addToast(message.payload.content, 'system', undefined, { skipPrefCheck: true });
+              }
               break;
             }
             case 'post_created': {
@@ -1073,7 +1172,7 @@ export default function App() {
         setPosts(prev => prev.map(p => (p.id === postId ? updatedPost : p)));
         setProfilePosts(prev => prev.map(p => (p.id === postId ? updatedPost : p)));
         setEditingPostId(null);
-        addToast('Post updated successfully', 'system');
+        addToast('Post updated successfully', 'system', undefined, { skipPrefCheck: true });
       }
     } catch (e) {
       console.error(e);
@@ -1090,7 +1189,7 @@ export default function App() {
         if (profileUser) {
           setProfileUser(prev => prev ? { ...prev, postCount: Math.max(0, (prev.postCount || 1) - 1) } : prev);
         }
-        addToast('Post deleted successfully', 'system');
+        addToast('Post deleted successfully', 'system', undefined, { skipPrefCheck: true });
         if (currentUser.role === 'admin' && adminData) fetchAdminStats();
       }
     } catch (e) {
@@ -1117,6 +1216,69 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
+  };
+
+  const handleToggleBookmark = async (postId: number) => {
+    if (!currentUser) return;
+    try {
+      const res = await fetch(`${API_URL}/api/posts/${postId}/bookmark`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPostViewPost(prev =>
+          prev?.id === postId
+            ? { ...prev, hasBookmarked: data.bookmarked, bookmarksCount: data.bookmarksCount }
+            : prev
+        );
+        if (feedModeRef.current === 'bookmarks' && !data.bookmarked) {
+          setPosts(prev => prev.filter(p => p.id !== postId));
+        }
+        addToast(data.bookmarked ? 'Post bookmarked' : 'Bookmark removed', 'system', undefined, { skipPrefCheck: true });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleSharePost = async (postId: number) => {
+    const post = postViewPost?.id === postId ? postViewPost : null;
+    if (!post) return;
+    const url = postPermalinkUrl(postId);
+    const shareText = post.content.trim().slice(0, 200) || `Post by ${post.username}`;
+
+    if (currentUser) {
+      try {
+        const res = await fetch(`${API_URL}/api/posts/${postId}/share`, {
+          method: 'POST',
+          headers: getHeaders(),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setPostViewPost(prev =>
+            prev?.id === postId ? { ...prev, sharesCount: data.sharesCount } : prev
+          );
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `${post.username} on Hin`,
+          text: shareText,
+          url,
+        });
+        return;
+      }
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') return;
+    }
+
+    handleCopyPostPermalink(postId);
   };
 
   const handleToggleCommentLike = async (postId: number, commentId: number) => {
@@ -1200,7 +1362,7 @@ export default function App() {
           [postId]: (prev[postId] || []).map(c => (c.id === commentId ? updatedComment : c)),
         }));
         setEditingCommentId(null);
-        addToast('Comment updated successfully', 'system');
+        addToast('Comment updated successfully', 'system', undefined, { skipPrefCheck: true });
       }
     } catch (e) {
       console.error(e);
@@ -1230,7 +1392,7 @@ export default function App() {
             prev.map(p => (p.id === postId ? { ...p, commentsCount: Math.max(0, p.commentsCount - 1) } : p))
           );
         }
-        addToast('Comment deleted', 'system');
+        addToast('Comment deleted', 'system', undefined, { skipPrefCheck: true });
         if (currentUser.role === 'admin' && adminData) fetchAdminStats();
       }
     } catch (e) {
@@ -1358,7 +1520,7 @@ export default function App() {
         if (profileUserId === userId) fetchProfilePosts(userId);
       }
     } catch (e) {
-      addToast(e instanceof Error ? e.message : 'Failed to follow', 'system');
+      addToast(e instanceof Error ? e.message : 'Failed to follow', 'system', undefined, { skipPrefCheck: true });
     } finally {
       setFollowBusy(false);
     }
@@ -1389,7 +1551,7 @@ export default function App() {
         fetchProfilePosts(userId);
       }
     } catch (e) {
-      addToast(e instanceof Error ? e.message : 'Failed to unfollow', 'system');
+      addToast(e instanceof Error ? e.message : 'Failed to unfollow', 'system', undefined, { skipPrefCheck: true });
     } finally {
       setFollowBusy(false);
     }
@@ -1407,7 +1569,113 @@ export default function App() {
       if (!res.ok) throw new Error(data.error || 'Failed to cancel request');
       updateProfileFollowState(userId, { followStatus: data.followStatus });
     } catch (e) {
-      addToast(e instanceof Error ? e.message : 'Failed to cancel request', 'system');
+      addToast(e instanceof Error ? e.message : 'Failed to cancel request', 'system', undefined, { skipPrefCheck: true });
+    } finally {
+      setFollowBusy(false);
+    }
+  };
+
+  const handleBlockUser = async (userId: number) => {
+    if (!token || followBusy) return;
+    setFollowBusy(true);
+    try {
+      const res = await fetch(`${API_URL}/api/blocks/${userId}`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to block user');
+      setBlockedUserIds(prev => new Set([...prev, userId]));
+      setFollowedUserIds(prev => {
+        const next = new Set(prev);
+        next.delete(userId);
+        return next;
+      });
+      setPosts(prev => prev.filter(p => p.userId !== userId));
+      updateProfileFollowState(userId, {
+        blockStatus: data.blockStatus,
+        followStatus: 'none',
+        canViewPosts: false,
+      });
+      if (profileUserId === userId) {
+        setProfilePosts([]);
+      }
+      addToast('User blocked', 'system', undefined, { skipPrefCheck: true });
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Failed to block user', 'system', undefined, { skipPrefCheck: true });
+    } finally {
+      setFollowBusy(false);
+    }
+  };
+
+  const handleUnblockUser = async (userId: number) => {
+    if (!token || followBusy) return;
+    setFollowBusy(true);
+    try {
+      const res = await fetch(`${API_URL}/api/blocks/${userId}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to unblock user');
+      setBlockedUserIds(prev => {
+        const next = new Set(prev);
+        next.delete(userId);
+        return next;
+      });
+      updateProfileFollowState(userId, {
+        blockStatus: data.blockStatus,
+        canViewPosts: true,
+      });
+      if (profileUserId === userId) fetchProfilePosts(userId);
+      addToast('User unblocked', 'system', undefined, { skipPrefCheck: true });
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Failed to unblock user', 'system', undefined, { skipPrefCheck: true });
+    } finally {
+      setFollowBusy(false);
+    }
+  };
+
+  const handleMuteUser = async (userId: number) => {
+    if (!token || followBusy) return;
+    setFollowBusy(true);
+    try {
+      const res = await fetch(`${API_URL}/api/mutes/${userId}`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to mute user');
+      setMutedUserIds(prev => new Set([...prev, userId]));
+      setPosts(prev => prev.filter(p => p.userId !== userId));
+      updateProfileFollowState(userId, { muteStatus: data.muteStatus });
+      addToast('User muted', 'system', undefined, { skipPrefCheck: true });
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Failed to mute user', 'system', undefined, { skipPrefCheck: true });
+    } finally {
+      setFollowBusy(false);
+    }
+  };
+
+  const handleUnmuteUser = async (userId: number) => {
+    if (!token || followBusy) return;
+    setFollowBusy(true);
+    try {
+      const res = await fetch(`${API_URL}/api/mutes/${userId}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to unmute user');
+      setMutedUserIds(prev => {
+        const next = new Set(prev);
+        next.delete(userId);
+        return next;
+      });
+      updateProfileFollowState(userId, { muteStatus: data.muteStatus });
+      addToast('User unmuted', 'system', undefined, { skipPrefCheck: true });
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Failed to unmute user', 'system', undefined, { skipPrefCheck: true });
     } finally {
       setFollowBusy(false);
     }
@@ -1421,7 +1689,7 @@ export default function App() {
     });
     if (res.ok) {
       setFollowRequests(prev => prev.filter(r => r.requesterId !== requesterId));
-      addToast('Follow request approved', 'system');
+      addToast('Follow request approved', 'system', undefined, { skipPrefCheck: true });
       fetchFollowedIds();
     }
   };
@@ -1516,7 +1784,7 @@ export default function App() {
         setToken(data.token);
         setCurrentUser(data.user);
         goHome();
-        addToast(`Now acting as @${data.user.username}`, 'system');
+        addToast(`Now acting as @${data.user.username}`, 'system', undefined, { skipPrefCheck: true });
       } else {
         const err = await res.json();
         alert(err.error || 'Failed to impersonate');
@@ -1540,7 +1808,7 @@ export default function App() {
       setAdminUser(null);
       setActiveTab('admin');
       setChatRecipient(null);
-      addToast('Returned to Admin session', 'system');
+      addToast('Returned to Admin session', 'system', undefined, { skipPrefCheck: true });
     }
   };
 
@@ -1555,7 +1823,7 @@ export default function App() {
         body: JSON.stringify({ role: nextRole }),
       });
       if (res.ok) {
-        addToast('User role updated successfully', 'system');
+        addToast('User role updated successfully', 'system', undefined, { skipPrefCheck: true });
         if (adminData) fetchAdminStats();
       }
     } catch (e) {
@@ -1569,7 +1837,7 @@ export default function App() {
     try {
       const res = await fetch(`${API_URL}/api/admin/users/${userId}`, { method: 'DELETE', headers: getHeaders() });
       if (res.ok) {
-        addToast(`Account @${targetUsername} has been soft-deleted`, 'system');
+        addToast(`Account @${targetUsername} has been soft-deleted`, 'system', undefined, { skipPrefCheck: true });
         if (adminData) fetchAdminStats();
         fetchUsers();
       }
@@ -1580,6 +1848,14 @@ export default function App() {
 
   const isGuestPostView = !currentUser && activeTab === 'post';
   const showAuthOnly = !currentUser && !isGuestPostView;
+
+  const effectiveSettings: UserSettings = userSettings ?? {
+    ...DEFAULT_USER_SETTINGS,
+    isPrivate: !!currentUser?.isPrivate,
+    updatedAt: new Date(0).toISOString(),
+  };
+  const showChatIcon =
+    !!currentUser && shouldShowChatIcon(effectiveSettings, activeTab);
 
   return (
     <AppShell
@@ -1701,6 +1977,8 @@ export default function App() {
             onRetractPollVote={handleRetractPollVote}
             onClosePoll={handleClosePoll}
             onCopyPermalink={() => postViewId && handleCopyPostPermalink(postViewId)}
+            onToggleBookmark={() => postViewId && handleToggleBookmark(postViewId)}
+            onShare={() => postViewId && handleSharePost(postViewId)}
           />
         ) : currentUser && activeTab === 'feed' ? (
           <FeedView
@@ -1708,9 +1986,6 @@ export default function App() {
             users={users}
             currentUser={currentUser}
             showNewPostForm={showNewPostForm}
-            showMessagesDropdown={showMessagesDropdown}
-            unreadMessagesCount={unreadMessagesCount}
-            messageIconPulseAt={messageIconPulseAt}
             newPostContent={newPostContent}
             token={token!}
             newlyCreatedPostId={newlyCreatedPostId}
@@ -1732,7 +2007,6 @@ export default function App() {
               setShowNewPostForm(true);
             }}
             onCloseCreatePost={() => setShowNewPostForm(false)}
-            onToggleMessages={toggleMessagesDropdown}
             onNewPostContentChange={setNewPostContent}
             onCreatePost={handleCreatePost}
             onToggleLike={handleToggleLike}
@@ -1762,6 +2036,7 @@ export default function App() {
             onVotePoll={handleVotePoll}
             onRetractPollVote={handleRetractPollVote}
             onClosePoll={handleClosePoll}
+            onOpenPost={openPost}
           />
         ) : currentUser && activeTab === 'profile' && profileUserId && token ? (
           <ProfileView
@@ -1773,6 +2048,8 @@ export default function App() {
             profilePostsError={profilePostsError}
             currentUser={currentUser}
             token={token}
+            userSettings={effectiveSettings}
+            onSettingsChange={handleSettingsChange}
             isEditing={isProfileEditing}
             isSettingsOpen={isProfileSettingsOpen}
             highlightSettings={highlightFollowRequests}
@@ -1794,6 +2071,10 @@ export default function App() {
             onFollow={handleFollow}
             onUnfollow={handleUnfollow}
             onCancelFollowRequest={handleCancelFollowRequest}
+            onBlockUser={handleBlockUser}
+            onUnblockUser={handleUnblockUser}
+            onMuteUser={handleMuteUser}
+            onUnmuteUser={handleUnmuteUser}
             onApproveFollowRequest={handleApproveFollowRequest}
             onRejectFollowRequest={handleRejectFollowRequest}
             onShowFollowers={() => setFollowersModal('followers')}
@@ -1830,6 +2111,7 @@ export default function App() {
             onVotePoll={handleVotePoll}
             onRetractPollVote={handleRetractPollVote}
             onClosePoll={handleClosePoll}
+            onOpenPost={openPost}
           />
         ) : currentUser && activeTab === 'admin' ? (
           <AdminDashboard
@@ -1844,6 +2126,23 @@ export default function App() {
             onBroadcast={handleSystemBroadcast}
           />
         ) : null}
+
+        {currentUser && activeTab !== 'admin' && (
+          <FloatingActionStack
+            showNewPostForm={showNewPostForm}
+            showCreatePost={activeTab === 'feed'}
+            showChatIcon={showChatIcon}
+            showMessagesDropdown={showMessagesDropdown}
+            unreadMessagesCount={unreadMessagesCount}
+            messageIconPulseAt={messageIconPulseAt}
+            onOpenCreatePost={() => {
+              setShowMessagesDropdown(false);
+              if (activeTab !== 'feed') goHome();
+              setShowNewPostForm(true);
+            }}
+            onToggleMessages={toggleMessagesDropdown}
+          />
+        )}
 
         {currentUser && (
           <MessagesPanel

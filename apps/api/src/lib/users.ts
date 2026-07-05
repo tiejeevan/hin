@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { FollowStatus, User } from '@hin/types';
+import { FollowStatus, User, BlockStatus, MuteStatus } from '@hin/types';
 import bcrypt from 'bcryptjs';
 
 export function toPublicUser(
@@ -21,6 +21,8 @@ export function toPublicUser(
     followingCount?: number;
     followStatus?: FollowStatus;
     canViewPosts?: boolean;
+    blockStatus?: BlockStatus;
+    muteStatus?: MuteStatus;
   },
 ): User {
   return {
@@ -38,6 +40,8 @@ export function toPublicUser(
     ...(extras?.followingCount !== undefined ? { followingCount: extras.followingCount } : {}),
     ...(extras?.followStatus !== undefined ? { followStatus: extras.followStatus } : {}),
     ...(extras?.canViewPosts !== undefined ? { canViewPosts: extras.canViewPosts } : {}),
+    ...(extras?.blockStatus !== undefined ? { blockStatus: extras.blockStatus } : {}),
+    ...(extras?.muteStatus !== undefined ? { muteStatus: extras.muteStatus } : {}),
   };
 }
 

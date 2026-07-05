@@ -11,6 +11,14 @@ import {
   getFollowerCount,
   getFollowingCount,
 } from '../lib/follows';
+import { getBlockStatus } from '../lib/blocks';
+import { getMuteStatus } from '../lib/mutes';
+import {
+  getOrCreateUserSettings,
+  ensureUserSettingsRow,
+  settingsRowUpdatesFromPatch,
+} from '../lib/user-settings';
+import { UpdateUserSettingsSchema } from '@hin/types';
 
 const users = new Hono<{ Bindings: Env }>();
 
@@ -37,13 +45,11 @@ users.patch('/me', async (c) => {
     bio?: string | null;
     avatarUrl?: string | null;
     coverUrl?: string | null;
-    isPrivate?: boolean;
   }>();
   const updates: Partial<{
     bio: string | null;
     avatarUrl: string | null;
     coverUrl: string | null;
-    isPrivate: number;
   }> = {};
 
   if (body.bio !== undefined) {
@@ -54,7 +60,6 @@ users.patch('/me', async (c) => {
   }
   if (body.avatarUrl !== undefined) updates.avatarUrl = body.avatarUrl;
   if (body.coverUrl !== undefined) updates.coverUrl = body.coverUrl;
-  if (body.isPrivate !== undefined) updates.isPrivate = body.isPrivate ? 1 : 0;
 
   if (Object.keys(updates).length === 0) {
     return c.json({ error: 'No valid fields to update' }, 400);
@@ -67,6 +72,50 @@ users.patch('/me', async (c) => {
     .returning();
 
   return c.json(toPublicUser(updated));
+});
+
+users.get('/me/settings', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const settings = await getOrCreateUserSettings(db, authUser.id);
+  return c.json(settings);
+});
+
+users.patch('/me/settings', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const body = await c.req.json();
+  const parsed = UpdateUserSettingsSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.errors[0]?.message ?? 'Invalid settings' }, 400);
+  }
+
+  const patch = parsed.data;
+  const db = drizzle(c.env.DB, { schema });
+
+  if (patch.isPrivate !== undefined) {
+    await db.update(schema.users)
+      .set({ isPrivate: patch.isPrivate ? 1 : 0 })
+      .where(eq(schema.users.id, authUser.id));
+  }
+
+  const rowUpdates = settingsRowUpdatesFromPatch(patch);
+  if (Object.keys(rowUpdates).length > 0) {
+    await ensureUserSettingsRow(db, authUser.id);
+    await db.update(schema.userSettings)
+      .set({ ...rowUpdates, updatedAt: new Date().toISOString() })
+      .where(eq(schema.userSettings.userId, authUser.id));
+  }
+
+  if (patch.isPrivate === undefined && Object.keys(rowUpdates).length === 0) {
+    return c.json({ error: 'No valid fields to update' }, 400);
+  }
+
+  const settings = await getOrCreateUserSettings(db, authUser.id);
+  return c.json(settings);
 });
 
 // Get single user profile
@@ -90,12 +139,20 @@ users.get('/:id', async (c) => {
 
   if (!user) return c.json({ error: 'User not found' }, 404);
 
-  const [followerCount, followingCount, followStatus, canView] = await Promise.all([
+  const blockStatus = await getBlockStatus(db, authUser.id, userId);
+  if (blockStatus === 'blocked_you') {
+    return c.json({ error: 'User not found' }, 404);
+  }
+
+  const [followerCount, followingCount, followStatus, canView, muteStatus] = await Promise.all([
     getFollowerCount(db, userId),
     getFollowingCount(db, userId),
     getFollowStatus(db, authUser.id, userId),
     canViewUserPosts(db, authUser.id, { id: user.id, isPrivate: user.isPrivate }),
+    getMuteStatus(db, authUser.id, userId),
   ]);
+
+  const canViewPosts = blockStatus === 'you_blocked' ? false : canView;
 
   let postCount: number | null = null;
   const postCountConditions = [
@@ -116,7 +173,9 @@ users.get('/:id', async (c) => {
     followerCount,
     followingCount,
     followStatus,
-    canViewPosts: canView,
+    canViewPosts,
+    blockStatus,
+    muteStatus,
   }));
 });
 

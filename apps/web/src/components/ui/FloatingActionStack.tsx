@@ -3,6 +3,8 @@ import { Plus, MessageSquare } from 'lucide-react';
 
 interface FloatingActionStackProps {
   showNewPostForm: boolean;
+  showCreatePost?: boolean;
+  showChatIcon?: boolean;
   showMessagesDropdown: boolean;
   unreadMessagesCount: number;
   messageIconPulseAt: number;
@@ -12,6 +14,8 @@ interface FloatingActionStackProps {
 
 export function FloatingActionStack({
   showNewPostForm,
+  showCreatePost = true,
+  showChatIcon = true,
   showMessagesDropdown,
   unreadMessagesCount,
   messageIconPulseAt,
@@ -34,14 +38,17 @@ export function FloatingActionStack({
 
   return (
     <div className="fixed bottom-4 right-4 z-20 flex flex-col items-center gap-3">
-      <button
-        onClick={onOpenCreatePost}
-        className="h-14 w-14 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 flex items-center justify-center cursor-pointer transition-all active:scale-95"
-        aria-label="Create post"
-      >
-        <Plus className="h-6 w-6" />
-      </button>
+      {showCreatePost && (
+        <button
+          onClick={onOpenCreatePost}
+          className="h-14 w-14 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 flex items-center justify-center cursor-pointer transition-all active:scale-95"
+          aria-label="Create post"
+        >
+          <Plus className="h-6 w-6" />
+        </button>
+      )}
 
+      {showChatIcon && (
       <button
         id="messages-fab-trigger"
         onClick={onToggleMessages}
@@ -62,6 +69,7 @@ export function FloatingActionStack({
           </span>
         )}
       </button>
+      )}
     </div>
   );
 }

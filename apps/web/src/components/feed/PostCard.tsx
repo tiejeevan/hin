@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { Heart, MessageSquare, Shield, Trash2, Send, X, MoreVertical, Pencil, Globe, Users, Lock, Link2 } from 'lucide-react';
-import { Post, Comment, User as UserType, PostVisibility } from '@hin/types';
+import { Heart, MessageSquare, Shield, Trash2, Send, X, MoreVertical, Pencil, Link2, Bookmark, Share2 } from 'lucide-react';
+import { Post, Comment, User as UserType } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { buildCommentTree } from '../../utils/comments';
 import { CommentItem } from './CommentItem';
@@ -28,6 +28,9 @@ interface PostCardProps {
   highlightCommentId?: number | null;
   onSignInRequired?: () => void;
   onCopyPermalink?: () => void;
+  onOpenPost?: (postId: number) => void;
+  onToggleBookmark?: () => void;
+  onShare?: () => void;
   onToggleLike: (postId: number) => void;
   onToggleComments: (postId: number) => void;
   onDeletePost: (postId: number) => void;
@@ -51,12 +54,6 @@ interface PostCardProps {
   onClosePoll: (postId: number) => Promise<void>;
 }
 
-const VISIBILITY_META: Record<PostVisibility, { Icon: typeof Globe; title: string }> = {
-  public: { Icon: Globe, title: 'Public' },
-  followers: { Icon: Users, title: 'Followers only' },
-  only_me: { Icon: Lock, title: 'Only me' },
-};
-
 export function PostCard({
   post,
   currentUser,
@@ -75,6 +72,9 @@ export function PostCard({
   highlightCommentId = null,
   onSignInRequired,
   onCopyPermalink,
+  onOpenPost,
+  onToggleBookmark,
+  onShare,
   onToggleLike,
   onToggleComments,
   onDeletePost,
@@ -103,8 +103,6 @@ export function PostCard({
   const menuRef = useRef<HTMLDivElement>(null);
   const canManagePost = !readOnly && currentUser && (currentUser.role === 'admin' || currentUser.id === post.userId);
   const author = users.find(u => u.id === post.userId);
-  const visibility = (post.visibility ?? 'public') as PostVisibility;
-  const { Icon: VisibilityIcon, title: visibilityTitle } = VISIBILITY_META[visibility];
 
   const requireAuth = (action: () => void) => {
     if (readOnly || !currentUser) {
@@ -214,19 +212,16 @@ export function PostCard({
                 {author?.role === 'admin' && <Shield className="h-3 w-3 text-amber-500" />}
               </button>
               <span className="text-[9px] text-text-muted flex items-center gap-1">
-                <span title={visibilityTitle} aria-label={visibilityTitle}>
-                  <VisibilityIcon className="h-3 w-3" />
-                </span>
                 <button
                   type="button"
-                  onClick={onCopyPermalink}
+                  onClick={() => (onOpenPost ? onOpenPost(post.id) : onCopyPermalink?.())}
                   className="hover:text-indigo-400 transition-colors cursor-pointer"
-                  title="Copy link"
+                  title={onOpenPost ? 'View post' : onCopyPermalink ? 'Copy link' : undefined}
                 >
                   {new Date(post.createdAt).toLocaleDateString()}{' '}
                   {new Date(post.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </button>
-                {onCopyPermalink && (
+                {onCopyPermalink && !onOpenPost && (
                   <button
                     type="button"
                     onClick={onCopyPermalink}
@@ -270,15 +265,31 @@ export function PostCard({
         ) : (
           <>
             {post.content.trim() && (
-              <MentionsText
-                content={post.content}
-                users={users}
-                onViewProfile={onViewProfile}
-                className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left"
-              />
+              onOpenPost ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenPost(post.id)}
+                  className="block w-full text-left cursor-pointer hover:opacity-90 transition-opacity"
+                >
+                  <MentionsText
+                    content={post.content}
+                    users={users}
+                    onViewProfile={onViewProfile}
+                    className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left"
+                  />
+                </button>
+              ) : (
+                <MentionsText
+                  content={post.content}
+                  users={users}
+                  onViewProfile={onViewProfile}
+                  className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left"
+                />
+              )
             )}
             {post.type === 'poll' && post.poll && (
-              <PostPollBody
+              <div onClick={e => e.stopPropagation()}>
+                <PostPollBody
                 post={post}
                 poll={post.poll}
                 isAuthor={!!currentUser && currentUser.id === post.userId}
@@ -286,23 +297,25 @@ export function PostCard({
                 onRetractVote={readOnly ? async () => { onSignInRequired?.(); } : onRetractPollVote}
                 onClosePoll={readOnly ? async () => {} : onClosePoll}
               />
+              </div>
             )}
           </>
         )}
 
         {post.mediaUrls && post.mediaUrls.length > 0 && (
-          <PostMediaGallery
-            urls={post.mediaUrls}
-            onImageClick={index => setLightboxIndex(index)}
-          />
-        )}
-
-        {lightboxIndex !== null && post.mediaUrls.length > 0 && (
-          <ImageLightbox
-            images={post.mediaUrls}
-            initialIndex={lightboxIndex}
-            onClose={() => setLightboxIndex(null)}
-          />
+          <div onClick={e => e.stopPropagation()}>
+            <PostMediaGallery
+              urls={post.mediaUrls}
+              onImageClick={index => setLightboxIndex(index)}
+            />
+            {lightboxIndex !== null && (
+              <ImageLightbox
+                images={post.mediaUrls}
+                initialIndex={lightboxIndex}
+                onClose={() => setLightboxIndex(null)}
+              />
+            )}
+          </div>
         )}
       </div>
 
@@ -326,6 +339,36 @@ export function PostCard({
           <MessageSquare className="h-4.5 w-4.5" />
           <span>{post.commentsCount}</span>
         </button>
+
+        {(onToggleBookmark || onShare) && (
+          <div className="ml-auto flex items-center gap-1">
+            {onToggleBookmark && (
+              <button
+                type="button"
+                onClick={() => requireAuth(onToggleBookmark)}
+                className={`flex items-center gap-1.5 text-xs transition-colors py-1 cursor-pointer min-h-[44px] px-1 ${
+                  post.hasBookmarked ? 'text-amber-500 font-semibold' : 'text-text-muted hover:text-amber-400'
+                }`}
+                title={post.hasBookmarked ? 'Remove bookmark' : 'Bookmark'}
+                aria-label={post.hasBookmarked ? 'Remove bookmark' : 'Bookmark'}
+              >
+                <Bookmark className={`h-4.5 w-4.5 ${post.hasBookmarked ? 'fill-amber-500' : ''}`} />
+              </button>
+            )}
+            {onShare && (
+              <button
+                type="button"
+                onClick={onShare}
+                className="flex items-center gap-1.5 text-xs text-text-muted hover:text-indigo-400 transition-colors py-1 cursor-pointer min-h-[44px] px-1"
+                title="Share"
+                aria-label="Share post"
+              >
+                <Share2 className="h-4.5 w-4.5" />
+                {(post.sharesCount ?? 0) > 0 && <span>{post.sharesCount}</span>}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {isCommentsExpanded && (
