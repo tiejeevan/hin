@@ -18,6 +18,8 @@ export const users = sqliteTable('users', {
 export const posts = sqliteTable('posts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** 'text' | 'poll' — extensible for future post kinds */
+  type: text('type').default('text').notNull(),
   content: text('content').notNull(),
   /** JSON array of media URLs (max 5) */
   mediaUrls: text('media_urls'),
@@ -27,6 +29,53 @@ export const posts = sqliteTable('posts', {
   userIdIdx: index('posts_user_id_idx').on(table.userId),
   createdAtIdx: index('posts_created_at_idx').on(table.createdAt),
   deletedAtIdx: index('posts_deleted_at_idx').on(table.deletedAt),
+  typeIdx: index('posts_type_idx').on(table.type),
+}));
+
+export const polls = sqliteTable('polls', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  postId: integer('post_id').notNull().unique().references(() => posts.id, { onDelete: 'cascade' }),
+  question: text('question').notNull().default(''),
+  endsAt: text('ends_at'),
+  maxSelections: integer('max_selections').default(1).notNull(),
+  allowVoteChange: integer('allow_vote_change').default(1).notNull(),
+  allowVoteRetraction: integer('allow_vote_retraction').default(1).notNull(),
+  isAnonymous: integer('is_anonymous').default(0).notNull(),
+  /** 'always' | 'after_vote' | 'after_close' */
+  resultsVisibility: text('results_visibility').default('always').notNull(),
+  /** 'open' | 'closed' */
+  status: text('status').default('open').notNull(),
+  totalVotes: integer('total_votes').default(0).notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  postIdIdx: index('polls_post_id_idx').on(table.postId),
+  statusIdx: index('polls_status_idx').on(table.status),
+  endsAtIdx: index('polls_ends_at_idx').on(table.endsAt),
+}));
+
+export const pollOptions = sqliteTable('poll_options', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  pollId: integer('poll_id').notNull().references(() => polls.id, { onDelete: 'cascade' }),
+  label: text('label').notNull(),
+  position: integer('position').notNull(),
+  voteCount: integer('vote_count').default(0).notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text('deleted_at'),
+}, (table) => ({
+  pollIdIdx: index('poll_options_poll_id_idx').on(table.pollId),
+}));
+
+export const pollVotes = sqliteTable('poll_votes', {
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  optionId: integer('option_id').notNull().references(() => pollOptions.id, { onDelete: 'cascade' }),
+  pollId: integer('poll_id').notNull().references(() => polls.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text('deleted_at'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.optionId] }),
+  pollIdIdx: index('poll_votes_poll_id_idx').on(table.pollId),
+  userPollIdx: index('poll_votes_user_poll_idx').on(table.userId, table.pollId),
+  deletedAtIdx: index('poll_votes_deleted_at_idx').on(table.deletedAt),
 }));
 
 export const postEditHistory = sqliteTable('post_edit_history', {

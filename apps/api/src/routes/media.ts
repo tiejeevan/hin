@@ -18,6 +18,19 @@ function folderForType(type: UploadType, userId: number): string {
   return `posts/${userId}`;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function uploadKey(
+  folder: string,
+  ext: string,
+  baseName: string | null,
+  variant: string | null,
+): string {
+  const stem = baseName && UUID_RE.test(baseName) ? baseName : crypto.randomUUID();
+  const suffix = variant === 'thumb' ? '_thumb' : '';
+  return `${folder}/${stem}${suffix}.${ext}`;
+}
+
 // Health check: verify R2 + D1 media_uploads stay in sync
 media.get('/api/upload/health', async (c) => {
   const authUser = await getAuthUser(c);
@@ -105,7 +118,14 @@ media.post('/api/upload', async (c) => {
 
   const ext = file.type === 'image/jpeg' ? 'jpg' : file.type === 'image/png' ? 'png' : 'webp';
   const folder = folderForType(type, authUser.id);
-  const key = `${folder}/${crypto.randomUUID()}.${ext}`;
+  const baseName = formData.get('baseName');
+  const variant = formData.get('variant');
+  const key = uploadKey(
+    folder,
+    ext,
+    typeof baseName === 'string' ? baseName : null,
+    typeof variant === 'string' ? variant : null,
+  );
 
   const bytes = await file.arrayBuffer();
   await c.env.MEDIA.put(key, bytes, {

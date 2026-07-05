@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { User as UserType } from '@hin/types';
 import { API_URL } from '../../config';
 import { ImagePicker, PickedImage } from '../ui/ImagePicker';
-import { uploadCompressedImage } from '../../lib/compressImage';
+import { uploadAvatarWithThumbnail, uploadCompressedImage } from '../../lib/compressImage';
 
 interface ProfileEditFormProps {
   user: UserType;
@@ -40,7 +40,10 @@ export function ProfileEditForm({ user, token, onSave, onCancel }: ProfileEditFo
     else setCoverImages([placeholder]);
 
     try {
-      const result = await uploadCompressedImage(file, kind, token, API_URL);
+      const result =
+        kind === 'avatar'
+          ? await uploadAvatarWithThumbnail(file, token, API_URL)
+          : await uploadCompressedImage(file, kind, token, API_URL);
       const uploaded: PickedImage = { previewUrl, remoteUrl: result.url, uploadId: result.id, file };
       if (kind === 'avatar') {
         setAvatarImages([uploaded]);

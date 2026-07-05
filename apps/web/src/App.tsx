@@ -4,12 +4,15 @@ import {
   Comment,
   Message,
   Notification,
+  Poll,
   PostsPage,
   SystemBroadcast,
   User as UserType,
 } from '@hin/types';
 import { API_URL, WS_URL } from './config';
 import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode } from './types/ui';
+import type { CreatePostSubmitPayload } from './components/feed/CreatePostForm';
+import { mergePollFromBroadcast } from './utils/pollVisibility';
 import { AppShell } from './components/layout/AppShell';
 import { AppHeader } from './components/layout/AppHeader';
 import { ImpersonationBanner } from './components/layout/ImpersonationBanner';
@@ -544,7 +547,26 @@ export default function App() {
             }
             case 'post_updated': {
               const { post } = message.payload;
-              setPosts(prev => prev.map(p => (p.id === post.id ? { ...p, content: post.content } : p)));
+              setPosts(prev => prev.map(p => (p.id === post.id ? { ...p, ...post } : p)));
+              setProfilePosts(prev => prev.map(p => (p.id === post.id ? { ...p, ...post } : p)));
+              break;
+            }
+            case 'poll_vote_update':
+            case 'poll_closed': {
+              const { postId, poll } = message.payload;
+              const mergePoll = (p: import('@hin/types').Post) => {
+                if (p.id !== postId || !p.poll) return p;
+                return {
+                  ...p,
+                  poll: mergePollFromBroadcast(
+                    p.poll,
+                    poll,
+                    p.userId === currentUser!.id,
+                  ),
+                };
+              };
+              setPosts(prev => prev.map(mergePoll));
+              setProfilePosts(prev => prev.map(mergePoll));
               break;
             }
             case 'like_update': {
@@ -716,12 +738,35 @@ export default function App() {
     ws.current?.close();
   };
 
-  const handleCreatePost = async (_e: React.FormEvent, mediaUrls: string[]) => {
-    if (!currentUser || !newPostContent.trim()) return;
+  const applyPollUpdate = (postId: number, poll: Poll) => {
+    const merge = (p: import('@hin/types').Post) =>
+      p.id === postId ? { ...p, poll } : p;
+    setPosts(prev => prev.map(merge));
+    setProfilePosts(prev => prev.map(merge));
+  };
+
+  const handleCreatePost = async (_e: React.FormEvent, payload: CreatePostSubmitPayload) => {
+    if (!currentUser) return;
+    if (payload.kind === 'text' && !newPostContent.trim()) return;
+    if (payload.kind === 'poll' && !payload.poll.question.trim()) return;
+
+    const body =
+      payload.kind === 'poll'
+        ? {
+            type: 'poll' as const,
+            content: newPostContent.trim(),
+            mediaUrls: payload.mediaUrls.length ? payload.mediaUrls : undefined,
+            ...payload.poll,
+          }
+        : {
+            content: newPostContent,
+            mediaUrls: payload.mediaUrls.length ? payload.mediaUrls : undefined,
+          };
+
     const res = await fetch(`${API_URL}/api/posts`, {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ content: newPostContent, mediaUrls }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -737,6 +782,46 @@ export default function App() {
     setShowNewPostForm(false);
     setNewlyCreatedPostId(newPost.id);
     setTimeout(() => setNewlyCreatedPostId(null), 3000);
+  };
+
+  const handleVotePoll = async (postId: number, optionIds: number[]) => {
+    const res = await fetch(`${API_URL}/api/posts/${postId}/poll/vote`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ optionIds }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Failed to vote');
+    }
+    const { poll } = await res.json();
+    applyPollUpdate(postId, poll);
+  };
+
+  const handleRetractPollVote = async (postId: number) => {
+    const res = await fetch(`${API_URL}/api/posts/${postId}/poll/vote`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Failed to retract vote');
+    }
+    const { poll } = await res.json();
+    applyPollUpdate(postId, poll);
+  };
+
+  const handleClosePoll = async (postId: number) => {
+    const res = await fetch(`${API_URL}/api/posts/${postId}/poll/close`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Failed to close poll');
+    }
+    const { poll } = await res.json();
+    applyPollUpdate(postId, poll);
   };
 
   const handleSavePostEdit = async (postId: number) => {
@@ -1212,6 +1297,9 @@ export default function App() {
             onEditCommentContentChange={setEditingCommentContent}
             onReply={(postId, comment: CommentNode) => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
             onToggleCommentLike={handleToggleCommentLike}
+            onVotePoll={handleVotePoll}
+            onRetractPollVote={handleRetractPollVote}
+            onClosePoll={handleClosePoll}
           />
         ) : activeTab === 'profile' && profileUserId && token ? (
           <ProfileView
@@ -1260,6 +1348,9 @@ export default function App() {
             onReply={(postId, comment: CommentNode) => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
             onToggleCommentLike={handleToggleCommentLike}
             onViewProfile={openProfile}
+            onVotePoll={handleVotePoll}
+            onRetractPollVote={handleRetractPollVote}
+            onClosePoll={handleClosePoll}
           />
         ) : activeTab === 'admin' ? (
           <AdminDashboard

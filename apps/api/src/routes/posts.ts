@@ -2,16 +2,92 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, desc, and, count, sql, isNull, lt, inArray } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { Post, Comment, Notification, PostsPage } from '@hin/types';
+import { Post, Comment, Notification, PostsPage, parseCreatePostBody, VotePollSchema } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { linkPostMedia, parseMediaUrls, serializeMediaUrls, validateOwnedPostMedia } from '../lib/media';
 import { notifyMentions } from '../lib/mentions';
+import { createPollWithOptions, loadPollsForPosts, castVote, retractVote, closePoll, getPollByPostId } from '../lib/polls';
 
 const posts = new Hono<{ Bindings: Env }>();
 
 const DEFAULT_FEED_LIMIT = 10;
 const MAX_FEED_LIMIT = 50;
+
+async function broadcastEvent(env: Env, message: object) {
+  try {
+    const doId = env.REALTIME_DO.idFromName('global');
+    const doStub = env.REALTIME_DO.get(doId);
+    await doStub.fetch(new Request('http://realtime/broadcast-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(message),
+    }));
+  } catch (_e) {}
+}
+
+async function buildPostResponse(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  post: {
+    id: number;
+    userId: number;
+    type?: string | null;
+    content: string;
+    mediaUrls: string | null;
+    createdAt: string;
+    username: string;
+  },
+  currentUserId: number | null,
+  pollMap?: Map<number, import('@hin/types').Poll>,
+): Promise<Post> {
+  const likesRes = await db
+    .select({ value: count() })
+    .from(schema.likes)
+    .where(and(eq(schema.likes.postId, post.id), isNull(schema.likes.deletedAt)))
+    .get();
+  const likesCount = likesRes?.value || 0;
+
+  const commentsRes = await db
+    .select({ value: count() })
+    .from(schema.comments)
+    .where(and(eq(schema.comments.postId, post.id), sql`${schema.comments.deletedAt} IS NULL`))
+    .get();
+  const commentsCount = commentsRes?.value || 0;
+
+  let hasLiked = false;
+  if (currentUserId) {
+    const likeRecord = await db
+      .select()
+      .from(schema.likes)
+      .where(and(
+        eq(schema.likes.postId, post.id),
+        eq(schema.likes.userId, currentUserId),
+        isNull(schema.likes.deletedAt),
+      ))
+      .get();
+    hasLiked = !!likeRecord;
+  }
+
+  const postType = (post.type ?? 'text') as Post['type'];
+  const response: Post = {
+    id: post.id,
+    userId: post.userId,
+    username: post.username,
+    type: postType,
+    content: post.content,
+    mediaUrls: parseMediaUrls(post.mediaUrls),
+    createdAt: post.createdAt,
+    likesCount,
+    commentsCount,
+    hasLiked,
+  };
+
+  if (postType === 'poll') {
+    response.poll = pollMap?.get(post.id) ?? await getPollByPostId(db, post.id, post.userId, currentUserId) ?? undefined;
+  }
+
+  return response;
+}
 
 // Get posts (cursor-paginated; order by id desc for stable cursors)
 posts.get('/', async (c) => {
@@ -54,6 +130,7 @@ posts.get('/', async (c) => {
   const rows = await db.select({
     id: schema.posts.id,
     userId: schema.posts.userId,
+    type: schema.posts.type,
     content: schema.posts.content,
     mediaUrls: schema.posts.mediaUrls,
     createdAt: schema.posts.createdAt,
@@ -70,60 +147,12 @@ posts.get('/', async (c) => {
   const pageRows = hasMore ? rows.slice(0, limit) : rows;
   const nextCursor = hasMore ? pageRows[pageRows.length - 1].id : null;
 
+  const pollPostIds = pageRows.filter(p => p.type === 'poll').map(p => p.id);
+  const postAuthorMap = new Map(pageRows.map(p => [p.id, p.userId]));
+  const pollMap = await loadPollsForPosts(db, pollPostIds, postAuthorMap, currentUserId);
+
   const postsWithMetadata: Post[] = await Promise.all(
-    pageRows.map(async (post) => {
-      const likesRes = await db
-        .select({ value: count() })
-        .from(schema.likes)
-        .where(
-          and(
-            eq(schema.likes.postId, post.id),
-            isNull(schema.likes.deletedAt)
-          )
-        )
-        .get();
-      const likesCount = likesRes?.value || 0;
-
-      const commentsRes = await db
-        .select({ value: count() })
-        .from(schema.comments)
-        .where(
-          and(
-            eq(schema.comments.postId, post.id),
-            sql`${schema.comments.deletedAt} IS NULL`
-          )
-        )
-        .get();
-      const commentsCount = commentsRes?.value || 0;
-
-      let hasLiked = false;
-      if (currentUserId) {
-        const likeRecord = await db
-          .select()
-          .from(schema.likes)
-          .where(
-            and(
-              eq(schema.likes.postId, post.id),
-              eq(schema.likes.userId, currentUserId),
-              isNull(schema.likes.deletedAt)
-            )
-          )
-          .get();
-        hasLiked = !!likeRecord;
-      }
-
-      return {
-        id: post.id,
-        userId: post.userId,
-        username: post.username,
-        content: post.content,
-        mediaUrls: parseMediaUrls(post.mediaUrls),
-        createdAt: post.createdAt,
-        likesCount,
-        commentsCount,
-        hasLiked,
-      };
-    })
+    pageRows.map(post => buildPostResponse(db, post, currentUserId, pollMap)),
   );
 
   const page: PostsPage = { posts: postsWithMetadata, nextCursor };
@@ -136,12 +165,14 @@ posts.post('/', async (c) => {
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
 
   const db = drizzle(c.env.DB, { schema });
-  const { content, mediaUrls: rawMediaUrls } = await c.req.json<{ content: string; mediaUrls?: string[] }>();
-  if (!content || content.trim() === '') {
-    return c.json({ error: 'Content cannot be empty' }, 400);
+  const body = await c.req.json();
+  const parsed = parseCreatePostBody(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, 400);
   }
 
-  const mediaUrls = Array.isArray(rawMediaUrls) ? rawMediaUrls.filter(Boolean) : [];
+  const data = parsed.data;
+  const mediaUrls = Array.isArray(data.mediaUrls) ? data.mediaUrls.filter(Boolean) : [];
   if (mediaUrls.length > 5) {
     return c.json({ error: 'Maximum 5 images allowed' }, 400);
   }
@@ -152,9 +183,13 @@ posts.post('/', async (c) => {
     }
   }
 
+  const isPoll = 'type' in data && data.type === 'poll';
+  const postType = isPoll ? 'poll' : 'text';
+
   const [inserted] = await db.insert(schema.posts).values({
     userId: authUser.id,
-    content: content,
+    type: postType,
+    content: (data.content ?? '').trim(),
     mediaUrls: serializeMediaUrls(mediaUrls),
   }).returning();
 
@@ -162,17 +197,32 @@ posts.post('/', async (c) => {
     await linkPostMedia(db, authUser.id, inserted.id, mediaUrls);
   }
 
-  const responsePost: Post = {
+  if (isPoll && 'options' in data) {
+    await createPollWithOptions(
+      db,
+      inserted.id,
+      {
+        question: data.question,
+        endsAt: data.endsAt ?? null,
+        maxSelections: data.maxSelections ?? 1,
+        allowVoteChange: data.allowVoteChange,
+        allowVoteRetraction: data.allowVoteRetraction,
+        isAnonymous: data.isAnonymous,
+        resultsVisibility: data.resultsVisibility,
+      },
+      data.options.map(o => o.label),
+    );
+  }
+
+  const responsePost = await buildPostResponse(db, {
     id: inserted.id,
     userId: authUser.id,
-    username: authUser.username,
+    type: postType,
     content: inserted.content,
-    mediaUrls: parseMediaUrls(inserted.mediaUrls),
+    mediaUrls: inserted.mediaUrls,
     createdAt: inserted.createdAt,
-    likesCount: 0,
-    commentsCount: 0,
-    hasLiked: false,
-  };
+    username: authUser.username,
+  }, authUser.id);
 
   await notifyMentions(db, c.env, {
     content: inserted.content,
@@ -182,16 +232,7 @@ posts.post('/', async (c) => {
     context: 'post',
   });
 
-  // Broadcast new post in real-time
-  try {
-    const doId = c.env.REALTIME_DO.idFromName('global');
-    const doStub = c.env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'post_created', payload: { post: responsePost } }),
-    }));
-  } catch (e) {}
+  await broadcastEvent(c.env, { type: 'post_created', payload: { post: responsePost } });
 
   return c.json(responsePost);
 });
@@ -231,34 +272,19 @@ posts.put('/:id', async (c) => {
     .where(eq(schema.posts.id, postId))
     .returning();
 
-  const likesRes = await db.select({ value: count() }).from(schema.likes).where(and(eq(schema.likes.postId, postId), isNull(schema.likes.deletedAt))).get();
-  const commentsRes = await db.select({ value: count() }).from(schema.comments).where(and(eq(schema.comments.postId, postId), sql`${schema.comments.deletedAt} IS NULL`)).get();
-
-  const likeRecord = await db.select().from(schema.likes).where(and(eq(schema.likes.postId, postId), eq(schema.likes.userId, authUser.id), isNull(schema.likes.deletedAt))).get();
   const author = await db.select({ username: schema.users.username }).from(schema.users).where(eq(schema.users.id, updated.userId)).get();
 
-  const responsePost: Post = {
+  const responsePost = await buildPostResponse(db, {
     id: updated.id,
     userId: updated.userId,
-    username: author?.username || 'Unknown',
+    type: updated.type,
     content: updated.content,
-    mediaUrls: parseMediaUrls(updated.mediaUrls),
+    mediaUrls: updated.mediaUrls,
     createdAt: updated.createdAt,
-    likesCount: likesRes?.value || 0,
-    commentsCount: commentsRes?.value || 0,
-    hasLiked: !!likeRecord,
-  };
+    username: author?.username || 'Unknown',
+  }, authUser.id);
 
-  // Broadcast post edit
-  try {
-    const doId = c.env.REALTIME_DO.idFromName('global');
-    const doStub = c.env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'post_updated', payload: { post: responsePost } }),
-    }));
-  } catch (e) {}
+  await broadcastEvent(c.env, { type: 'post_updated', payload: { post: responsePost } });
 
   return c.json(responsePost);
 });
@@ -558,6 +584,88 @@ posts.post('/:id/comments', async (c) => {
   } catch (e) {}
 
   return c.json(commentResponse);
+});
+
+// Vote on poll
+posts.post('/:id/poll/vote', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const postId = parseInt(c.req.param('id'));
+  if (isNaN(postId)) return c.json({ error: 'Invalid post id' }, 400);
+
+  const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
+  if (!post || post.deletedAt) return c.json({ error: 'Post not found' }, 404);
+  if (post.type !== 'poll') return c.json({ error: 'Not a poll post' }, 400);
+
+  const body = await c.req.json();
+  const parsed = VotePollSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.errors[0]?.message || 'Invalid vote' }, 400);
+  }
+
+  const result = await castVote(db, postId, authUser.id, parsed.data.optionIds);
+  if (result.error) return c.json({ error: result.error }, result.status || 400);
+
+  await broadcastEvent(c.env, {
+    type: 'poll_vote_update',
+    payload: { postId, poll: result.poll },
+  });
+
+  return c.json({ poll: result.poll });
+});
+
+// Retract poll vote
+posts.delete('/:id/poll/vote', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const postId = parseInt(c.req.param('id'));
+  if (isNaN(postId)) return c.json({ error: 'Invalid post id' }, 400);
+
+  const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
+  if (!post || post.deletedAt) return c.json({ error: 'Post not found' }, 404);
+  if (post.type !== 'poll') return c.json({ error: 'Not a poll post' }, 400);
+
+  const result = await retractVote(db, postId, authUser.id);
+  if (result.error) return c.json({ error: result.error }, result.status || 400);
+
+  await broadcastEvent(c.env, {
+    type: 'poll_vote_update',
+    payload: { postId, poll: result.poll },
+  });
+
+  return c.json({ poll: result.poll });
+});
+
+// Close poll (author or admin)
+posts.post('/:id/poll/close', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const postId = parseInt(c.req.param('id'));
+  if (isNaN(postId)) return c.json({ error: 'Invalid post id' }, 400);
+
+  const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
+  if (!post || post.deletedAt) return c.json({ error: 'Post not found' }, 404);
+  if (post.type !== 'poll') return c.json({ error: 'Not a poll post' }, 400);
+
+  if (authUser.role !== 'admin' && authUser.id !== post.userId) {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const result = await closePoll(db, postId);
+  if (result.error) return c.json({ error: result.error }, result.status || 400);
+
+  await broadcastEvent(c.env, {
+    type: 'poll_closed',
+    payload: { postId, poll: result.poll },
+  });
+
+  return c.json({ poll: result.poll });
 });
 
 // Delete Post (Owner or Admin) - Soft Delete

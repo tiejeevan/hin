@@ -276,12 +276,15 @@ Feed posts authored by users.
 | --- | --- | --- | --- |
 | `id` | integer | PK, autoincrement | |
 | `user_id` | integer | not null, FK → `users.id` | cascade on delete |
+| `type` | text | not null, default `'text'` | `'text'` \| `'poll'` — extensible post kind |
 | `content` | text | not null | |
 | `media_urls` | text | nullable | JSON array of media URLs (max 5) |
 | `created_at` | text | not null, default `CURRENT_TIMESTAMP` | |
 | `deleted_at` | text | nullable | soft delete |
 
-**Indexes:** `posts_user_id_idx`, `posts_created_at_idx`, `posts_deleted_at_idx`
+**Indexes:** `posts_user_id_idx`, `posts_created_at_idx`, `posts_deleted_at_idx`, `posts_type_idx`
+
+**Evolution notes:** `type` added in migration `0012`. Existing rows backfilled to `'text'`.
 
 ---
 
@@ -434,12 +437,74 @@ Admin audit log for every system message broadcast (notification, toast, or both
 
 ---
 
+### `polls`
+
+Poll configuration linked 1:1 to a poll post (`posts.type = 'poll'`).
+
+| Column | Type | Constraints | Notes |
+| --- | --- | --- | --- |
+| `id` | integer | PK, autoincrement | |
+| `post_id` | integer | not null, unique, FK → `posts.id` | cascade on delete |
+| `question` | text | not null | poll question or statement shown above options |
+| `ends_at` | text | nullable | ISO timestamp; null = no auto-expiry |
+| `max_selections` | integer | not null, default `1` | `1` = single choice; `>1` = multi-select cap |
+| `allow_vote_change` | integer | not null, default `1` | SQLite boolean - allow changing selection |
+| `allow_vote_retraction` | integer | not null, default `1` | SQLite boolean - allow removing vote entirely |
+| `is_anonymous` | integer | not null, default `0` | hide voter identities in API |
+| `results_visibility` | text | not null, default `'always'` | `'always'` \| `'after_vote'` \| `'after_close'` |
+| `status` | text | not null, default `'open'` | `'open'` \| `'closed'` |
+| `total_votes` | integer | not null, default `0` | denormalized distinct voter count |
+| `created_at` | text | not null, default `CURRENT_TIMESTAMP` | |
+
+**Indexes:** `polls_post_id_idx`, `polls_status_idx`, `polls_ends_at_idx`
+
+---
+
+### `poll_options`
+
+Choices for a poll.
+
+| Column | Type | Constraints | Notes |
+| --- | --- | --- | --- |
+| `id` | integer | PK, autoincrement | |
+| `poll_id` | integer | not null, FK → `polls.id` | cascade on delete |
+| `label` | text | not null | max 200 chars (API validation) |
+| `position` | integer | not null | display order (0-based) |
+| `vote_count` | integer | not null, default `0` | denormalized |
+| `created_at` | text | not null, default `CURRENT_TIMESTAMP` | |
+| `deleted_at` | text | nullable | reserved for future option edits |
+
+**Indexes:** `poll_options_poll_id_idx`
+
+---
+
+### `poll_votes`
+
+User votes on poll options. Composite PK supports multi-select.
+
+| Column | Type | Constraints | Notes |
+| --- | --- | --- | --- |
+| `user_id` | integer | PK, FK → `users.id` | cascade on delete |
+| `option_id` | integer | PK, FK → `poll_options.id` | cascade on delete |
+| `poll_id` | integer | not null, FK → `polls.id` | denormalized for lookups |
+| `created_at` | text | not null, default `CURRENT_TIMESTAMP` | |
+| `deleted_at` | text | nullable | soft delete (vote change / retract) |
+
+**Indexes:** `poll_votes_poll_id_idx`, `poll_votes_user_poll_idx`, `poll_votes_deleted_at_idx`
+
+**Evolution notes:** poll tables added in migration `0012`.
+
+---
+
 ## Quick reference
 
 | Table | Purpose | Soft delete |
 | --- | --- | --- |
 | `users` | Accounts / profiles | yes |
-| `posts` | Feed posts | yes |
+| `posts` | Feed posts (text or poll) | yes |
+| `polls` | Poll settings (1:1 with poll posts) | no |
+| `poll_options` | Poll choices | soft delete on options |
+| `poll_votes` | User votes on options | yes |
 | `post_edit_history` | Post edit snapshots | no |
 | `media_uploads` | R2 media tracking | no |
 | `comments` | Post comments (nested) | yes |

@@ -32,6 +32,9 @@ interface ProfilePostsProps {
   onReply: (postId: number, comment: CommentNode) => void;
   onToggleCommentLike: (postId: number, commentId: number) => void;
   onViewProfile: (userId: number) => void;
+  onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
+  onRetractPollVote: (postId: number) => Promise<void>;
+  onClosePoll: (postId: number) => Promise<void>;
 }
 
 export function ProfilePosts({
@@ -64,6 +67,9 @@ export function ProfilePosts({
   onReply,
   onToggleCommentLike,
   onViewProfile,
+  onVotePoll,
+  onRetractPollVote,
+  onClosePoll,
 }: ProfilePostsProps) {
   return (
     <div className="space-y-3">
@@ -108,6 +114,9 @@ export function ProfilePosts({
             onReply={onReply}
             onToggleCommentLike={onToggleCommentLike}
             onViewProfile={onViewProfile}
+            onVotePoll={onVotePoll}
+            onRetractPollVote={onRetractPollVote}
+            onClosePoll={onClosePoll}
           />
         ))
       )}

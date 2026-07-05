@@ -85,6 +85,27 @@
       "when": 1783143000000,
       "tag": "0011_system_broadcasts",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1783144000000,
+      "tag": "0012_polls",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1783145000000,
+      "tag": "0013_poll_question",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1783146000000,
+      "tag": "0014_allow_vote_retraction",
+      "breakpoints": true
     }
   ]
 }

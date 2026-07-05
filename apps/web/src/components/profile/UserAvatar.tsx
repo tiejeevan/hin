@@ -1,9 +1,11 @@
+import { useEffect, useState } from 'react';
 import { getAvatarColor } from '../../utils/avatar';
+import { avatarUrlForDisplay, type AvatarDisplaySize } from '../../utils/avatarUrl';
 
 interface UserAvatarProps {
   username: string;
   avatarUrl?: string | null;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: AvatarDisplaySize;
   className?: string;
   onClick?: () => void;
 }
@@ -18,13 +20,22 @@ const sizeClasses = {
 export function UserAvatar({ username, avatarUrl, size = 'md', className = '', onClick }: UserAvatarProps) {
   const sizeClass = sizeClasses[size];
   const interactive = onClick ? 'cursor-pointer hover:opacity-90 transition-opacity' : '';
+  const preferredSrc = avatarUrlForDisplay(avatarUrl, size);
+  const [src, setSrc] = useState(preferredSrc);
 
-  if (avatarUrl) {
+  useEffect(() => {
+    setSrc(avatarUrlForDisplay(avatarUrl, size));
+  }, [avatarUrl, size]);
+
+  if (src) {
     return (
       <img
-        src={avatarUrl}
+        src={src}
         alt={`${username}'s avatar`}
         onClick={onClick}
+        onError={() => {
+          if (avatarUrl && src !== avatarUrl) setSrc(avatarUrl);
+        }}
         className={`rounded-full object-cover border border-border-custom shrink-0 ${sizeClass} ${interactive} ${className}`}
       />
     );

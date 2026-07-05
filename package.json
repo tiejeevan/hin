@@ -11,9 +11,13 @@
     "build": "npm run build --workspaces --if-present",
     "db:generate": "npm run db:generate --workspace=packages/db",
     "db:migrate:local": "npm run db:migrate:local --workspace=packages/db",
-    "db:migrate:prod": "npm run db:migrate:prod --workspace=packages/db"
+    "db:migrate:prod": "npm run db:migrate:prod --workspace=packages/db",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:polls": "playwright test e2e/polls.spec.ts"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "concurrently": "^8.2.2",
     "typescript": "^5.4.5"
   }

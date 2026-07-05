@@ -6,6 +6,8 @@ import { buildCommentTree } from '../../utils/comments';
 import { CommentItem } from './CommentItem';
 import { MentionsText } from './MentionsText';
 import { ImageLightbox } from './ImageLightbox';
+import { PostMediaGallery } from './PostMediaGallery';
+import { PostPollBody } from './PostPollBody';
 import { UserAvatar } from '../profile/UserAvatar';
 
 interface PostCardProps {
@@ -40,6 +42,9 @@ interface PostCardProps {
   onReply: (postId: number, comment: CommentNode) => void;
   onToggleCommentLike: (postId: number, commentId: number) => void;
   onViewProfile: (userId: number) => void;
+  onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
+  onRetractPollVote: (postId: number) => Promise<void>;
+  onClosePoll: (postId: number) => Promise<void>;
 }
 
 export function PostCard({
@@ -74,6 +79,9 @@ export function PostCard({
   onReply,
   onToggleCommentLike,
   onViewProfile,
+  onVotePoll,
+  onRetractPollVote,
+  onClosePoll,
 }: PostCardProps) {
   const nestedComments = buildCommentTree(commentsList);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -158,7 +166,7 @@ export function PostCard({
             <UserAvatar
               username={post.username}
               avatarUrl={author?.avatarUrl}
-              size="md"
+              size="sm"
               onClick={() => onViewProfile(post.userId)}
             />
             <div className="text-left">
@@ -204,51 +212,33 @@ export function PostCard({
             </div>
           </div>
         ) : (
-          <MentionsText
-            content={post.content}
-            users={users}
-            onViewProfile={onViewProfile}
-            className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left"
-          />
+          <>
+            {post.content.trim() && (
+              <MentionsText
+                content={post.content}
+                users={users}
+                onViewProfile={onViewProfile}
+                className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left"
+              />
+            )}
+            {post.type === 'poll' && post.poll && (
+              <PostPollBody
+                post={post}
+                poll={post.poll}
+                isAuthor={currentUser.id === post.userId}
+                onVote={onVotePoll}
+                onRetractVote={onRetractPollVote}
+                onClosePoll={onClosePoll}
+              />
+            )}
+          </>
         )}
 
         {post.mediaUrls && post.mediaUrls.length > 0 && (
-          <div
-            className={`rounded-xl overflow-hidden border border-border-custom bg-bg-primary ${
-              post.mediaUrls.length === 1
-                ? 'max-h-80 flex items-center justify-center'
-                : `grid gap-0.5 ${post.mediaUrls.length === 2 ? 'grid-cols-2' : 'grid-cols-2'}`
-            }`}
-          >
-            {post.mediaUrls.map((url, i) => (
-              <button
-                type="button"
-                key={url + i}
-                onClick={() => setLightboxIndex(i)}
-                className={`block p-0 border-0 bg-transparent cursor-pointer ${
-                  post.mediaUrls.length === 1
-                    ? 'w-full'
-                    : post.mediaUrls.length === 3 && i === 0
-                      ? 'col-span-2 aspect-[2/1]'
-                      : 'aspect-square'
-                }`}
-                aria-label={`View image ${i + 1}`}
-              >
-                <img
-                  src={url}
-                  alt={`Post attachment ${i + 1}`}
-                  className={
-                    post.mediaUrls.length === 1
-                      ? 'max-w-full max-h-80 object-contain mx-auto'
-                      : 'w-full h-full object-cover'
-                  }
-                  onError={e => {
-                    (e.target as HTMLElement).style.display = 'none';
-                  }}
-                />
-              </button>
-            ))}
-          </div>
+          <PostMediaGallery
+            urls={post.mediaUrls}
+            onImageClick={index => setLightboxIndex(index)}
+          />
         )}
 
         {lightboxIndex !== null && post.mediaUrls.length > 0 && (
@@ -260,7 +250,7 @@ export function PostCard({
         )}
       </div>
 
-      <div className="flex items-center gap-6 border-t border-border-custom/40 pt-3">
+      <div className="flex items-center gap-6">
         <button
           onClick={() => onToggleLike(post.id)}
           className={`flex items-center gap-1.5 text-xs transition-colors py-1 cursor-pointer min-h-[44px] ${

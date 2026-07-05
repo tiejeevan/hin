@@ -1,4 +1,4 @@
-import { Sparkles, LogOut, Shield } from 'lucide-react';
+import { LogOut, Shield } from 'lucide-react';
 import { User as UserType, Notification } from '@hin/types';
 import { NotificationBell } from '../notifications/NotificationBell';
 import { NotificationPanel } from '../notifications/NotificationPanel';
@@ -40,24 +40,16 @@ export function AppHeader({
 
   return (
     <header className="sticky top-0 z-40 bg-bg-secondary/85 backdrop-blur-md border-b border-border-custom px-4 py-3 flex items-center justify-between transition-colors duration-200 shrink-0">
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onGoHome}
-          className="flex items-center gap-2 cursor-pointer rounded-xl hover:opacity-90 transition-opacity"
-          aria-label="Go home"
-        >
-          <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <Sparkles className="h-5 w-5 text-white" />
-          </div>
-          <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary via-text-secondary to-text-muted">
-            Hin
-          </span>
-        </button>
-        <span className="text-[10px] bg-bg-tertiary text-text-secondary border border-border-custom px-2 py-0.5 rounded-full font-mono font-medium">
-          Secure
+      <button
+        type="button"
+        onClick={onGoHome}
+        className="cursor-pointer rounded-xl hover:opacity-90 transition-opacity"
+        aria-label="Go home"
+      >
+        <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary via-text-secondary to-text-muted">
+          Hin
         </span>
-      </div>
+      </button>
 
       {currentUser && (
         <div className="flex items-center gap-3">

@@ -3,6 +3,7 @@ import { Loader2, Plus } from 'lucide-react';
 import { Post, Comment, User as UserType } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { CreatePostForm } from './CreatePostForm';
+import type { CreatePostSubmitPayload } from './CreatePostForm';
 import { PostCard } from './PostCard';
 import { FloatingActionStack } from '../ui/FloatingActionStack';
 
@@ -32,7 +33,7 @@ interface FeedViewProps {
   onCloseCreatePost: () => void;
   onToggleMessages: () => void;
   onNewPostContentChange: (value: string) => void;
-  onCreatePost: (e: React.FormEvent, mediaUrls: string[]) => void | Promise<void>;
+  onCreatePost: (e: React.FormEvent, payload: CreatePostSubmitPayload) => void | Promise<void>;
   onToggleLike: (postId: number) => void;
   onToggleComments: (postId: number) => void;
   onDeletePost: (postId: number) => void;
@@ -51,6 +52,9 @@ interface FeedViewProps {
   onEditCommentContentChange: (content: string) => void;
   onReply: (postId: number, comment: CommentNode) => void;
   onToggleCommentLike: (postId: number, commentId: number) => void;
+  onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
+  onRetractPollVote: (postId: number) => Promise<void>;
+  onClosePoll: (postId: number) => Promise<void>;
 }
 
 export function FeedView({
@@ -98,6 +102,9 @@ export function FeedView({
   onEditCommentContentChange,
   onReply,
   onToggleCommentLike,
+  onVotePoll,
+  onRetractPollVote,
+  onClosePoll,
 }: FeedViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -121,7 +128,8 @@ export function FeedView({
   }, [hasMorePosts, isLoadingMore, onLoadMore, posts.length]);
 
   return (
-    <div ref={scrollRef} className="flex-grow overflow-y-auto p-4 md:p-6 space-y-4 relative">
+    <div ref={scrollRef} className="flex-grow overflow-y-auto p-4 md:p-6 relative">
+      <div className="max-w-2xl mx-auto w-full space-y-4 pb-20 md:pb-4">
       <div className="hidden md:flex justify-end">
         <button
           onClick={onOpenCreatePost}
@@ -142,7 +150,7 @@ export function FeedView({
         />
       )}
 
-      <div className="space-y-4 pb-20 md:pb-4">
+      <div className="space-y-4">
         {posts.length === 0 ? (
           <div className="text-center py-12 border border-dashed border-border-custom rounded-2xl text-text-muted text-sm">
             No posts yet. Be the first to publish!
@@ -182,6 +190,9 @@ export function FeedView({
                 onEditCommentContentChange={onEditCommentContentChange}
                 onReply={onReply}
                 onToggleCommentLike={onToggleCommentLike}
+                onVotePoll={onVotePoll}
+                onRetractPollVote={onRetractPollVote}
+                onClosePoll={onClosePoll}
               />
             ))}
             <div ref={sentinelRef} className="h-1" aria-hidden />
@@ -196,6 +207,7 @@ export function FeedView({
             )}
           </>
         )}
+      </div>
       </div>
 
       <FloatingActionStack

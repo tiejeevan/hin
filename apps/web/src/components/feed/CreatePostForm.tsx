@@ -1,14 +1,25 @@
-import { useState } from 'react';
-import { X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { BarChart3, Loader2, MoreVertical, Send, X } from 'lucide-react';
 import { ImagePicker, PickedImage } from '../ui/ImagePicker';
 import { uploadCompressedImage } from '../../lib/compressImage';
 import { API_URL } from '../../config';
+import {
+  PollCreatorFields,
+  defaultPollDraft,
+  validatePollDraft,
+  pollDraftToApiFields,
+  type PollDraft,
+} from './PollCreatorFields';
+
+export type CreatePostSubmitPayload =
+  | { kind: 'text'; mediaUrls: string[] }
+  | { kind: 'poll'; mediaUrls: string[]; poll: ReturnType<typeof pollDraftToApiFields> };
 
 interface CreatePostFormProps {
   content: string;
   token: string;
   onContentChange: (value: string) => void;
-  onSubmit: (e: React.FormEvent, mediaUrls: string[]) => void | Promise<void>;
+  onSubmit: (e: React.FormEvent, payload: CreatePostSubmitPayload) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -19,10 +30,35 @@ export function CreatePostForm({
   onSubmit,
   onClose,
 }: CreatePostFormProps) {
+  const [hasPoll, setHasPoll] = useState(false);
   const [images, setImages] = useState<PickedImage[]>([]);
+  const [pollDraft, setPollDraft] = useState<PollDraft>(defaultPollDraft);
+  const [showPollSettings, setShowPollSettings] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [menuOpen]);
 
   const handleAddFiles = async (files: File[]) => {
     setError(null);
@@ -73,15 +109,32 @@ export function CreatePostForm({
       setError('Please wait for images to finish uploading');
       return;
     }
+
+    if (hasPoll) {
+      const pollError = validatePollDraft(pollDraft);
+      if (pollError) {
+        setError(pollError);
+        return;
+      }
+    } else if (!content.trim()) {
+      setError('Write something for your post');
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
+    const mediaUrls = images.map(img => img.remoteUrl);
     try {
-      await onSubmit(
-        e,
-        images.map(img => img.remoteUrl),
-      );
+      if (hasPoll) {
+        await onSubmit(e, { kind: 'poll', mediaUrls, poll: pollDraftToApiFields(pollDraft) });
+      } else {
+        await onSubmit(e, { kind: 'text', mediaUrls });
+      }
       images.forEach(img => URL.revokeObjectURL(img.previewUrl));
       setImages([]);
+      setPollDraft(defaultPollDraft());
+      setHasPoll(false);
+      setShowPollSettings(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to publish');
     } finally {
@@ -90,26 +143,31 @@ export function CreatePostForm({
   };
 
   return (
-    <div className="bg-bg-secondary border border-border-custom rounded-2xl p-4 space-y-4">
-      <div className="flex items-center justify-between border-b border-border-custom/60 pb-2">
-        <span className="text-xs font-bold text-text-primary">Create New Post</span>
-        <button
-          onClick={onClose}
-          className="text-text-muted hover:text-text-primary cursor-pointer p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
-          aria-label="Close"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
+    <div className="bg-bg-secondary border border-border-custom rounded-2xl p-4 space-y-3">
       <form onSubmit={handleSubmit} className="space-y-3">
         <textarea
-          required
           rows={3}
           placeholder="What is on your mind?"
           value={content}
           onChange={e => onContentChange(e.target.value)}
           className="w-full bg-bg-primary border border-border-custom rounded-xl p-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors resize-none"
         />
+
+        {hasPoll && (
+          <section className="space-y-3 pt-1 border-t border-border-custom/60">
+            <label className="text-[11px] font-semibold text-text-muted uppercase tracking-wide flex items-center gap-1.5">
+              <BarChart3 className="h-3.5 w-3.5" />
+              Poll
+            </label>
+            <PollCreatorFields
+              draft={pollDraft}
+              onChange={setPollDraft}
+              showSettings={showPollSettings}
+              onToggleSettings={() => setShowPollSettings(prev => !prev)}
+            />
+          </section>
+        )}
+
         <ImagePicker
           images={images}
           max={5}
@@ -118,23 +176,75 @@ export function CreatePostForm({
           onAddFiles={handleAddFiles}
           onRemove={handleRemove}
           disabled={submitting}
+          actions={
+            <div className="flex items-center gap-0.5">
+              <div ref={menuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen(prev => !prev)}
+                  className="text-text-muted hover:text-text-primary hover:bg-bg-tertiary rounded-lg transition-colors cursor-pointer p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                  title="Post options"
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </button>
+
+                {menuOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 bottom-full mb-1 w-40 rounded-xl border border-border-custom bg-bg-secondary shadow-lg overflow-hidden z-10"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        if (hasPoll) {
+                          setHasPoll(false);
+                          setPollDraft(defaultPollDraft());
+                          setShowPollSettings(false);
+                        } else {
+                          setHasPoll(true);
+                        }
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-text-secondary hover:bg-bg-tertiary hover:text-indigo-400 transition-colors cursor-pointer min-h-[44px]"
+                    >
+                      <BarChart3 className="h-3.5 w-3.5" />
+                      {hasPoll ? 'Remove Poll' : 'Add Poll'}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button
+                type="submit"
+                disabled={uploading || submitting}
+                className="text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50 rounded-lg transition-colors cursor-pointer p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                aria-label={
+                  uploading ? 'Uploading' : submitting ? 'Publishing' : 'Publish post'
+                }
+                title={
+                  uploading ? 'Uploading…' : submitting ? 'Publishing…' : 'Publish post'
+                }
+              >
+                {uploading || submitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="text-text-muted hover:text-text-primary hover:bg-bg-tertiary rounded-lg transition-colors cursor-pointer p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                aria-label="Cancel"
+                title="Cancel"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          }
         />
-        <div className="flex justify-end gap-2 pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer min-h-[44px]"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={uploading || submitting}
-            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all shadow-md cursor-pointer min-h-[44px]"
-          >
-            {uploading ? 'Uploading…' : submitting ? 'Publishing…' : 'Publish Post'}
-          </button>
-        </div>
       </form>
     </div>
   );

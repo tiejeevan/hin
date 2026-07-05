@@ -12,10 +12,41 @@ export interface User {
   postCount?: number;
 }
 
+export type PostType = 'text' | 'poll';
+export type PollResultsVisibility = 'always' | 'after_vote' | 'after_close';
+export type PollStatus = 'open' | 'closed';
+
+export interface PollOption {
+  id: number;
+  label: string;
+  position: number;
+  voteCount: number;
+  votePercent?: number;
+}
+
+export interface Poll {
+  id: number;
+  postId: number;
+  question: string;
+  endsAt: string | null;
+  maxSelections: number;
+  allowVoteChange: boolean;
+  allowVoteRetraction: boolean;
+  isAnonymous: boolean;
+  resultsVisibility: PollResultsVisibility;
+  status: PollStatus;
+  totalVotes: number;
+  options: PollOption[];
+  userVoteOptionIds?: number[];
+  showResults: boolean;
+  isExpired: boolean;
+}
+
 export interface Post {
   id: number;
   userId: number;
   username: string;
+  type: PostType;
   content: string;
   mediaUrls: string[];
   createdAt: string;
@@ -23,6 +54,7 @@ export interface Post {
   commentsCount: number;
   hasLiked?: boolean;
   deletedAt?: string | null;
+  poll?: Poll;
 }
 
 export interface MediaUpload {
@@ -109,9 +141,50 @@ export interface PostsPage {
 }
 
 // Zod schemas for input validation
-export const CreatePostSchema = z.object({
+export const PollOptionInputSchema = z.object({
+  label: z.string().min(1, 'Option cannot be empty').max(200, 'Option is too long'),
+});
+
+export const CreateTextPostSchema = z.object({
+  type: z.literal('text').optional(),
   content: z.string().min(1, 'Post content cannot be empty').max(1000, 'Post is too long'),
   mediaUrls: z.array(z.string().url()).max(5, 'Maximum 5 images allowed').optional(),
+});
+
+export const CreatePollPostSchema = z.object({
+  type: z.literal('poll'),
+  content: z.string().max(1000, 'Post is too long').optional().default(''),
+  question: z.string().min(1, 'Poll question cannot be empty').max(500, 'Poll question is too long'),
+  options: z.array(PollOptionInputSchema).min(2, 'At least 2 options required').max(10, 'Maximum 10 options allowed'),
+  maxSelections: z.number().int().min(1).optional(),
+  endsAt: z.string().datetime({ offset: true }).nullable().optional(),
+  allowVoteChange: z.boolean().optional().default(true),
+  allowVoteRetraction: z.boolean().optional().default(true),
+  isAnonymous: z.boolean().optional().default(false),
+  resultsVisibility: z.enum(['always', 'after_vote', 'after_close']).optional().default('always'),
+  mediaUrls: z.array(z.string().url()).max(5, 'Maximum 5 images allowed').optional(),
+}).superRefine((data, ctx) => {
+  const maxSel = data.maxSelections ?? 1;
+  if (maxSel > data.options.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'maxSelections cannot exceed number of options',
+      path: ['maxSelections'],
+    });
+  }
+});
+
+/** Parse create-post body; defaults missing type to text post */
+export function parseCreatePostBody(body: unknown) {
+  const raw = body as Record<string, unknown>;
+  if (raw?.type === 'poll') {
+    return CreatePollPostSchema.safeParse(body);
+  }
+  return CreateTextPostSchema.safeParse(body);
+}
+
+export const VotePollSchema = z.object({
+  optionIds: z.array(z.number().int().positive()).min(1, 'Select at least one option'),
 });
 
 export const CreateCommentSchema = z.object({
@@ -159,6 +232,8 @@ export type ServerMessage =
   | { type: 'comment_deleted'; payload: { commentId: number; postId: number } }
   | { type: 'post_updated'; payload: { post: Post } }
   | { type: 'comment_updated'; payload: { comment: Comment } }
+  | { type: 'poll_vote_update'; payload: { postId: number; poll: Poll } }
+  | { type: 'poll_closed'; payload: { postId: number; poll: Poll } }
   | { type: 'typing'; payload: { senderId: number; isTyping: boolean } }
   | { type: 'messages_read'; payload: { senderId: number; receiverId: number } }
   | { type: 'presence_snapshot'; payload: { onlineUserIds: number[] } }

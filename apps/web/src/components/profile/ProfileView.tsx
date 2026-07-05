@@ -44,6 +44,9 @@ interface ProfileViewProps {
   onReply: (postId: number, comment: CommentNode) => void;
   onToggleCommentLike: (postId: number, commentId: number) => void;
   onViewProfile: (userId: number) => void;
+  onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
+  onRetractPollVote: (postId: number) => Promise<void>;
+  onClosePoll: (postId: number) => Promise<void>;
 }
 
 export function ProfileView({
@@ -86,11 +89,15 @@ export function ProfileView({
   onReply,
   onToggleCommentLike,
   onViewProfile,
+  onVotePoll,
+  onRetractPollVote,
+  onClosePoll,
 }: ProfileViewProps) {
   const isOwnProfile = profileUser?.id === currentUser.id;
 
   return (
-    <div className="flex-grow overflow-y-auto p-4 md:p-6 space-y-4">
+    <div className="flex-grow overflow-y-auto p-4 md:p-6">
+      <div className="max-w-2xl mx-auto w-full space-y-4">
       <button
         onClick={onBack}
         className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary transition-colors cursor-pointer min-h-[44px]"
@@ -147,10 +154,14 @@ export function ProfileView({
               onReply={onReply}
               onToggleCommentLike={onToggleCommentLike}
               onViewProfile={onViewProfile}
+              onVotePoll={onVotePoll}
+              onRetractPollVote={onRetractPollVote}
+              onClosePoll={onClosePoll}
             />
           )}
         </>
       ) : null}
+      </div>
     </div>
   );
 }
