@@ -17,11 +17,21 @@ import {
   getFollowerCount,
   getFollowingCount,
   getFollowedUserIds,
+  countPendingFollowRequests,
 } from '../lib/follows';
 
 const follows = new Hono<{ Bindings: Env }>();
 
 // Pending requests for auth user (register before /:userId)
+follows.get('/requests/count', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const count = await countPendingFollowRequests(db, authUser.id);
+  return c.json({ count });
+});
+
 follows.get('/requests', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);

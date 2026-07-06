@@ -429,7 +429,7 @@ Direct messages between users.
 | `created_at` | text | not null, default `CURRENT_TIMESTAMP` | |
 | `deleted_at` | text | nullable | soft delete |
 
-**Indexes:** `messages_sender_id_idx`, `messages_receiver_id_idx`, `messages_deleted_at_idx`
+**Indexes:** `messages_sender_id_idx`, `messages_receiver_id_idx`, `messages_receiver_id_read_idx`, `messages_deleted_at_idx`
 
 ---
 

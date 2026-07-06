@@ -73,6 +73,21 @@ export async function getBlockedUserIds(db: Db, userId: number): Promise<number[
   return rows.map(r => r.blockedId);
 }
 
+/** Users who have blocked the given user. */
+export async function getBlockerUserIds(db: Db, userId: number): Promise<number[]> {
+  const rows = await db
+    .select({ blockerId: schema.userBlocks.blockerId })
+    .from(schema.userBlocks)
+    .where(
+      and(
+        eq(schema.userBlocks.blockedId, userId),
+        isNull(schema.userBlocks.deletedAt),
+      ),
+    )
+    .all();
+  return rows.map(r => r.blockerId);
+}
+
 export async function getHiddenAuthorIds(db: Db, viewerId: number): Promise<number[]> {
   const [blocked, muted] = await Promise.all([
     getBlockedUserIds(db, viewerId),

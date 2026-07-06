@@ -507,6 +507,20 @@ export async function listPendingRequests(db: Db, targetId: number): Promise<Fol
   }));
 }
 
+export async function countPendingFollowRequests(db: Db, targetId: number): Promise<number> {
+  const res = await db
+    .select({ value: count() })
+    .from(schema.followRequests)
+    .where(
+      and(
+        eq(schema.followRequests.targetId, targetId),
+        isNull(schema.followRequests.deletedAt),
+      ),
+    )
+    .get();
+  return res?.value || 0;
+}
+
 const LIST_PAGE_SIZE = 20;
 
 async function enrichFollowListUsers(

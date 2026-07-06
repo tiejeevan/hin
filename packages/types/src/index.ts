@@ -176,6 +176,21 @@ export interface SystemSettings {
   maxMediaPerPost: number;
 }
 
+export interface MeBootstrapCounts {
+  unreadNotifications: number;
+  unreadMessages: number;
+  pendingFollowRequests: number;
+}
+
+export interface MeBootstrap {
+  followingIds: number[];
+  blockedIds: number[];
+  mutedIds: number[];
+  userSettings: UserSettings;
+  systemSettings: SystemSettings;
+  counts: MeBootstrapCounts;
+}
+
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   maxPinnedPostsPerUser: 1,
   maxPostLength: 1000,

@@ -250,6 +250,7 @@ export const messages = sqliteTable('messages', {
 }, (table) => ({
   senderIdIdx: index('messages_sender_id_idx').on(table.senderId),
   receiverIdIdx: index('messages_receiver_id_idx').on(table.receiverId),
+  receiverReadIdx: index('messages_receiver_id_read_idx').on(table.receiverId, table.read),
   deletedAtIdx: index('messages_deleted_at_idx').on(table.deletedAt),
 }));
 

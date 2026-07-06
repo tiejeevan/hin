@@ -5,8 +5,19 @@ import * as schema from '@hin/db';
 import { Notification } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
+import { countUnreadNotifications, resolveNotificationEntityType } from '../lib/notifications';
 
 const notifications = new Hono<{ Bindings: Env }>();
+
+// Unread count for bell badge (excludes message-type notifications)
+notifications.get('/unread-count', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const count = await countUnreadNotifications(db, authUser.id);
+  return c.json({ count });
+});
 
 // Get notifications
 notifications.get('/', async (c) => {
@@ -27,40 +38,27 @@ notifications.get('/', async (c) => {
       content: schema.notifications.content,
       read: schema.notifications.read,
       createdAt: schema.notifications.createdAt,
+      senderUsername: schema.users.username,
     })
     .from(schema.notifications)
+    .leftJoin(schema.users, eq(schema.notifications.senderId, schema.users.id))
     .where(eq(schema.notifications.userId, authUser.id))
     .orderBy(desc(schema.notifications.createdAt))
     .all();
 
-  const populatedNotifs: Notification[] = await Promise.all(
-    rawNotifs.map(async (notif) => {
-      const sender = await db.select({ username: schema.users.username }).from(schema.users).where(eq(schema.users.id, notif.senderId)).get();
-      const entityType =
-        notif.entityType === 'post' || notif.entityType === 'message' || notif.entityType === 'system' || notif.entityType === 'user'
-          ? notif.entityType
-          : notif.type === 'message'
-            ? 'message'
-            : notif.type === 'system'
-              ? 'system'
-              : notif.type === 'follow' || notif.type === 'follow_request' || notif.type === 'follow_accepted'
-                ? 'user'
-                : 'post';
-      return {
-        id: notif.id,
-        userId: notif.userId,
-        senderId: notif.senderId,
-        senderUsername: sender?.username || 'Someone',
-        type: notif.type as Notification['type'],
-        entityType,
-        entityId: notif.entityId,
-        commentId: notif.commentId ?? null,
-        content: notif.content,
-        read: notif.read === 1,
-        createdAt: notif.createdAt,
-      };
-    })
-  );
+  const populatedNotifs: Notification[] = rawNotifs.map((notif) => ({
+    id: notif.id,
+    userId: notif.userId,
+    senderId: notif.senderId,
+    senderUsername: notif.senderUsername || 'Someone',
+    type: notif.type as Notification['type'],
+    entityType: resolveNotificationEntityType(notif),
+    entityId: notif.entityId,
+    commentId: notif.commentId ?? null,
+    content: notif.content,
+    read: notif.read === 1,
+    createdAt: notif.createdAt,
+  }));
 
   return c.json(populatedNotifs);
 });

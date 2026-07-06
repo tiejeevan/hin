@@ -7,6 +7,7 @@ import {
   ReportTargetType,
   Comment,
   FollowRequest,
+  MeBootstrap,
   Message,
   Notification,
   Poll,
@@ -114,6 +115,7 @@ export default function App() {
   const [messagesPanelExpanded, setMessagesPanelExpanded] = useState(false);
   const [messageIconPulseAt, setMessageIconPulseAt] = useState(0);
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [adminData, setAdminData] = useState<AdminData | null>(null);
@@ -256,9 +258,14 @@ export default function App() {
   const openChatInPanel = (recipient: ChatRecipient) => {
     setChatRecipient(recipient);
     fetchMessages(recipient.id);
-    setThreads(prev =>
-      prev.map(t => (t.id === recipient.id ? { ...t, unreadCount: 0 } : t))
-    );
+    setThreads(prev => {
+      const thread = prev.find(t => t.id === recipient.id);
+      const cleared = thread?.unreadCount ?? 0;
+      if (cleared > 0) {
+        setUnreadMessagesCount(count => Math.max(0, count - cleared));
+      }
+      return prev.map(t => (t.id === recipient.id ? { ...t, unreadCount: 0 } : t));
+    });
   };
 
   const backToMessagesList = () => {
@@ -279,7 +286,24 @@ export default function App() {
     });
   };
 
-  const unreadMessagesCount = threads.reduce((sum, t) => sum + t.unreadCount, 0);
+  const fetchBootstrap = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/me/bootstrap`, { headers: getHeaders() });
+      if (res.ok) {
+        const data: MeBootstrap = await res.json();
+        setFollowedUserIds(new Set(data.followingIds));
+        setBlockedUserIds(new Set(data.blockedIds));
+        setMutedUserIds(new Set(data.mutedIds));
+        setUserSettings(data.userSettings);
+        setSystemSettings(data.systemSettings);
+        setUnreadNotifsCount(data.counts.unreadNotifications);
+        setUnreadMessagesCount(data.counts.unreadMessages);
+      }
+    } catch (e) {
+      console.error('Error fetching bootstrap:', e);
+    }
+  };
 
   const fetchFollowedIds = async () => {
     if (!token) return;
@@ -294,32 +318,6 @@ export default function App() {
     }
   };
 
-  const fetchBlockedIds = async () => {
-    if (!token) return;
-    try {
-      const res = await fetch(`${API_URL}/api/blocks/ids`, { headers: getHeaders() });
-      if (res.ok) {
-        const data: { ids: number[] } = await res.json();
-        setBlockedUserIds(new Set(data.ids));
-      }
-    } catch (e) {
-      console.error('Error fetching blocked ids:', e);
-    }
-  };
-
-  const fetchMutedIds = async () => {
-    if (!token) return;
-    try {
-      const res = await fetch(`${API_URL}/api/mutes/ids`, { headers: getHeaders() });
-      if (res.ok) {
-        const data: { ids: number[] } = await res.json();
-        setMutedUserIds(new Set(data.ids));
-      }
-    } catch (e) {
-      console.error('Error fetching muted ids:', e);
-    }
-  };
-
   const fetchFollowRequests = async () => {
     if (!token) return;
     try {
@@ -327,30 +325,6 @@ export default function App() {
       if (res.ok) setFollowRequests(await res.json());
     } catch (e) {
       console.error('Error fetching follow requests:', e);
-    }
-  };
-
-  const fetchUserSettings = async () => {
-    if (!token) return;
-    try {
-      const res = await fetch(`${API_URL}/api/users/me/settings`, { headers: getHeaders() });
-      if (res.ok) {
-        setUserSettings(await res.json());
-      }
-    } catch (e) {
-      console.error('Error fetching user settings:', e);
-    }
-  };
-
-  const fetchSystemSettings = async () => {
-    if (!token) return;
-    try {
-      const res = await fetch(`${API_URL}/api/settings`, { headers: getHeaders() });
-      if (res.ok) {
-        setSystemSettings(await res.json());
-      }
-    } catch (e) {
-      console.error('Error fetching system settings:', e);
     }
   };
 
@@ -744,7 +718,11 @@ export default function App() {
     if (!token) return;
     try {
       const res = await fetch(`${API_URL}/api/messages/threads`, { headers: getHeaders() });
-      if (res.ok) setThreads(await res.json());
+      if (res.ok) {
+        const data: import('@hin/types').ChatThread[] = await res.json();
+        setThreads(data);
+        setUnreadMessagesCount(data.reduce((sum, t) => sum + t.unreadCount, 0));
+      }
     } catch (e) {
       console.error('Error fetching threads:', e);
     }
@@ -789,14 +767,7 @@ export default function App() {
   useEffect(() => {
     if (token) {
       fetchPosts();
-      fetchNotifications();
-      fetchThreads();
-      fetchFollowedIds();
-      fetchBlockedIds();
-      fetchMutedIds();
-      fetchFollowRequests();
-      fetchUserSettings();
-      fetchSystemSettings();
+      fetchBootstrap();
     } else {
       setPosts([]);
       setFeedNextCursor(null);
@@ -810,6 +781,8 @@ export default function App() {
       setFollowRequests([]);
       setUserSettings(null);
       setSystemSettings(null);
+      setUnreadNotifsCount(0);
+      setUnreadMessagesCount(0);
     }
   }, [token]);
 
@@ -904,7 +877,11 @@ export default function App() {
                 setMessageIconPulseAt(Date.now());
                 setThreads(prev => {
                   const idx = prev.findIndex(t => t.id === partnerId);
-                  if (idx === -1) return prev;
+                  if (idx === -1) {
+                    fetchThreads();
+                    return prev;
+                  }
+                  setUnreadMessagesCount(count => count + 1);
                   return prev.map(t =>
                     t.id === partnerId
                       ? {
@@ -922,7 +899,6 @@ export default function App() {
                 });
               }
 
-              fetchThreads();
               break;
             }
             case 'messages_read': {
@@ -2166,8 +2142,12 @@ export default function App() {
             onOpenAdmin={currentUser?.role === 'admin' ? openAdmin : undefined}
             onToggleNotifications={() => {
               setShowNotifications(prev => {
-                if (!prev) setShowMessagesDropdown(false);
-                return !prev;
+                const next = !prev;
+                if (next) {
+                  setShowMessagesDropdown(false);
+                  fetchNotifications();
+                }
+                return next;
               });
             }}
             onCloseNotifications={() => setShowNotifications(false)}
