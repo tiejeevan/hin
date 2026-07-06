@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Heart, MoreVertical, Pencil, Trash2, Flag } from 'lucide-react';
 import { User as UserType } from '@hin/types';
 import { CommentNode } from '../../types/ui';
-import { MentionsText } from './MentionsText';
+import { PostContentText } from './PostContentText';
 import { useMentionAutocomplete } from '../../hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '../ui/MentionSuggestions';
 
@@ -22,6 +22,7 @@ interface CommentItemProps {
   onReply: (postId: number, comment: CommentNode) => void;
   onToggleCommentLike: (postId: number, commentId: number) => void;
   onViewProfile: (userIdOrUsername: number | string) => void;
+  onViewHashtag?: (tag: string) => void;
   onSignInRequired?: () => void;
   onReport?: (commentId: number) => void;
 }
@@ -42,6 +43,7 @@ export function CommentItem({
   onReply,
   onToggleCommentLike,
   onViewProfile,
+  onViewHashtag,
   onSignInRequired,
   onReport,
 }: CommentItemProps) {
@@ -146,9 +148,10 @@ export function CommentItem({
                   {comment.content}
                 </p>
               ) : (
-                <MentionsText
+                <PostContentText
                   content={comment.content}
                   onViewProfile={onViewProfile}
+                  onViewHashtag={onViewHashtag}
                   className="text-text-secondary text-xs mt-0.5 leading-relaxed break-words"
                 />
               )}
@@ -268,6 +271,7 @@ export function CommentItem({
           onReply={onReply}
           onToggleCommentLike={onToggleCommentLike}
           onViewProfile={onViewProfile}
+          onViewHashtag={onViewHashtag}
           onSignInRequired={onSignInRequired}
         />
       ))}

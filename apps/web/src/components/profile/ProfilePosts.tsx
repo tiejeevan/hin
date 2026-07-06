@@ -32,6 +32,7 @@ interface ProfilePostsProps {
   onReply: (postId: number, comment: CommentNode) => void;
   onToggleCommentLike: (postId: number, commentId: number) => void;
   onViewProfile: (userIdOrUsername: number | string) => void;
+  onViewHashtag?: (tag: string) => void;
   onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
@@ -80,6 +81,7 @@ export function ProfilePosts({
   onReply,
   onToggleCommentLike,
   onViewProfile,
+  onViewHashtag,
   onVotePoll,
   onRetractPollVote,
   onClosePoll,
@@ -135,6 +137,7 @@ export function ProfilePosts({
       onReply={onReply}
       onToggleCommentLike={onToggleCommentLike}
       onViewProfile={onViewProfile}
+      onViewHashtag={onViewHashtag}
       onVotePoll={onVotePoll}
       onRetractPollVote={onRetractPollVote}
       onClosePoll={onClosePoll}

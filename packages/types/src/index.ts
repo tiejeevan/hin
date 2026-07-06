@@ -128,6 +128,14 @@ export interface Poll {
   isExpired: boolean;
 }
 
+export interface LinkPreview {
+  url: string;
+  title?: string | null;
+  description?: string | null;
+  imageUrl?: string | null;
+  siteName?: string | null;
+}
+
 export interface Post {
   id: number;
   userId: number;
@@ -152,6 +160,16 @@ export interface Post {
   parentPostId?: number | null;
   threadReplyCount?: number;
   threadPosts?: Post[];
+  linkPreview?: LinkPreview | null;
+}
+
+export interface TrendingHashtag {
+  tag: string;
+  count: number;
+}
+
+export interface TrendingHashtagsPage {
+  hashtags: TrendingHashtag[];
 }
 
 export interface PostThreadPage {

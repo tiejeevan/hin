@@ -6,6 +6,7 @@ const FEED_MODES: { value: FeedMode; label: string }[] = [
   { value: 'all', label: 'Everyone' },
   { value: 'following', label: 'Following' },
   { value: 'bookmarks', label: 'Saved' },
+  { value: 'explore', label: 'Explore' },
 ];
 
 function feedModeLabel(mode: FeedMode): string {

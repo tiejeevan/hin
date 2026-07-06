@@ -1,4 +1,4 @@
-import { sqliteTable, integer, text, primaryKey, index } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, integer, text, primaryKey, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 export const users = sqliteTable('users', {
@@ -36,6 +36,20 @@ export const userSettings = sqliteTable('user_settings', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+/** Cached Open Graph metadata for a URL shared in a post (keyed by normalized URL hash). */
+export const linkPreviews = sqliteTable('link_previews', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  urlHash: text('url_hash').notNull().unique(),
+  url: text('url').notNull(),
+  title: text('title'),
+  description: text('description'),
+  imageUrl: text('image_url'),
+  siteName: text('site_name'),
+  fetchedAt: text('fetched_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  /** 1 when the last fetch attempt failed (used to back off retries). */
+  fetchFailed: integer('fetch_failed').default(0).notNull(),
+});
+
 export const posts = sqliteTable('posts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -51,6 +65,8 @@ export const posts = sqliteTable('posts', {
   pinnedAt: text('pinned_at'),
   threadRootId: integer('thread_root_id').references((): any => posts.id, { onDelete: 'set null' }),
   parentPostId: integer('parent_post_id').references((): any => posts.id, { onDelete: 'set null' }),
+  /** First URL's cached Open Graph preview, if any (only one preview per post). */
+  linkPreviewId: integer('link_preview_id').references(() => linkPreviews.id, { onDelete: 'set null' }),
 }, (table) => ({
   userIdIdx: index('posts_user_id_idx').on(table.userId),
   createdAtIdx: index('posts_created_at_idx').on(table.createdAt),
@@ -60,6 +76,25 @@ export const posts = sqliteTable('posts', {
   userPinnedIdx: index('posts_user_pinned_idx').on(table.userId, table.pinnedAt),
   threadRootIdx: index('posts_thread_root_id_idx').on(table.threadRootId),
   parentPostIdx: index('posts_parent_post_id_idx').on(table.parentPostId),
+}));
+
+/** Normalized (lowercase, no leading '#') hashtag registry. */
+export const hashtags = sqliteTable('hashtags', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  tag: text('tag').notNull().unique(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+/** Join table linking posts to the hashtags mentioned in their content. */
+export const postHashtags = sqliteTable('post_hashtags', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  postId: integer('post_id').notNull().references(() => posts.id, { onDelete: 'cascade' }),
+  hashtagId: integer('hashtag_id').notNull().references(() => hashtags.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  postIdIdx: index('post_hashtags_post_id_idx').on(table.postId),
+  hashtagIdIdx: index('post_hashtags_hashtag_id_idx').on(table.hashtagId),
+  uniquePostHashtag: uniqueIndex('post_hashtags_unique').on(table.postId, table.hashtagId),
 }));
 
 export const polls = sqliteTable('polls', {

@@ -91,6 +91,7 @@ export async function getThreadPostRows(
   pinnedAt: string | null;
   threadRootId: number | null;
   parentPostId: number | null;
+  linkPreviewId: number | null;
   username: string;
   authorAvatarUrl: string | null;
   authorRole: string;
@@ -107,6 +108,7 @@ export async function getThreadPostRows(
       pinnedAt: schema.posts.pinnedAt,
       threadRootId: schema.posts.threadRootId,
       parentPostId: schema.posts.parentPostId,
+      linkPreviewId: schema.posts.linkPreviewId,
       username: schema.users.username,
       authorAvatarUrl: schema.users.avatarUrl,
       authorRole: schema.users.role,
@@ -136,6 +138,7 @@ export async function getThreadPostRows(
           pinnedAt: schema.posts.pinnedAt,
           threadRootId: schema.posts.threadRootId,
           parentPostId: schema.posts.parentPostId,
+          linkPreviewId: schema.posts.linkPreviewId,
           username: schema.users.username,
           authorAvatarUrl: schema.users.avatarUrl,
           authorRole: schema.users.role,

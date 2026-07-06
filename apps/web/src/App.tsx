@@ -54,6 +54,8 @@ export default function App() {
   const [feedNextCursor, setFeedNextCursor] = useState<number | string | null>(null);
   const [isLoadingMorePosts, setIsLoadingMorePosts] = useState(false);
   const [feedMode, setFeedMode] = useState<FeedMode>('all');
+  const [activeHashtag, setActiveHashtag] = useState<string | null>(null);
+  const activeHashtagRef = useRef<string | null>(null);
   const [followedUserIds, setFollowedUserIds] = useState<Set<number>>(new Set());
   const [blockedUserIds, setBlockedUserIds] = useState<Set<number>>(new Set());
   const [mutedUserIds, setMutedUserIds] = useState<Set<number>>(new Set());
@@ -170,6 +172,10 @@ export default function App() {
   }, [feedMode]);
 
   useEffect(() => {
+    activeHashtagRef.current = activeHashtag;
+  }, [activeHashtag]);
+
+  useEffect(() => {
     followedUserIdsRef.current = followedUserIds;
   }, [followedUserIds]);
 
@@ -198,6 +204,8 @@ export default function App() {
     const visibility = post.visibility ?? 'public';
 
     if (blocked.has(post.userId) || muted.has(post.userId)) return false;
+    // Explore is filtered by hashtag server-side; skip live-append rather than re-parsing content client-side.
+    if (mode === 'explore') return false;
     if (post.userId === viewerId) return mode !== 'bookmarks';
     if (mode === 'bookmarks') return false;
     if (mode === 'following') {
@@ -477,10 +485,12 @@ export default function App() {
 
   // Removed fetchUsers
 
-  const fetchPosts = async (opts?: { cursor?: number | string | null; append?: boolean; mode?: FeedMode }) => {
+  const fetchPosts = async (opts?: { cursor?: number | string | null; append?: boolean; mode?: FeedMode; hashtag?: string | null }) => {
     const append = opts?.append ?? false;
     const cursor = opts?.cursor ?? null;
     const mode = opts?.mode ?? feedModeRef.current;
+    const hashtag = opts?.hashtag !== undefined ? opts.hashtag : activeHashtagRef.current;
+    if (mode === 'explore' && !hashtag) return;
     if (append) {
       if (feedLoadingRef.current || cursor === null) return;
       feedLoadingRef.current = true;
@@ -489,6 +499,7 @@ export default function App() {
     try {
       const params = new URLSearchParams({ limit: String(FEED_PAGE_SIZE) });
       if (cursor !== null) params.set('cursor', String(cursor));
+      if (mode === 'explore' && hashtag) params.set('hashtag', hashtag);
       const url =
         mode === 'bookmarks'
           ? `${API_URL}/api/posts/bookmarks?${params}`
@@ -517,15 +528,34 @@ export default function App() {
 
   const loadMorePosts = useCallback(() => {
     if (feedNextCursor === null || feedLoadingRef.current) return;
-    fetchPosts({ cursor: feedNextCursor, append: true, mode: feedMode });
-  }, [feedNextCursor, token, feedMode]);
+    fetchPosts({ cursor: feedNextCursor, append: true, mode: feedMode, hashtag: activeHashtag });
+  }, [feedNextCursor, token, feedMode, activeHashtag]);
 
   const handleFeedModeChange = (mode: FeedMode) => {
     if (mode === feedMode) return;
     setFeedMode(mode);
     setPosts([]);
     setFeedNextCursor(null);
-    fetchPosts({ mode });
+    setActiveHashtag(null);
+    if (mode === 'explore') return; // ExploreHashtags picks a trending tag and calls handleSelectHashtag.
+    fetchPosts({ mode, hashtag: null });
+  };
+
+  /** Switch to (or stay on) the Explore feed filtered to a specific hashtag. */
+  const handleSelectHashtag = (tag: string) => {
+    setFeedMode('explore');
+    setActiveHashtag(tag);
+    setPosts([]);
+    setFeedNextCursor(null);
+    fetchPosts({ mode: 'explore', hashtag: tag });
+  };
+
+  /** Navigate to the Explore feed for a hashtag clicked inside post/comment content, from any tab. */
+  const handleViewHashtag = (tag: string) => {
+    setActiveTab('feed');
+    setShowNotifications(false);
+    setShowMessagesDropdown(false);
+    handleSelectHashtag(tag);
   };
 
   const fetchComments = async (postId: number) => {
@@ -2236,6 +2266,13 @@ export default function App() {
               }
               handleViewProfile(idOrUsername);
             }}
+            onViewHashtag={tag => {
+              if (!currentUser) {
+                handleGuestSignIn();
+                return;
+              }
+              handleViewHashtag(tag);
+            }}
             onVotePoll={handleVotePoll}
             onRetractPollVote={handleRetractPollVote}
             onClosePoll={handleClosePoll}
@@ -2342,6 +2379,13 @@ export default function App() {
             onReply={(postId, comment: CommentNode) => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
             onToggleCommentLike={handleToggleCommentLike}
             onViewProfile={handleViewProfile}
+            onViewHashtag={tag => {
+              if (!currentUser) {
+                handleGuestSignIn();
+                return;
+              }
+              handleViewHashtag(tag);
+            }}
             onVotePoll={handleVotePoll}
             onRetractPollVote={handleRetractPollVote}
             onClosePoll={handleClosePoll}
@@ -2386,6 +2430,8 @@ export default function App() {
             hasMorePosts={feedNextCursor !== null}
             feedMode={feedMode}
             onFeedModeChange={handleFeedModeChange}
+            activeHashtag={activeHashtag}
+            onSelectHashtag={handleSelectHashtag}
             onLoadMore={loadMorePosts}
             onCloseCreatePost={() => setShowNewPostForm(false)}
             onNewPostContentChange={setNewPostContent}
@@ -2404,6 +2450,7 @@ export default function App() {
             onCommentTextChange={(postId, text) => setNewCommentText(prev => ({ ...prev, [postId]: text }))}
             onCancelReply={postId => setReplyingTo(prev => ({ ...prev, [postId]: null }))}
             onViewProfile={handleViewProfile}
+            onViewHashtag={handleViewHashtag}
             onDeleteComment={handleDeleteComment}
             onStartCommentEdit={(id, content) => {
               setEditingCommentId(id);

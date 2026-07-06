@@ -6,6 +6,7 @@ import { CreatePostForm } from './CreatePostForm';
 import type { CreatePostSubmitPayload } from './CreatePostForm';
 import { PostCard } from './PostCard';
 import { FeedModeSelector } from './FeedModeSelector';
+import { ExploreHashtags } from './ExploreHashtags';
 
 interface FeedViewProps {
   posts: Post[];
@@ -26,6 +27,8 @@ interface FeedViewProps {
   hasMorePosts: boolean;
   feedMode: FeedMode;
   onFeedModeChange: (mode: FeedMode) => void;
+  activeHashtag?: string | null;
+  onSelectHashtag?: (tag: string) => void;
   onLoadMore: () => void;
   onCloseCreatePost: () => void;
   onNewPostContentChange: (value: string) => void;
@@ -41,6 +44,7 @@ interface FeedViewProps {
   onCommentTextChange: (postId: number, text: string) => void;
   onCancelReply: (postId: number) => void;
   onViewProfile: (userIdOrUsername: number | string) => void;
+  onViewHashtag?: (tag: string) => void;
   onDeleteComment: (postId: number, commentId: number) => void;
   onStartCommentEdit: (commentId: number, content: string) => void;
   onCancelCommentEdit: () => void;
@@ -84,6 +88,8 @@ export function FeedView({
   hasMorePosts,
   feedMode,
   onFeedModeChange,
+  activeHashtag = null,
+  onSelectHashtag,
   onLoadMore,
   onCloseCreatePost,
   onNewPostContentChange,
@@ -99,6 +105,7 @@ export function FeedView({
   onCommentTextChange,
   onCancelReply,
   onViewProfile,
+  onViewHashtag,
   onDeleteComment,
   onStartCommentEdit,
   onCancelCommentEdit,
@@ -160,7 +167,9 @@ export function FeedView({
       <div className="max-w-2xl mx-auto w-full space-y-4 pb-20 md:pb-4">
       <FeedModeSelector feedMode={feedMode} onFeedModeChange={onFeedModeChange} />
 
-
+      {feedMode === 'explore' && onSelectHashtag && (
+        <ExploreHashtags activeHashtag={activeHashtag} onSelectHashtag={onSelectHashtag} />
+      )}
 
       {showNewPostForm && (
         <CreatePostForm
@@ -180,7 +189,11 @@ export function FeedView({
               ? 'Follow people to see their posts here.'
               : feedMode === 'bookmarks'
                 ? 'No saved posts yet. Bookmark posts to find them here.'
-                : 'No posts yet. Be the first to publish!'}
+                : feedMode === 'explore'
+                  ? activeHashtag
+                    ? `No posts found for #${activeHashtag} yet.`
+                    : 'Pick a trending hashtag to explore posts.'
+                  : 'No posts yet. Be the first to publish!'}
           </div>
         ) : (
           <>
@@ -209,6 +222,7 @@ export function FeedView({
                 onCommentTextChange={onCommentTextChange}
                 onCancelReply={onCancelReply}
                 onViewProfile={onViewProfile}
+                onViewHashtag={onViewHashtag}
                 onDeleteComment={onDeleteComment}
                 onStartCommentEdit={onStartCommentEdit}
                 onCancelCommentEdit={onCancelCommentEdit}

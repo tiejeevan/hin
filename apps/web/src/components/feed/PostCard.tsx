@@ -4,7 +4,8 @@ import { Post, Comment, User as UserType, DEFAULT_SYSTEM_SETTINGS } from '@hin/t
 import { CommentNode } from '../../types/ui';
 import { buildCommentTree } from '../../utils/comments';
 import { CommentItem } from './CommentItem';
-import { MentionsText } from './MentionsText';
+import { PostContentText } from './PostContentText';
+import { LinkPreviewCard } from './LinkPreviewCard';
 import { ImageLightbox } from './ImageLightbox';
 import { PostMediaGallery } from './PostMediaGallery';
 import { PostPollBody } from './PostPollBody';
@@ -51,6 +52,7 @@ interface PostCardProps {
   onReply: (postId: number, comment: CommentNode) => void;
   onToggleCommentLike: (postId: number, commentId: number) => void;
   onViewProfile: (userIdOrUsername: number | string) => void;
+  onViewHashtag?: (tag: string) => void;
   onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
@@ -107,6 +109,7 @@ export function PostCard({
   onReply,
   onToggleCommentLike,
   onViewProfile,
+  onViewHashtag,
   onVotePoll,
   onRetractPollVote,
   onClosePoll,
@@ -384,19 +387,26 @@ export function PostCard({
                   onClick={() => onOpenPost(post.id)}
                   className="block w-full text-left cursor-pointer hover:opacity-90 transition-opacity"
                 >
-                  <MentionsText
+                  <PostContentText
                     content={post.content}
                     onViewProfile={onViewProfile}
+                    onViewHashtag={onViewHashtag}
                     className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left"
                   />
                 </button>
               ) : (
-                <MentionsText
+                <PostContentText
                   content={post.content}
                   onViewProfile={onViewProfile}
+                  onViewHashtag={onViewHashtag}
                   className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left"
                 />
               )
+            )}
+            {post.linkPreview && (
+              <div onClick={e => e.stopPropagation()}>
+                <LinkPreviewCard preview={post.linkPreview} />
+              </div>
             )}
             {post.type === 'poll' && post.poll && (
               <div onClick={e => e.stopPropagation()}>
@@ -444,14 +454,16 @@ export function PostCard({
               <p className="text-[10px] text-text-muted">
                 {new Date(reply.createdAt).toLocaleString()}
               </p>
-              <MentionsText
+              <PostContentText
                 content={reply.content}
                 onViewProfile={onViewProfile}
+                onViewHashtag={onViewHashtag}
                 className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left"
               />
               {reply.mediaUrls.length > 0 && (
                 <PostMediaGallery urls={reply.mediaUrls} onImageClick={() => {}} />
               )}
+              {reply.linkPreview && <LinkPreviewCard preview={reply.linkPreview} />}
             </div>
           ))}
         </div>
@@ -630,6 +642,7 @@ export function PostCard({
                   onReply={onReply}
                   onToggleCommentLike={onToggleCommentLike}
                   onViewProfile={onViewProfile}
+                  onViewHashtag={onViewHashtag}
                   onSignInRequired={onSignInRequired}
                   onReport={onReportComment}
                 />

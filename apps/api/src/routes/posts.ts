@@ -7,6 +7,8 @@ import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { linkPostMedia, parseMediaUrls, serializeMediaUrls, validateOwnedPostMedia } from '../lib/media';
 import { notifyMentions } from '../lib/mentions';
+import { syncPostHashtags } from '../lib/hashtags';
+import { parseFirstUrl, getOrFetchLinkPreview } from '../lib/linkPreview';
 import { createPollWithOptions, loadPollsForPosts, castVote, retractVote, closePoll, getPollByPostId } from '../lib/polls';
 import { getFollowingFeedUserIds } from '../lib/follows';
 import { getHiddenAuthorIds, shouldDeliverNotification } from '../lib/blocks';
@@ -47,6 +49,7 @@ async function buildPostResponse(
     pinnedAt?: string | null;
     threadRootId?: number | null;
     parentPostId?: number | null;
+    linkPreviewId?: number | null;
     username: string;
     authorAvatarUrl?: string | null;
     authorRole?: string;
@@ -114,6 +117,24 @@ async function buildPostResponse(
   const effectiveRootId = post.threadRootId ?? post.id;
   const threadReplyCount = await countThreadReplies(db, effectiveRootId);
 
+  let linkPreview: Post['linkPreview'] = null;
+  if (post.linkPreviewId) {
+    const preview = await db
+      .select()
+      .from(schema.linkPreviews)
+      .where(eq(schema.linkPreviews.id, post.linkPreviewId))
+      .get();
+    if (preview && !preview.fetchFailed) {
+      linkPreview = {
+        url: preview.url,
+        title: preview.title,
+        description: preview.description,
+        imageUrl: preview.imageUrl,
+        siteName: preview.siteName,
+      };
+    }
+  }
+
   const response: Post = {
     id: post.id,
     userId: post.userId,
@@ -135,6 +156,7 @@ async function buildPostResponse(
     threadRootId: post.threadRootId ?? null,
     parentPostId: post.parentPostId ?? null,
     threadReplyCount,
+    linkPreview,
   };
 
   if (postType === 'poll') {
@@ -152,6 +174,7 @@ posts.get('/', async (c) => {
 
   const filterUserId = c.req.query('userId');
   const followingFeed = c.req.query('following') === 'true';
+  const hashtagParam = c.req.query('hashtag');
   const limitParam = c.req.query('limit');
   const cursorParam = c.req.query('cursor');
 
@@ -217,6 +240,21 @@ posts.get('/', async (c) => {
     }
   }
 
+  if (hashtagParam) {
+    const tag = hashtagParam.trim().toLowerCase();
+    const taggedPosts = await db
+      .select({ postId: schema.postHashtags.postId })
+      .from(schema.postHashtags)
+      .innerJoin(schema.hashtags, eq(schema.postHashtags.hashtagId, schema.hashtags.id))
+      .where(eq(schema.hashtags.tag, tag))
+      .all();
+    const taggedPostIds = taggedPosts.map(r => r.postId);
+    if (taggedPostIds.length === 0) {
+      return c.json({ posts: [], nextCursor: null } satisfies PostsPage);
+    }
+    postConditions.push(inArray(schema.posts.id, taggedPostIds));
+  }
+
   if (cursor !== null) {
     postConditions.push(lt(schema.posts.id, cursor));
   }
@@ -232,6 +270,7 @@ posts.get('/', async (c) => {
     pinnedAt: schema.posts.pinnedAt,
     threadRootId: schema.posts.threadRootId,
     parentPostId: schema.posts.parentPostId,
+    linkPreviewId: schema.posts.linkPreviewId,
     username: schema.users.username,
     authorAvatarUrl: schema.users.avatarUrl,
     authorRole: schema.users.role,
@@ -311,6 +350,7 @@ posts.get('/bookmarks', async (c) => {
       mediaUrls: schema.posts.mediaUrls,
       visibility: schema.posts.visibility,
       createdAt: schema.posts.createdAt,
+      linkPreviewId: schema.posts.linkPreviewId,
       username: schema.users.username,
       authorAvatarUrl: schema.users.avatarUrl,
       authorRole: schema.users.role,
@@ -409,6 +449,17 @@ posts.post('/', async (c) => {
     await linkPostMedia(db, authUser.id, inserted.id, mediaUrls);
   }
 
+  await syncPostHashtags(db, inserted.id, inserted.content);
+
+  const firstUrl = parseFirstUrl(inserted.content);
+  if (firstUrl) {
+    const linkPreviewId = await getOrFetchLinkPreview(db, firstUrl);
+    if (linkPreviewId !== null) {
+      await db.update(schema.posts).set({ linkPreviewId }).where(eq(schema.posts.id, inserted.id)).run();
+      inserted.linkPreviewId = linkPreviewId;
+    }
+  }
+
   if (isPoll && 'options' in data) {
     await createPollWithOptions(
       db,
@@ -437,6 +488,7 @@ posts.post('/', async (c) => {
     pinnedAt: inserted.pinnedAt,
     threadRootId: inserted.threadRootId,
     parentPostId: inserted.parentPostId,
+    linkPreviewId: inserted.linkPreviewId,
     username: authUser.username,
     authorAvatarUrl: authUser.avatarUrl,
     authorRole: authUser.role,
@@ -496,10 +548,25 @@ posts.put('/:id', async (c) => {
     }).run();
   }
 
-  const [updated] = await db.update(schema.posts)
+  const contentChanged = content.trim() !== post.content;
+
+  let [updated] = await db.update(schema.posts)
     .set({ content: content.trim() })
     .where(eq(schema.posts.id, postId))
     .returning();
+
+  if (contentChanged) {
+    await syncPostHashtags(db, updated.id, updated.content);
+
+    const firstUrl = parseFirstUrl(updated.content);
+    const linkPreviewId = firstUrl ? await getOrFetchLinkPreview(db, firstUrl) : null;
+    if (linkPreviewId !== updated.linkPreviewId) {
+      [updated] = await db.update(schema.posts)
+        .set({ linkPreviewId })
+        .where(eq(schema.posts.id, postId))
+        .returning();
+    }
+  }
 
   const author = await db.select({
     username: schema.users.username,
@@ -515,6 +582,7 @@ posts.put('/:id', async (c) => {
     mediaUrls: updated.mediaUrls,
     visibility: updated.visibility,
     createdAt: updated.createdAt,
+    linkPreviewId: updated.linkPreviewId,
     username: author?.username || 'Unknown',
     authorAvatarUrl: author?.avatarUrl,
     authorRole: author?.role,
@@ -942,6 +1010,7 @@ posts.get('/:id', async (c) => {
       pinnedAt: schema.posts.pinnedAt,
       threadRootId: schema.posts.threadRootId,
       parentPostId: schema.posts.parentPostId,
+      linkPreviewId: schema.posts.linkPreviewId,
       username: schema.users.username,
       authorAvatarUrl: schema.users.avatarUrl,
       authorRole: schema.users.role,
