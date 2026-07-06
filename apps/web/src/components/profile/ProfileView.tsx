@@ -1,6 +1,7 @@
 import { ArrowLeft, Lock } from 'lucide-react';
 import { FollowRequest, Post, Comment, User as UserType, UserSettings } from '@hin/types';
 import { CommentNode } from '../../types/ui';
+import { AuthForm } from '../auth/AuthForm';
 import { ProfileHeader } from './ProfileHeader';
 import { ProfilePosts } from './ProfilePosts';
 import { ProfileSettingsPanel } from './ProfileSettingsPanel';
@@ -12,8 +13,9 @@ interface ProfileViewProps {
   isLoading: boolean;
   loadError: string | null;
   profilePostsError: string | null;
-  currentUser: UserType;
-  token: string;
+  currentUser?: UserType;
+  token?: string;
+  readOnly?: boolean;
   userSettings: UserSettings;
   onSettingsChange: (settings: UserSettings) => void;
   isEditing: boolean;
@@ -28,7 +30,18 @@ interface ProfileViewProps {
   editingPostContent: string;
   editingCommentId: number | null;
   editingCommentContent: string;
+  showGuestAuth?: boolean;
+  isRegisterMode?: boolean;
+  usernameInput?: string;
+  passwordInput?: string;
+  authError?: string | null;
+  isAuthLoading?: boolean;
   onBack: () => void;
+  onSignIn?: () => void;
+  onAuthSubmit?: (e: React.FormEvent) => void;
+  onUsernameChange?: (value: string) => void;
+  onPasswordChange?: (value: string) => void;
+  onToggleAuthMode?: () => void;
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onProfileSaved: (updated: UserType) => void;
@@ -68,6 +81,10 @@ interface ProfileViewProps {
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
   onOpenPost: (postId: number) => void;
+  onCopyPermalink?: () => void;
+  onReport?: () => void;
+  onReportPost?: (postId: number) => void;
+  onReportComment?: (commentId: number) => void;
 }
 
 export function ProfileView({
@@ -79,6 +96,7 @@ export function ProfileView({
   profilePostsError,
   currentUser,
   token,
+  readOnly = false,
   userSettings,
   onSettingsChange,
   isEditing,
@@ -93,7 +111,18 @@ export function ProfileView({
   editingPostContent,
   editingCommentId,
   editingCommentContent,
+  showGuestAuth,
+  isRegisterMode,
+  usernameInput,
+  passwordInput,
+  authError,
+  isAuthLoading,
   onBack,
+  onSignIn,
+  onAuthSubmit,
+  onUsernameChange,
+  onPasswordChange,
+  onToggleAuthMode,
   onStartEdit,
   onCancelEdit,
   onProfileSaved,
@@ -133,12 +162,18 @@ export function ProfileView({
   onRetractPollVote,
   onClosePoll,
   onOpenPost,
+  onCopyPermalink,
+  onReport,
+  onReportPost,
+  onReportComment,
 }: ProfileViewProps) {
-  const isOwnProfile = profileUser?.id === currentUser.id;
+  const isOwnProfile = !!currentUser && profileUser?.id === currentUser.id;
   const canViewPosts = profileUser?.canViewPosts !== false;
   const hasVisiblePosts = profilePosts.length > 0;
   const showPostsSection = !isEditing && !isSettingsOpen && (canViewPosts || hasVisiblePosts);
   const showPrivateEmptyState = !isEditing && !isSettingsOpen && !canViewPosts && !hasVisiblePosts;
+
+  const handleSignInRequired = readOnly ? onSignIn : undefined;
 
   return (
     <div className="flex-grow overflow-y-auto p-4 md:p-6">
@@ -161,7 +196,8 @@ export function ProfileView({
             user={profileUser}
             isOwnProfile={isOwnProfile}
             isEditing={isEditing}
-            token={token}
+            token={token ?? ''}
+            readOnly={readOnly}
             followBusy={followBusy}
             onStartEdit={onStartEdit}
             onCancelEdit={onCancelEdit}
@@ -179,9 +215,12 @@ export function ProfileView({
             pendingRequestCount={followRequests.length}
             isSettingsOpen={isSettingsOpen}
             onOpenSettings={onOpenSettings}
+            onCopyPermalink={onCopyPermalink}
+            onReport={onReport}
+            onSignInRequired={handleSignInRequired}
           />
 
-          {isOwnProfile && isSettingsOpen && !isEditing && (
+          {isOwnProfile && isSettingsOpen && !isEditing && token && (
             <ProfileSettingsPanel
               settings={userSettings}
               token={token}
@@ -201,7 +240,18 @@ export function ProfileView({
             <div className="flex flex-col items-center justify-center py-16 border border-dashed border-border-custom rounded-2xl text-text-muted gap-3">
               <Lock className="h-8 w-8 text-text-muted/70" />
               <p className="text-sm font-medium text-text-secondary">This account is private</p>
-              <p className="text-xs">Follow this account to see their posts.</p>
+              <p className="text-xs">
+                {readOnly ? 'Sign in and follow this account to see their posts.' : 'Follow this account to see their posts.'}
+              </p>
+              {readOnly && onSignIn && (
+                <button
+                  type="button"
+                  onClick={onSignIn}
+                  className="mt-2 px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer"
+                >
+                  Sign in
+                </button>
+              )}
             </div>
           )}
 
@@ -216,6 +266,7 @@ export function ProfileView({
               <ProfilePosts
                 posts={profilePosts}
                 currentUser={currentUser}
+                readOnly={readOnly}
                 expandedComments={expandedComments}
                 postComments={postComments}
                 newCommentText={newCommentText}
@@ -246,11 +297,32 @@ export function ProfileView({
                 onRetractPollVote={onRetractPollVote}
                 onClosePoll={onClosePoll}
                 onOpenPost={onOpenPost}
+                onSignInRequired={handleSignInRequired}
+                onReportPost={onReportPost}
+                onReportComment={onReportComment}
               />
             </>
           )}
         </>
       ) : null}
+
+      {showGuestAuth && readOnly && onAuthSubmit && onUsernameChange && onPasswordChange && onToggleAuthMode && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/60">
+          <div className="w-full max-w-sm rounded-2xl border border-border-custom bg-bg-secondary p-6 shadow-xl">
+            <AuthForm
+              isRegisterMode={!!isRegisterMode}
+              usernameInput={usernameInput ?? ''}
+              passwordInput={passwordInput ?? ''}
+              authError={authError ?? null}
+              isAuthLoading={!!isAuthLoading}
+              onSubmit={onAuthSubmit}
+              onUsernameChange={onUsernameChange}
+              onPasswordChange={onPasswordChange}
+              onToggleMode={onToggleAuthMode}
+            />
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );

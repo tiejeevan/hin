@@ -1,6 +1,13 @@
 export type AppRoute =
   | { view: 'home' }
-  | { view: 'post'; postId: number; commentId?: number };
+  | { view: 'post'; postId: number; commentId?: number }
+  | { view: 'profile'; username: string };
+
+const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,30}$/;
+
+export function isValidUsername(username: string): boolean {
+  return USERNAME_PATTERN.test(username);
+}
 
 export function parseLocation(pathname: string, hash: string): AppRoute {
   const postMatch = pathname.match(/^\/post\/(\d+)\/?$/);
@@ -13,6 +20,15 @@ export function parseLocation(pathname: string, hash: string): AppRoute {
       commentId: commentMatch ? Number(commentMatch[1]) : undefined,
     };
   }
+
+  const profileMatch = pathname.match(/^\/profile\/([^/]+)\/?$/);
+  if (profileMatch) {
+    const username = decodeURIComponent(profileMatch[1]);
+    if (isValidUsername(username)) {
+      return { view: 'profile', username };
+    }
+  }
+
   return { view: 'home' };
 }
 
@@ -21,9 +37,16 @@ export function postPath(postId: number, commentId?: number): string {
   return commentId ? `${base}#comment-${commentId}` : base;
 }
 
+export function profilePath(username: string): string {
+  return `/profile/${encodeURIComponent(username)}`;
+}
+
 export function routeToPath(route: AppRoute): string {
   if (route.view === 'post') {
     return postPath(route.postId, route.commentId);
+  }
+  if (route.view === 'profile') {
+    return profilePath(route.username);
   }
   return '/';
 }
@@ -41,4 +64,8 @@ export function syncUrl(route: AppRoute, replace = false): void {
 
 export function postPermalinkUrl(postId: number, commentId?: number): string {
   return `${window.location.origin}${postPath(postId, commentId)}`;
+}
+
+export function profilePermalinkUrl(username: string): string {
+  return `${window.location.origin}${profilePath(username)}`;
 }

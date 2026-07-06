@@ -52,6 +52,8 @@ interface FeedViewProps {
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
   onOpenPost: (postId: number) => void;
+  onReportPost?: (postId: number) => void;
+  onReportComment?: (commentId: number) => void;
 }
 
 export function FeedView({
@@ -99,6 +101,8 @@ export function FeedView({
   onRetractPollVote,
   onClosePoll,
   onOpenPost,
+  onReportPost,
+  onReportComment,
 }: FeedViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef(onLoadMore);
@@ -197,6 +201,8 @@ export function FeedView({
                 onRetractPollVote={onRetractPollVote}
                 onClosePoll={onClosePoll}
                 onOpenPost={onOpenPost}
+                onReport={onReportPost}
+                onReportComment={onReportComment}
               />
             ))}
             <div ref={sentinelRef} className="h-1" aria-hidden />

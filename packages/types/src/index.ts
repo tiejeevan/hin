@@ -67,6 +67,32 @@ export interface MuteListPage {
   nextCursor: number | null;
 }
 
+export type ReportTargetType = 'user' | 'post' | 'comment';
+export type ReportReason = 'spam' | 'harassment' | 'hate' | 'misinformation' | 'nudity' | 'other';
+export type ReportStatus = 'pending' | 'dismissed' | 'action_taken';
+export type ReviewReportAction = 'dismiss' | 'delete_content' | 'delete_user';
+
+export interface ContentReport {
+  id: number;
+  reporterId: number;
+  reporterUsername: string;
+  targetType: ReportTargetType;
+  targetId: number;
+  reason: ReportReason;
+  details?: string | null;
+  status: ReportStatus;
+  reviewedBy?: number | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+  targetPreview?: string | null;
+  targetUsername?: string | null;
+}
+
+export interface ReportListPage {
+  reports: ContentReport[];
+  nextCursor: number | null;
+}
+
 export type PostType = 'text' | 'poll';
 export type PostVisibility = 'public' | 'followers' | 'only_me';
 export type PollResultsVisibility = 'always' | 'after_vote' | 'after_close';
@@ -402,4 +428,15 @@ export type ServerMessage =
 export const BroadcastSystemMessageSchema = z.object({
   message: z.string().min(1, 'Message cannot be empty').max(500, 'Message is too long'),
   delivery: z.enum(['notification', 'toast', 'both']),
+});
+
+export const CreateReportSchema = z.object({
+  targetType: z.enum(['user', 'post', 'comment']),
+  targetId: z.number().int().positive(),
+  reason: z.enum(['spam', 'harassment', 'hate', 'misinformation', 'nudity', 'other']),
+  details: z.string().max(500, 'Details are too long').optional(),
+});
+
+export const ReviewReportSchema = z.object({
+  action: z.enum(['dismiss', 'delete_content', 'delete_user']),
 });

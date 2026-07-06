@@ -265,6 +265,27 @@ export const notifications = sqliteTable('notifications', {
   userIdReadIdx: index('notifications_user_id_read_idx').on(table.userId, table.read),
 }));
 
+/** User-submitted reports for admin review. */
+export const contentReports = sqliteTable('content_reports', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  reporterId: integer('reporter_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** 'user' | 'post' | 'comment' */
+  targetType: text('target_type').notNull(),
+  targetId: integer('target_id').notNull(),
+  /** 'spam' | 'harassment' | 'hate' | 'misinformation' | 'nudity' | 'other' */
+  reason: text('reason').notNull(),
+  details: text('details'),
+  /** 'pending' | 'dismissed' | 'action_taken' */
+  status: text('status').default('pending').notNull(),
+  reviewedBy: integer('reviewed_by').references(() => users.id, { onDelete: 'set null' }),
+  reviewedAt: text('reviewed_at'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  statusIdx: index('content_reports_status_idx').on(table.status),
+  targetIdx: index('content_reports_target_idx').on(table.targetType, table.targetId),
+  reporterTargetIdx: index('content_reports_reporter_target_idx').on(table.reporterId, table.targetType, table.targetId),
+}));
+
 /** Admin system message broadcasts — always persisted for audit, regardless of delivery mode. */
 export const systemBroadcasts = sqliteTable('system_broadcasts', {
   id: integer('id').primaryKey({ autoIncrement: true }),

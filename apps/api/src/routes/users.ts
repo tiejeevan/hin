@@ -4,15 +4,7 @@ import { eq, and, count, sql, or, like, isNull } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
-import { toPublicUser, USER_PUBLIC_FIELDS } from '../lib/users';
-import {
-  canViewUserPosts,
-  getFollowStatus,
-  getFollowerCount,
-  getFollowingCount,
-} from '../lib/follows';
-import { getBlockStatus } from '../lib/blocks';
-import { getMuteStatus } from '../lib/mutes';
+import { toPublicUser, USER_PUBLIC_FIELDS, buildProfileResponse } from '../lib/users';
 import {
   getOrCreateUserSettings,
   ensureUserSettingsRow,
@@ -209,7 +201,7 @@ users.get('/search', async (c) => {
 // Get user by username
 users.get('/username/:username', async (c) => {
   const authUser = await getAuthUser(c);
-  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+  const viewerId = authUser ? authUser.id : null;
 
   const db = drizzle(c.env.DB, { schema });
   const username = c.req.param('username');
@@ -226,7 +218,10 @@ users.get('/username/:username', async (c) => {
       .get();
 
     if (!user) return c.json({ error: 'User not found' }, 404);
-    return c.json(toPublicUser(user));
+
+    const profile = await buildProfileResponse(db, viewerId, user);
+    if (!profile) return c.json({ error: 'User not found' }, 404);
+    return c.json(profile);
   } catch (e) {
     console.error('Error fetching user by username:', e);
     return c.json({ error: 'Internal Server Error' }, 500);
@@ -236,7 +231,7 @@ users.get('/username/:username', async (c) => {
 // Get single user profile
 users.get('/:id', async (c) => {
   const authUser = await getAuthUser(c);
-  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+  const viewerId = authUser ? authUser.id : null;
 
   const db = drizzle(c.env.DB, { schema });
   const userId = parseInt(c.req.param('id'));
@@ -254,44 +249,9 @@ users.get('/:id', async (c) => {
 
   if (!user) return c.json({ error: 'User not found' }, 404);
 
-  const blockStatus = await getBlockStatus(db, authUser.id, userId);
-  if (blockStatus === 'blocked_you') {
-    return c.json({ error: 'User not found' }, 404);
-  }
-
-  const [followerCount, followingCount, followStatus, canView, muteStatus] = await Promise.all([
-    getFollowerCount(db, userId),
-    getFollowingCount(db, userId),
-    getFollowStatus(db, authUser.id, userId),
-    canViewUserPosts(db, authUser.id, { id: user.id, isPrivate: user.isPrivate }),
-    getMuteStatus(db, authUser.id, userId),
-  ]);
-
-  const canViewPosts = blockStatus === 'you_blocked' ? false : canView;
-
-  let postCount: number | null = null;
-  const postCountConditions = [
-    eq(schema.posts.userId, userId),
-    sql`${schema.posts.deletedAt} IS NULL`,
-  ];
-  if (!canView) {
-    postCountConditions.push(eq(schema.posts.visibility, 'public'));
-  }
-  const postCountRes = await db.select({ value: count() })
-    .from(schema.posts)
-    .where(and(...postCountConditions))
-    .get();
-  postCount = postCountRes?.value || 0;
-
-  return c.json(toPublicUser(user, {
-    postCount,
-    followerCount,
-    followingCount,
-    followStatus,
-    canViewPosts,
-    blockStatus,
-    muteStatus,
-  }));
+  const profile = await buildProfileResponse(db, viewerId, user);
+  if (!profile) return c.json({ error: 'User not found' }, 404);
+  return c.json(profile);
 });
 
 export default users;

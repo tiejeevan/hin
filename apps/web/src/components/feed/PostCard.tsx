@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Heart, MessageSquare, Shield, Trash2, Send, X, MoreVertical, Pencil, Link2, Bookmark, Share2 } from 'lucide-react';
+import { Heart, MessageSquare, Shield, Trash2, Send, X, MoreVertical, Pencil, Link2, Bookmark, Share2, Flag } from 'lucide-react';
 import { Post, Comment, User as UserType } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { buildCommentTree } from '../../utils/comments';
@@ -53,6 +53,8 @@ interface PostCardProps {
   onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
+  onReport?: (postId: number) => void;
+  onReportComment?: (commentId: number) => void;
 }
 
 export function PostCard({
@@ -96,6 +98,8 @@ export function PostCard({
   onVotePoll,
   onRetractPollVote,
   onClosePoll,
+  onReport,
+  onReportComment,
 }: PostCardProps) {
   const token = localStorage.getItem('hin_token');
   
@@ -116,6 +120,8 @@ export function PostCard({
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const canManagePost = !readOnly && currentUser && (currentUser.role === 'admin' || currentUser.id === post.userId);
+  const canReportPost = !readOnly && currentUser && currentUser.id !== post.userId && onReport;
+  const showPostMenu = canManagePost || canReportPost;
 
   const requireAuth = (action: () => void) => {
     if (readOnly || !currentUser) {
@@ -162,7 +168,7 @@ export function PostCard({
         isNewlyCreated ? 'animate-blink-border' : ''
       }`}
     >
-      {canManagePost && (
+      {showPostMenu && (
         <div ref={menuRef} className="absolute top-4 right-4 z-10">
           <button
             onClick={() => setMenuOpen(prev => !prev)}
@@ -179,28 +185,45 @@ export function PostCard({
               role="menu"
               className="absolute right-0 top-full mt-1 w-36 rounded-xl border border-border-custom bg-bg-secondary shadow-lg overflow-hidden"
             >
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onStartPostEdit(post.id, post.content);
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-text-secondary hover:bg-bg-tertiary hover:text-indigo-400 transition-colors cursor-pointer min-h-[44px]"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-                Edit
-              </button>
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onDeletePost(post.id);
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer min-h-[44px]"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Delete
-              </button>
+              {canManagePost && (
+                <>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onStartPostEdit(post.id, post.content);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-text-secondary hover:bg-bg-tertiary hover:text-indigo-400 transition-colors cursor-pointer min-h-[44px]"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onDeletePost(post.id);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer min-h-[44px]"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
+                  </button>
+                </>
+              )}
+              {canReportPost && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onReport!(post.id);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer min-h-[44px]"
+                >
+                  <Flag className="h-3.5 w-3.5" />
+                  Report
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -475,6 +498,7 @@ export function PostCard({
                   onToggleCommentLike={onToggleCommentLike}
                   onViewProfile={onViewProfile}
                   onSignInRequired={onSignInRequired}
+                  onReport={onReportComment}
                 />
               ))
             )}

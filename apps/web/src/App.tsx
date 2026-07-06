@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   BroadcastDelivery,
+  ContentReport,
+  ReportListPage,
+  ReportReason,
+  ReportTargetType,
   Comment,
   FollowRequest,
   Message,
@@ -19,7 +23,7 @@ import { API_URL, WS_URL } from './config';
 import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode, FeedMode } from './types/ui';
 import type { CreatePostSubmitPayload } from './components/feed/CreatePostForm';
 import { mergePollFromBroadcast } from './utils/pollVisibility';
-import { parseLocation, syncUrl, postPermalinkUrl } from './lib/appRoutes';
+import { parseLocation, syncUrl, postPermalinkUrl, profilePermalinkUrl } from './lib/appRoutes';
 import { AppShell } from './components/layout/AppShell';
 import { AppHeader } from './components/layout/AppHeader';
 import { GuestHeader } from './components/layout/GuestHeader';
@@ -33,6 +37,7 @@ import { MessagesPanel } from './components/messages/MessagesPanel';
 import { ToastContainer } from './components/ui/ToastContainer';
 import { FloatingActionStack } from './components/ui/FloatingActionStack';
 import { FollowersModal } from './components/profile/FollowersModal';
+import { ReportModal } from './components/moderation/ReportModal';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('hin_token'));
@@ -110,6 +115,9 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [adminData, setAdminData] = useState<AdminData | null>(null);
   const [broadcastHistory, setBroadcastHistory] = useState<SystemBroadcast[] | null>(null);
+  const [adminReports, setAdminReports] = useState<ContentReport[] | null>(null);
+
+  const [reportTarget, setReportTarget] = useState<{ type: ReportTargetType; id: number } | null>(null);
 
   const [profileUserId, setProfileUserId] = useState<number | null>(null);
   const [profileUser, setProfileUser] = useState<UserType | null>(null);
@@ -337,29 +345,30 @@ export default function App() {
     }
   };
 
-  const fetchProfile = async (userId: number) => {
-    if (!token) return;
+  const fetchProfile = async (userId: number): Promise<UserType | null> => {
     setProfileLoading(true);
     setProfileError(null);
     try {
       const res = await fetch(`${API_URL}/api/users/${userId}`, { headers: getHeaders() });
       if (res.ok) {
-        setProfileUser(await res.json());
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setProfileError(data.error || 'Failed to load profile');
-        setProfileUser(null);
+        const user: UserType = await res.json();
+        setProfileUser(user);
+        return user;
       }
+      const data = await res.json().catch(() => ({}));
+      setProfileError(data.error || 'Failed to load profile');
+      setProfileUser(null);
+      return null;
     } catch {
       setProfileError('Failed to load profile');
       setProfileUser(null);
+      return null;
     } finally {
       setProfileLoading(false);
     }
   };
 
   const fetchProfilePosts = async (userId: number) => {
-    if (!token) return;
     setProfilePostsError(null);
     try {
       const res = await fetch(`${API_URL}/api/posts?userId=${userId}&limit=50`, {
@@ -374,7 +383,10 @@ export default function App() {
     }
   };
 
-  const openProfile = (userId: number, opts?: { highlightFollowRequests?: boolean }) => {
+  const openProfile = async (
+    userId: number,
+    opts?: { highlightFollowRequests?: boolean; username?: string; skipUrlSync?: boolean; replace?: boolean },
+  ) => {
     setProfileUserId(userId);
     setActiveTab('profile');
     setIsProfileEditing(false);
@@ -385,22 +397,64 @@ export default function App() {
     setChatRecipient(null);
     setProfilePostsError(null);
     setHighlightFollowRequests(!!opts?.highlightFollowRequests);
-    fetchProfile(userId);
+    setShowGuestAuth(false);
+    if (!opts?.skipUrlSync && opts?.username) {
+      syncUrl({ view: 'profile', username: opts.username }, opts?.replace);
+    }
+    const user = await fetchProfile(userId);
     fetchProfilePosts(userId);
     if (userId === currentUser?.id) fetchFollowRequests();
+    if (!opts?.skipUrlSync && !opts?.username && user?.username) {
+      syncUrl({ view: 'profile', username: user.username }, opts?.replace);
+    }
   };
 
-  const openProfileByUsername = async (username: string) => {
+  const openProfileByUsername = async (
+    username: string,
+    opts?: { skipUrlSync?: boolean; replace?: boolean },
+  ) => {
+    setActiveTab('profile');
+    setProfileLoading(true);
+    setProfileError(null);
+    setProfileUser(null);
+    setProfilePosts([]);
+    setIsProfileEditing(false);
+    setIsProfileSettingsOpen(false);
+    setShowNotifications(false);
+    setShowMessagesDropdown(false);
+    setMessagesPanelExpanded(false);
+    setChatRecipient(null);
+    setProfilePostsError(null);
+    setHighlightFollowRequests(false);
+    setShowGuestAuth(false);
+    if (!opts?.skipUrlSync) {
+      syncUrl({ view: 'profile', username }, opts?.replace);
+    }
     try {
-      const res = await fetch(`${API_URL}/api/users/username/${username}`, { headers: getHeaders() });
+      const res = await fetch(`${API_URL}/api/users/username/${encodeURIComponent(username)}`, {
+        headers: getHeaders(),
+      });
       if (res.ok) {
-        const user = await res.json();
-        openProfile(user.id);
+        const user: UserType = await res.json();
+        setProfileUserId(user.id);
+        setProfileUser(user);
+        setProfileLoading(false);
+        setProfileError(null);
+        fetchProfilePosts(user.id);
+        if (user.id === currentUser?.id) fetchFollowRequests();
       } else {
-        addToast(`User @${username} not found`, 'system', undefined, { skipPrefCheck: true });
+        setProfileUserId(null);
+        setProfileUser(null);
+        setProfileLoading(false);
+        const data = await res.json().catch(() => ({}));
+        setProfileError(data.error || `User @${username} not found`);
+        if (!currentUser) {
+          addToast(`User @${username} not found`, 'system', undefined, { skipPrefCheck: true });
+        }
       }
     } catch (e) {
       console.error('Error opening profile by username:', e);
+      setProfileError('Failed to load profile');
     }
   };
 
@@ -545,6 +599,82 @@ export default function App() {
       () => addToast('Link copied to clipboard', 'system', undefined, { skipPrefCheck: true }),
       () => addToast('Could not copy link', 'system', undefined, { skipPrefCheck: true }),
     );
+  };
+
+  const handleCopyProfilePermalink = (username: string) => {
+    const url = profilePermalinkUrl(username);
+    navigator.clipboard.writeText(url).then(
+      () => addToast('Profile link copied', 'system', undefined, { skipPrefCheck: true }),
+      () => addToast('Could not copy link', 'system', undefined, { skipPrefCheck: true }),
+    );
+  };
+
+  const handleOpenReport = (type: ReportTargetType, id: number) => {
+    if (!currentUser || !token) {
+      handleGuestSignIn();
+      return;
+    }
+    setReportTarget({ type, id });
+  };
+
+  const handleSubmitReport = async (reason: ReportReason, details?: string) => {
+    if (!reportTarget || !token) return { success: false, error: 'Not signed in' };
+    try {
+      const res = await fetch(`${API_URL}/api/reports`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({
+          targetType: reportTarget.type,
+          targetId: reportTarget.id,
+          reason,
+          details,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setReportTarget(null);
+        addToast('Report submitted', 'system', undefined, { skipPrefCheck: true });
+        return { success: true };
+      }
+      return { success: false, error: data.error || 'Failed to submit report' };
+    } catch {
+      return { success: false, error: 'Failed to submit report' };
+    }
+  };
+
+  const fetchAdminReports = async () => {
+    if (!currentUser || currentUser.role !== 'admin' || !token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/reports?status=pending`, { headers: getHeaders() });
+      if (res.ok) {
+        const data: ReportListPage = await res.json();
+        setAdminReports(data.reports);
+      }
+    } catch (e) {
+      console.error('Error fetching reports:', e);
+    }
+  };
+
+  const handleReviewReport = async (reportId: number, action: 'dismiss' | 'delete_content' | 'delete_user') => {
+    if (!currentUser || currentUser.role !== 'admin' || !token) {
+      return { success: false, error: 'Unauthorized' };
+    }
+    try {
+      const res = await fetch(`${API_URL}/api/admin/reports/${reportId}`, {
+        method: 'PATCH',
+        headers: getHeaders(),
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAdminReports(prev => prev?.filter(r => r.id !== reportId) ?? null);
+        if (adminData) fetchAdminStats();
+        return { success: true };
+      }
+      return { success: false, error: data.error || 'Failed to review report' };
+    } catch {
+      return { success: false, error: 'Failed to review report' };
+    }
   };
 
   const handleToastClick = (toast: Toast) => {
@@ -1038,6 +1168,8 @@ export default function App() {
         const route = parseLocation(window.location.pathname, window.location.hash);
         if (route.view === 'post') {
           openPost(route.postId, { commentId: route.commentId, skipUrlSync: true });
+        } else if (route.view === 'profile') {
+          openProfileByUsername(route.username, { skipUrlSync: true });
         }
       } else {
         setAuthError(data.error || 'Authentication failed');
@@ -1723,12 +1855,16 @@ export default function App() {
     const route = parseLocation(window.location.pathname, window.location.hash);
     if (route.view === 'post') {
       openPost(route.postId, { commentId: route.commentId, replace: true, skipUrlSync: true });
+    } else if (route.view === 'profile') {
+      openProfileByUsername(route.username, { replace: true, skipUrlSync: true });
     }
 
     const onPopState = () => {
       const r = parseLocation(window.location.pathname, window.location.hash);
       if (r.view === 'post') {
         openPost(r.postId, { commentId: r.commentId, skipUrlSync: true });
+      } else if (r.view === 'profile') {
+        openProfileByUsername(r.username, { skipUrlSync: true });
       } else {
         goHome({ skipUrlSync: true });
       }
@@ -1846,7 +1982,8 @@ export default function App() {
   };
 
   const isGuestPostView = !currentUser && activeTab === 'post';
-  const showAuthOnly = !currentUser && !isGuestPostView;
+  const isGuestProfileView = !currentUser && activeTab === 'profile';
+  const showAuthOnly = !currentUser && !isGuestPostView && !isGuestProfileView;
 
   const effectiveSettings: UserSettings = userSettings ?? {
     ...DEFAULT_USER_SETTINGS,
@@ -1868,7 +2005,7 @@ export default function App() {
         ) : undefined
       }
       header={
-        isGuestPostView ? (
+        isGuestPostView || isGuestProfileView ? (
           <GuestHeader onSignIn={handleGuestSignIn} onGoHome={() => goHome()} />
         ) : currentUser ? (
           <AppHeader
@@ -1977,6 +2114,103 @@ export default function App() {
             onCopyPermalink={() => postViewId && handleCopyPostPermalink(postViewId)}
             onToggleBookmark={() => postViewId && handleToggleBookmark(postViewId)}
             onShare={() => postViewId && handleSharePost(postViewId)}
+            onReportPost={(postId) => handleOpenReport('post', postId)}
+            onReportComment={(commentId) => handleOpenReport('comment', commentId)}
+          />
+        ) : activeTab === 'profile' ? (
+          <ProfileView
+            profileUser={profileUser}
+            profilePosts={profilePosts}
+            followRequests={followRequests}
+            isLoading={profileLoading}
+            loadError={profileError}
+            profilePostsError={profilePostsError}
+            currentUser={currentUser ?? undefined}
+            token={token ?? undefined}
+            readOnly={!currentUser}
+            userSettings={effectiveSettings}
+            onSettingsChange={handleSettingsChange}
+            isEditing={isProfileEditing}
+            isSettingsOpen={isProfileSettingsOpen}
+            highlightSettings={highlightFollowRequests}
+            followBusy={followBusy}
+            expandedComments={expandedComments}
+            postComments={postComments}
+            newCommentText={newCommentText}
+            replyingTo={replyingTo}
+            editingPostId={editingPostId}
+            editingPostContent={editingPostContent}
+            editingCommentId={editingCommentId}
+            editingCommentContent={editingCommentContent}
+            showGuestAuth={showGuestAuth}
+            isRegisterMode={isRegisterMode}
+            usernameInput={usernameInput}
+            passwordInput={passwordInput}
+            authError={authError}
+            isAuthLoading={isAuthLoading}
+            onBack={() => goHome()}
+            onSignIn={handleGuestSignIn}
+            onAuthSubmit={handleAuthSubmit}
+            onUsernameChange={setUsernameInput}
+            onPasswordChange={setPasswordInput}
+            onToggleAuthMode={() => {
+              setIsRegisterMode(!isRegisterMode);
+              setAuthError(null);
+            }}
+            onStartEdit={() => setIsProfileEditing(true)}
+            onCancelEdit={() => setIsProfileEditing(false)}
+            onProfileSaved={handleProfileSaved}
+            onStartChat={startChat}
+            onFollow={handleFollow}
+            onUnfollow={handleUnfollow}
+            onCancelFollowRequest={handleCancelFollowRequest}
+            onBlockUser={handleBlockUser}
+            onUnblockUser={handleUnblockUser}
+            onMuteUser={handleMuteUser}
+            onUnmuteUser={handleUnmuteUser}
+            onApproveFollowRequest={handleApproveFollowRequest}
+            onRejectFollowRequest={handleRejectFollowRequest}
+            onShowFollowers={() => setFollowersModal('followers')}
+            onShowFollowing={() => setFollowersModal('following')}
+            onOpenSettings={() => {
+              setIsProfileSettingsOpen(true);
+              fetchFollowRequests();
+            }}
+            onCloseSettings={() => setIsProfileSettingsOpen(false)}
+            onToggleLike={handleToggleLike}
+            onToggleComments={toggleComments}
+            onDeletePost={handleDeletePost}
+            onStartPostEdit={(id, content) => {
+              setEditingPostId(id);
+              setEditingPostContent(content);
+            }}
+            onCancelPostEdit={() => setEditingPostId(null)}
+            onSavePostEdit={handleSavePostEdit}
+            onEditPostContentChange={setEditingPostContent}
+            onCreateComment={handleCreateComment}
+            onCommentTextChange={(postId, text) => setNewCommentText(prev => ({ ...prev, [postId]: text }))}
+            onCancelReply={postId => setReplyingTo(prev => ({ ...prev, [postId]: null }))}
+            onDeleteComment={handleDeleteComment}
+            onStartCommentEdit={(id, content) => {
+              setEditingCommentId(id);
+              setEditingCommentContent(content);
+            }}
+            onCancelCommentEdit={() => setEditingCommentId(null)}
+            onSaveCommentEdit={handleSaveCommentEdit}
+            onEditCommentContentChange={setEditingCommentContent}
+            onReply={(postId, comment: CommentNode) => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
+            onToggleCommentLike={handleToggleCommentLike}
+            onViewProfile={handleViewProfile}
+            onVotePoll={handleVotePoll}
+            onRetractPollVote={handleRetractPollVote}
+            onClosePoll={handleClosePoll}
+            onOpenPost={openPost}
+            onCopyPermalink={profileUser ? () => handleCopyProfilePermalink(profileUser.username) : undefined}
+            onReport={profileUser && currentUser && profileUser.id !== currentUser.id
+              ? () => handleOpenReport('user', profileUser.id)
+              : undefined}
+            onReportPost={(postId) => handleOpenReport('post', postId)}
+            onReportComment={(commentId) => handleOpenReport('comment', commentId)}
           />
         ) : currentUser && activeTab === 'feed' ? (
           <FeedView
@@ -2030,92 +2264,25 @@ export default function App() {
             onRetractPollVote={handleRetractPollVote}
             onClosePoll={handleClosePoll}
             onOpenPost={openPost}
-          />
-        ) : currentUser && activeTab === 'profile' && profileUserId && token ? (
-          <ProfileView
-            profileUser={profileUser}
-            profilePosts={profilePosts}
-            followRequests={followRequests}
-            isLoading={profileLoading}
-            loadError={profileError}
-            profilePostsError={profilePostsError}
-            currentUser={currentUser}
-            token={token}
-            userSettings={effectiveSettings}
-            onSettingsChange={handleSettingsChange}
-            isEditing={isProfileEditing}
-            isSettingsOpen={isProfileSettingsOpen}
-            highlightSettings={highlightFollowRequests}
-            followBusy={followBusy}
-            expandedComments={expandedComments}
-            postComments={postComments}
-            newCommentText={newCommentText}
-            replyingTo={replyingTo}
-            editingPostId={editingPostId}
-            editingPostContent={editingPostContent}
-            editingCommentId={editingCommentId}
-            editingCommentContent={editingCommentContent}
-            onBack={goHome}
-            onStartEdit={() => setIsProfileEditing(true)}
-            onCancelEdit={() => setIsProfileEditing(false)}
-            onProfileSaved={handleProfileSaved}
-            onStartChat={startChat}
-            onFollow={handleFollow}
-            onUnfollow={handleUnfollow}
-            onCancelFollowRequest={handleCancelFollowRequest}
-            onBlockUser={handleBlockUser}
-            onUnblockUser={handleUnblockUser}
-            onMuteUser={handleMuteUser}
-            onUnmuteUser={handleUnmuteUser}
-            onApproveFollowRequest={handleApproveFollowRequest}
-            onRejectFollowRequest={handleRejectFollowRequest}
-            onShowFollowers={() => setFollowersModal('followers')}
-            onShowFollowing={() => setFollowersModal('following')}
-            onOpenSettings={() => {
-              setIsProfileSettingsOpen(true);
-              fetchFollowRequests();
-            }}
-            onCloseSettings={() => setIsProfileSettingsOpen(false)}
-            onToggleLike={handleToggleLike}
-            onToggleComments={toggleComments}
-            onDeletePost={handleDeletePost}
-            onStartPostEdit={(id, content) => {
-              setEditingPostId(id);
-              setEditingPostContent(content);
-            }}
-            onCancelPostEdit={() => setEditingPostId(null)}
-            onSavePostEdit={handleSavePostEdit}
-            onEditPostContentChange={setEditingPostContent}
-            onCreateComment={handleCreateComment}
-            onCommentTextChange={(postId, text) => setNewCommentText(prev => ({ ...prev, [postId]: text }))}
-            onCancelReply={postId => setReplyingTo(prev => ({ ...prev, [postId]: null }))}
-            onDeleteComment={handleDeleteComment}
-            onStartCommentEdit={(id, content) => {
-              setEditingCommentId(id);
-              setEditingCommentContent(content);
-            }}
-            onCancelCommentEdit={() => setEditingCommentId(null)}
-            onSaveCommentEdit={handleSaveCommentEdit}
-            onEditCommentContentChange={setEditingCommentContent}
-            onReply={(postId, comment: CommentNode) => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
-            onToggleCommentLike={handleToggleCommentLike}
-            onViewProfile={handleViewProfile}
-            onVotePoll={handleVotePoll}
-            onRetractPollVote={handleRetractPollVote}
-            onClosePoll={handleClosePoll}
-            onOpenPost={openPost}
+            onReportPost={(postId) => handleOpenReport('post', postId)}
+            onReportComment={(commentId) => handleOpenReport('comment', commentId)}
           />
         ) : currentUser && activeTab === 'admin' ? (
           <AdminDashboard
             adminData={adminData}
             broadcastHistory={broadcastHistory}
+            adminReports={adminReports}
             currentUser={currentUser}
             onImpersonateUser={handleImpersonateUser}
             onUpdateUserRole={handleUpdateUserRole}
             onDeleteUser={handleAdminDeleteUser}
             onLoadAdminData={fetchAdminStats}
             onLoadBroadcastHistory={fetchBroadcastHistory}
+            onLoadReports={fetchAdminReports}
+            onReviewReport={handleReviewReport}
             onBroadcast={handleSystemBroadcast}
+            onOpenProfile={openProfileByUsername}
+            onOpenPost={openPost}
           />
         ) : null}
 
@@ -2167,6 +2334,13 @@ export default function App() {
             token={token}
             onClose={() => setFollowersModal(null)}
             onViewProfile={handleViewProfile}
+          />
+        )}
+
+        {reportTarget && (
+          <ReportModal
+            onClose={() => setReportTarget(null)}
+            onSubmit={handleSubmitReport}
           />
         )}
       </section>

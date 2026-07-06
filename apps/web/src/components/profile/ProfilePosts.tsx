@@ -4,7 +4,8 @@ import { CommentNode } from '../../types/ui';
 
 interface ProfilePostsProps {
   posts: Post[];
-  currentUser: UserType;
+  currentUser?: UserType;
+  readOnly?: boolean;
   expandedComments: Record<number, boolean>;
   postComments: Record<number, Comment[]>;
   newCommentText: Record<number, string>;
@@ -35,11 +36,15 @@ interface ProfilePostsProps {
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
   onOpenPost: (postId: number) => void;
+  onSignInRequired?: () => void;
+  onReportPost?: (postId: number) => void;
+  onReportComment?: (commentId: number) => void;
 }
 
 export function ProfilePosts({
   posts,
   currentUser,
+  readOnly = false,
   expandedComments,
   postComments,
   newCommentText,
@@ -70,6 +75,9 @@ export function ProfilePosts({
   onRetractPollVote,
   onClosePoll,
   onOpenPost,
+  onSignInRequired,
+  onReportPost,
+  onReportComment,
 }: ProfilePostsProps) {
   return (
     <div className="space-y-3">
@@ -84,7 +92,8 @@ export function ProfilePosts({
           <PostCard
             key={post.id}
             post={post}
-            currentUser={currentUser}
+            currentUser={currentUser ?? null}
+            readOnly={readOnly}
             commentsList={postComments[post.id] || []}
             isCommentsExpanded={expandedComments[post.id] || false}
             isNewlyCreated={false}
@@ -117,6 +126,9 @@ export function ProfilePosts({
             onRetractPollVote={onRetractPollVote}
             onClosePoll={onClosePoll}
             onOpenPost={onOpenPost}
+            onSignInRequired={onSignInRequired}
+            onReport={onReportPost}
+            onReportComment={onReportComment}
           />
         ))
       )}

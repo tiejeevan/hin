@@ -55,6 +55,8 @@ interface PostViewProps {
   onCopyPermalink: () => void;
   onToggleBookmark: () => void;
   onShare: () => void;
+  onReportPost?: (postId: number) => void;
+  onReportComment?: (commentId: number) => void;
 }
 
 export function PostView({
@@ -108,6 +110,8 @@ export function PostView({
   onCopyPermalink,
   onToggleBookmark,
   onShare,
+  onReportPost,
+  onReportComment,
 }: PostViewProps) {
   if (isLoading) {
     return (
@@ -234,6 +238,8 @@ export function PostView({
         onVotePoll={onVotePoll}
         onRetractPollVote={onRetractPollVote}
         onClosePoll={onClosePoll}
+        onReport={onReportPost}
+        onReportComment={onReportComment}
       />
     </div>
   );

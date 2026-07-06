@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Heart, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import { Heart, MoreVertical, Pencil, Trash2, Flag } from 'lucide-react';
 import { User as UserType } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { MentionsText } from './MentionsText';
@@ -23,6 +23,7 @@ interface CommentItemProps {
   onToggleCommentLike: (postId: number, commentId: number) => void;
   onViewProfile: (userIdOrUsername: number | string) => void;
   onSignInRequired?: () => void;
+  onReport?: (commentId: number) => void;
 }
 
 export function CommentItem({
@@ -42,6 +43,7 @@ export function CommentItem({
   onToggleCommentLike,
   onViewProfile,
   onSignInRequired,
+  onReport,
 }: CommentItemProps) {
   const token = localStorage.getItem('hin_token');
   const commentEditAutocomplete = useMentionAutocomplete({
@@ -52,6 +54,8 @@ export function CommentItem({
   const isDeleted = !!comment.deletedAt || comment.username === 'deleted';
   const isEditing = editingCommentId === comment.id;
   const canManage = !readOnly && !isDeleted && currentUser && (currentUser.role === 'admin' || currentUser.id === comment.userId);
+  const canReport = !readOnly && !isDeleted && currentUser && currentUser.id !== comment.userId && onReport;
+  const showMenu = canManage || canReport;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -150,7 +154,7 @@ export function CommentItem({
               )}
             </div>
 
-            {canManage && !isEditing && (
+            {showMenu && !isEditing && (
               <div ref={menuRef} className="relative shrink-0 -mt-0.5">
                 <button
                   type="button"
@@ -168,30 +172,48 @@ export function CommentItem({
                     role="menu"
                     className="absolute right-0 top-full mt-1 w-32 rounded-xl border border-border-custom bg-bg-secondary shadow-lg overflow-hidden z-20"
                   >
-                    <button
-                      role="menuitem"
-                      type="button"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onStartEdit(comment.id, comment.content);
-                      }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-secondary hover:bg-bg-tertiary hover:text-indigo-400 transition-colors cursor-pointer min-h-[40px]"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                      Edit
-                    </button>
-                    <button
-                      role="menuitem"
-                      type="button"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onDeleteComment(postId, comment.id);
-                      }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer min-h-[40px]"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete
-                    </button>
+                    {canManage && (
+                      <>
+                        <button
+                          role="menuitem"
+                          type="button"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            onStartEdit(comment.id, comment.content);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-secondary hover:bg-bg-tertiary hover:text-indigo-400 transition-colors cursor-pointer min-h-[40px]"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          Edit
+                        </button>
+                        <button
+                          role="menuitem"
+                          type="button"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            onDeleteComment(postId, comment.id);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer min-h-[40px]"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </button>
+                      </>
+                    )}
+                    {canReport && (
+                      <button
+                        role="menuitem"
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onReport!(comment.id);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer min-h-[40px]"
+                      >
+                        <Flag className="h-3.5 w-3.5" />
+                        Report
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

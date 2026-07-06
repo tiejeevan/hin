@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Shield, MessageCircle, Pencil, UserPlus, UserCheck, Clock, Settings, MoreHorizontal, VolumeX, Volume2, Ban, UserX } from 'lucide-react';
+import { Shield, MessageCircle, Pencil, UserPlus, UserCheck, Clock, Settings, MoreHorizontal, VolumeX, Volume2, Ban, UserX, Link2, Flag } from 'lucide-react';
 import { BlockStatus, FollowStatus, MuteStatus, User as UserType } from '@hin/types';
 import { UserAvatar } from './UserAvatar';
 import { ProfileEditForm } from './ProfileEditForm';
@@ -26,6 +26,10 @@ interface ProfileHeaderProps {
   pendingRequestCount?: number;
   isSettingsOpen?: boolean;
   onOpenSettings?: () => void;
+  readOnly?: boolean;
+  onCopyPermalink?: () => void;
+  onReport?: () => void;
+  onSignInRequired?: () => void;
 }
 
 function followButtonLabel(status: FollowStatus | undefined, isPrivate: boolean | undefined): string {
@@ -56,6 +60,10 @@ export function ProfileHeader({
   pendingRequestCount = 0,
   isSettingsOpen = false,
   onOpenSettings,
+  readOnly = false,
+  onCopyPermalink,
+  onReport,
+  onSignInRequired,
 }: ProfileHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -124,8 +132,29 @@ export function ProfileHeader({
           />
 
           <div className="flex items-center gap-2 pb-1">
-            {isOwnProfile ? (
+            {readOnly ? (
+              onSignInRequired && (
+                <button
+                  type="button"
+                  onClick={onSignInRequired}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer min-h-[44px]"
+                >
+                  Sign in
+                </button>
+              )
+            ) : isOwnProfile ? (
               <>
+                {onCopyPermalink && (
+                  <button
+                    type="button"
+                    onClick={onCopyPermalink}
+                    className="flex items-center justify-center w-11 h-11 rounded-xl border border-border-custom bg-bg-tertiary hover:bg-bg-tertiary/80 text-text-primary transition-colors cursor-pointer"
+                    aria-label="Copy profile link"
+                    title="Copy profile link"
+                  >
+                    <Link2 className="h-4 w-4" />
+                  </button>
+                )}
                 {onOpenSettings && (
                   <button
                     type="button"
@@ -242,6 +271,19 @@ export function ProfileHeader({
                         <Ban className="h-3.5 w-3.5" />
                         Block
                       </button>
+                      {onReport && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            onReport();
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                        >
+                          <Flag className="h-3.5 w-3.5" />
+                          Report
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

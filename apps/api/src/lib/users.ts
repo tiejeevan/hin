@@ -1,7 +1,18 @@
-import { eq } from 'drizzle-orm';
+import { eq, and, count, sql } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import { FollowStatus, User, BlockStatus, MuteStatus } from '@hin/types';
 import bcrypt from 'bcryptjs';
+import { drizzle } from 'drizzle-orm/d1';
+import {
+  canViewUserPosts,
+  getFollowStatus,
+  getFollowerCount,
+  getFollowingCount,
+} from './follows';
+import { getBlockStatus } from './blocks';
+import { getMuteStatus } from './mutes';
+
+type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 export function toPublicUser(
   user: {
@@ -55,6 +66,90 @@ export const USER_PUBLIC_FIELDS = {
   isPrivate: schema.users.isPrivate,
   createdAt: schema.users.createdAt,
 };
+
+type UserRow = {
+  id: number;
+  username: string;
+  role: string;
+  bio?: string | null;
+  avatarUrl?: string | null;
+  coverUrl?: string | null;
+  isPrivate?: number | boolean | null;
+  createdAt: string;
+};
+
+export async function buildProfileResponse(
+  db: Db,
+  viewerId: number | null,
+  user: UserRow,
+): Promise<User | null> {
+  const userId = user.id;
+
+  if (viewerId) {
+    const blockStatus = await getBlockStatus(db, viewerId, userId);
+    if (blockStatus === 'blocked_you') return null;
+
+    const [followerCount, followingCount, followStatus, canView, muteStatus] = await Promise.all([
+      getFollowerCount(db, userId),
+      getFollowingCount(db, userId),
+      getFollowStatus(db, viewerId, userId),
+      canViewUserPosts(db, viewerId, { id: user.id, isPrivate: user.isPrivate }),
+      getMuteStatus(db, viewerId, userId),
+    ]);
+
+    const canViewPosts = blockStatus === 'you_blocked' ? false : canView;
+
+    const postCountConditions = [
+      eq(schema.posts.userId, userId),
+      sql`${schema.posts.deletedAt} IS NULL`,
+    ];
+    if (!canView) {
+      postCountConditions.push(eq(schema.posts.visibility, 'public'));
+    }
+    const postCountRes = await db.select({ value: count() })
+      .from(schema.posts)
+      .where(and(...postCountConditions))
+      .get();
+
+    return toPublicUser(user, {
+      postCount: postCountRes?.value || 0,
+      followerCount,
+      followingCount,
+      followStatus,
+      canViewPosts,
+      blockStatus,
+      muteStatus,
+    });
+  }
+
+  // Guest viewer
+  const isPrivate = !!(user.isPrivate && user.isPrivate !== 0);
+  const canViewPosts = !isPrivate;
+
+  const [followerCount, followingCount] = await Promise.all([
+    getFollowerCount(db, userId),
+    getFollowingCount(db, userId),
+  ]);
+
+  const postCountConditions = [
+    eq(schema.posts.userId, userId),
+    sql`${schema.posts.deletedAt} IS NULL`,
+  ];
+  if (!canViewPosts) {
+    postCountConditions.push(eq(schema.posts.visibility, 'public'));
+  }
+  const postCountRes = await db.select({ value: count() })
+    .from(schema.posts)
+    .where(and(...postCountConditions))
+    .get();
+
+  return toPublicUser(user, {
+    postCount: postCountRes?.value || 0,
+    followerCount,
+    followingCount,
+    canViewPosts,
+  });
+}
 
 // Ensure Admin user is seeded in DB
 export async function seedAdminUser(db: any) {

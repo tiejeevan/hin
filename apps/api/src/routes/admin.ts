@@ -2,11 +2,12 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, count, sql, isNull, desc } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { BroadcastDelivery, BroadcastSystemMessageSchema, Notification, SystemBroadcast } from '@hin/types';
+import { BroadcastDelivery, BroadcastSystemMessageSchema, Notification, ReportStatus, ReviewReportSchema, SystemBroadcast } from '@hin/types';
 import { sign } from 'hono/jwt';
 import type { Env } from '../types';
 import { getAuthUser, JWT_SECRET } from '../lib/auth';
 import { isNotificationEnabled, toPublicSettings } from '../lib/user-settings';
+import { listReports, reviewReport } from '../lib/reports';
 
 const admin = new Hono<{ Bindings: Env }>();
 
@@ -327,6 +328,56 @@ admin.delete('/users/:id', async (c) => {
     .run();
 
   return c.json({ success: true });
+});
+
+// List content reports for admin review
+admin.get('/reports', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const statusParam = c.req.query('status') || 'pending';
+  if (statusParam !== 'pending' && statusParam !== 'dismissed' && statusParam !== 'action_taken') {
+    return c.json({ error: 'Invalid status' }, 400);
+  }
+
+  const cursorParam = c.req.query('cursor');
+  let cursor: number | null = null;
+  if (cursorParam !== undefined && cursorParam !== '') {
+    const parsed = parseInt(cursorParam);
+    if (isNaN(parsed)) return c.json({ error: 'Invalid cursor' }, 400);
+    cursor = parsed;
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const page = await listReports(db, statusParam as ReportStatus, cursor);
+  return c.json(page);
+});
+
+// Review a content report
+admin.patch('/reports/:id', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const reportId = parseInt(c.req.param('id'));
+  if (isNaN(reportId)) return c.json({ error: 'Invalid report id' }, 400);
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = ReviewReportSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, 400);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const result = await reviewReport(db, authUser.id, reportId, parsed.data.action);
+  if (!result.ok) {
+    return c.json({ error: result.error }, result.code as 400 | 404);
+  }
+
+  return c.json({ success: true, report: result.report });
 });
 
 export default admin;
