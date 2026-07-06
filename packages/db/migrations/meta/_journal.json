@@ -141,6 +141,27 @@
       "when": 1783151000000,
       "tag": "0019_user_blocks_mutes",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1783152000000,
+      "tag": "0020_content_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1783153000000,
+      "tag": "0021_user_lifecycle_pins_threads",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1783154000000,
+      "tag": "0022_post_limits",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, Lock, MessageSquare, Settings, UserX } from 'lucide-react';
+import { Bell, Lock, MessageSquare, Settings, UserX, AlertTriangle } from 'lucide-react';
 import {
   ChatIconPage,
   FollowRequest,
@@ -20,6 +20,7 @@ const CHAT_PAGE_OPTIONS: { value: ChatIconPage; label: string }[] = [
 interface ProfileSettingsPanelProps {
   settings: UserSettings;
   token: string;
+  username: string;
   requests: FollowRequest[];
   highlighted?: boolean;
   onSettingsChange: (settings: UserSettings) => void;
@@ -29,11 +30,13 @@ interface ProfileSettingsPanelProps {
   onClose: () => void;
   onUnblockUser: (userId: number) => void | Promise<void>;
   onUnmuteUser: (userId: number) => void | Promise<void>;
+  onDeleteAccount: (password: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export function ProfileSettingsPanel({
   settings,
   token,
+  username,
   requests,
   highlighted = false,
   onSettingsChange,
@@ -43,10 +46,15 @@ export function ProfileSettingsPanel({
   onClose,
   onUnblockUser,
   onUnmuteUser,
+  onDeleteAccount,
 }: ProfileSettingsPanelProps) {
-  const [openSection, setOpenSection] = useState<'privacy' | 'notifications' | 'chat' | 'blocked' | null>(null);
+  const [openSection, setOpenSection] = useState<'privacy' | 'notifications' | 'chat' | 'blocked' | 'danger' | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleteConfirmUsername, setDeleteConfirmUsername] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (highlighted) setOpenSection('privacy');
@@ -86,8 +94,29 @@ export function ProfileSettingsPanel({
     [settings, token, onSettingsChange],
   );
 
-  const toggleSection = (section: 'privacy' | 'notifications' | 'chat' | 'blocked') => {
+  const toggleSection = (section: 'privacy' | 'notifications' | 'chat' | 'blocked' | 'danger') => {
     setOpenSection(prev => (prev === section ? null : section));
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmUsername !== username) {
+      setDeleteError('Username does not match');
+      return;
+    }
+    if (!deletePassword) {
+      setDeleteError('Password is required');
+      return;
+    }
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      const result = await onDeleteAccount(deletePassword);
+      if (!result.success) {
+        setDeleteError(result.error || 'Failed to delete account');
+      }
+    } finally {
+      setDeleteBusy(false);
+    }
   };
 
   const toggleChatPage = (page: ChatIconPage) => {
@@ -312,6 +341,50 @@ export function ProfileSettingsPanel({
                 onViewProfile={onViewProfile}
               />
             </section>
+          </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="Danger zone"
+          description="Permanently delete your account and all your content"
+          icon={<AlertTriangle className="h-4 w-4" />}
+          iconClassName="bg-rose-500/10 text-rose-400 border-rose-500/20"
+          open={openSection === 'danger'}
+          onToggle={() => toggleSection('danger')}
+        >
+          <div className="space-y-4">
+            <p className="text-xs text-text-muted">
+              This will soft-delete your account, posts, comments, and related profile data.
+              Contact an admin if you need your account restored.
+            </p>
+            {deleteError && <p className="text-xs text-rose-400">{deleteError}</p>}
+            <label className="block space-y-1">
+              <span className="text-xs text-text-muted">Type your username to confirm</span>
+              <input
+                type="text"
+                value={deleteConfirmUsername}
+                onChange={e => setDeleteConfirmUsername(e.target.value)}
+                placeholder={username}
+                className="w-full px-3 py-2 rounded-xl border border-border-custom bg-bg-primary text-sm text-text-primary"
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs text-text-muted">Password</span>
+              <input
+                type="password"
+                value={deletePassword}
+                onChange={e => setDeletePassword(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-border-custom bg-bg-primary text-sm text-text-primary"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={deleteBusy}
+              onClick={() => void handleDeleteAccount()}
+              className="w-full px-4 py-2.5 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white transition-colors cursor-pointer min-h-[44px]"
+            >
+              {deleteBusy ? 'Deleting…' : 'Delete my account'}
+            </button>
           </div>
         </CollapsibleSection>
       </div>

@@ -11,6 +11,7 @@ export interface Toast {
 export interface AdminData {
   stats: {
     users: number;
+    deletedUsers?: number;
     posts: number;
     comments: number;
     messages: number;

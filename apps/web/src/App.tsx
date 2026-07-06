@@ -18,6 +18,9 @@ import {
   shouldShowNotificationToast,
   shouldShowChatIcon,
   notificationPostTarget,
+  SystemSettings,
+  DEFAULT_SYSTEM_SETTINGS,
+  validatePostLimits,
 } from '@hin/types';
 import { API_URL, WS_URL } from './config';
 import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode, FeedMode } from './types/ui';
@@ -126,6 +129,7 @@ export default function App() {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [isProfileEditing, setIsProfileEditing] = useState(false);
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
+  const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
   const userSettingsRef = useRef<UserSettings | null>(null);
 
   useEffect(() => {
@@ -134,10 +138,13 @@ export default function App() {
 
   const [postViewId, setPostViewId] = useState<number | null>(null);
   const [postViewPost, setPostViewPost] = useState<import('@hin/types').Post | null>(null);
+  const [postViewThreadReplies, setPostViewThreadReplies] = useState<import('@hin/types').Post[]>([]);
   const [postViewLoading, setPostViewLoading] = useState(false);
   const [postViewError, setPostViewError] = useState<{ status: number; message: string } | null>(null);
   const [highlightCommentId, setHighlightCommentId] = useState<number | null>(null);
   const [showGuestAuth, setShowGuestAuth] = useState(false);
+  const [threadReplyTargetId, setThreadReplyTargetId] = useState<number | null>(null);
+  const [threadReplyContent, setThreadReplyContent] = useState('');
 
   const ws = useRef<WebSocket | null>(null);
   const wsReadyRef = useRef(false);
@@ -332,6 +339,18 @@ export default function App() {
       }
     } catch (e) {
       console.error('Error fetching user settings:', e);
+    }
+  };
+
+  const fetchSystemSettings = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/settings`, { headers: getHeaders() });
+      if (res.ok) {
+        setSystemSettings(await res.json());
+      }
+    } catch (e) {
+      console.error('Error fetching system settings:', e);
     }
   };
 
@@ -550,18 +569,26 @@ export default function App() {
   const fetchPost = async (postId: number) => {
     setPostViewLoading(true);
     setPostViewError(null);
+    setPostViewThreadReplies([]);
     try {
-      const res = await fetch(`${API_URL}/api/posts/${postId}`, { headers: getHeaders() });
-      if (res.ok) {
-        const post = await res.json();
+      const [postRes, threadRes] = await Promise.all([
+        fetch(`${API_URL}/api/posts/${postId}`, { headers: getHeaders() }),
+        fetch(`${API_URL}/api/posts/${postId}/thread`, { headers: getHeaders() }),
+      ]);
+      if (postRes.ok) {
+        const post = await postRes.json();
         setPostViewPost(post);
         setExpandedComments(prev => ({ ...prev, [postId]: true }));
         fetchComments(postId);
+        if (threadRes.ok) {
+          const thread = await threadRes.json();
+          setPostViewThreadReplies(thread.replies ?? []);
+        }
       } else {
-        const data = await res.json().catch(() => ({}));
+        const data = await postRes.json().catch(() => ({}));
         setPostViewPost(null);
         setPostViewError({
-          status: res.status,
+          status: postRes.status,
           message: data.error || 'Failed to load post',
         });
       }
@@ -769,6 +796,7 @@ export default function App() {
       fetchMutedIds();
       fetchFollowRequests();
       fetchUserSettings();
+      fetchSystemSettings();
     } else {
       setPosts([]);
       setFeedNextCursor(null);
@@ -781,6 +809,7 @@ export default function App() {
       setMutedUserIds(new Set());
       setFollowRequests([]);
       setUserSettings(null);
+      setSystemSettings(null);
     }
   }, [token]);
 
@@ -1249,6 +1278,98 @@ export default function App() {
     setTimeout(() => setNewlyCreatedPostId(null), 3000);
   };
 
+  const updatePostInState = (updated: import('@hin/types').Post) => {
+    const merge = (p: import('@hin/types').Post) => (p.id === updated.id ? updated : p);
+    setPosts(prev => prev.map(merge));
+    setProfilePosts(prev => prev.map(merge));
+    setPostViewPost(prev => (prev?.id === updated.id ? updated : prev));
+  };
+
+  const handlePinPost = async (postId: number) => {
+    const res = await fetch(`${API_URL}/api/posts/${postId}/pin`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      addToast(data.error || 'Failed to pin post', 'system', undefined, { skipPrefCheck: true });
+      return;
+    }
+    const updated = await res.json();
+    updatePostInState(updated);
+    if (profileUserId) fetchProfilePosts(profileUserId);
+    addToast('Post pinned to profile', 'system', undefined, { skipPrefCheck: true });
+  };
+
+  const handleUnpinPost = async (postId: number) => {
+    const res = await fetch(`${API_URL}/api/posts/${postId}/pin`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      addToast(data.error || 'Failed to unpin post', 'system', undefined, { skipPrefCheck: true });
+      return;
+    }
+    const updated = await res.json();
+    updatePostInState(updated);
+    if (profileUserId) fetchProfilePosts(profileUserId);
+    addToast('Post unpinned', 'system', undefined, { skipPrefCheck: true });
+  };
+
+  const handleSubmitThreadReply = async (postId: number) => {
+    if (!threadReplyContent.trim()) return;
+    const limits = systemSettings ?? DEFAULT_SYSTEM_SETTINGS;
+    const limitError = validatePostLimits(threadReplyContent.trim(), 0, limits);
+    if (limitError) {
+      addToast(limitError, 'system', undefined, { skipPrefCheck: true });
+      return;
+    }
+    const res = await fetch(`${API_URL}/api/posts`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ content: threadReplyContent.trim(), replyToPostId: postId }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      addToast(data.error || 'Failed to add thread reply', 'system', undefined, { skipPrefCheck: true });
+      return;
+    }
+    const reply = await res.json();
+    setThreadReplyContent('');
+    setThreadReplyTargetId(null);
+    const rootId = postId;
+    const bumpThreadCount = (p: import('@hin/types').Post) =>
+      p.id === rootId
+        ? { ...p, threadReplyCount: (p.threadReplyCount ?? 0) + 1 }
+        : p;
+    setPosts(prev => prev.map(bumpThreadCount));
+    setProfilePosts(prev => prev.map(bumpThreadCount));
+    setPostViewPost(prev => (prev?.id === rootId ? bumpThreadCount(prev) : prev));
+    if (postViewId === rootId) {
+      setPostViewThreadReplies(prev => [...prev, reply]);
+    }
+    addToast('Thread reply posted', 'system', undefined, { skipPrefCheck: true });
+  };
+
+  const handleDeleteAccount = async (password: string) => {
+    try {
+      const res = await fetch(`${API_URL}/api/users/me`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+        body: JSON.stringify({ password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Failed to delete account' };
+      }
+      handleLogout();
+      return { success: true };
+    } catch {
+      return { success: false, error: 'Failed to delete account' };
+    }
+  };
+
   const handleVotePoll = async (postId: number, optionIds: number[]) => {
     const res = await fetch(`${API_URL}/api/posts/${postId}/poll/vote`, {
       method: 'POST',
@@ -1291,6 +1412,12 @@ export default function App() {
 
   const handleSavePostEdit = async (postId: number) => {
     if (!editingPostContent.trim()) return;
+    const limits = systemSettings ?? DEFAULT_SYSTEM_SETTINGS;
+    const limitError = validatePostLimits(editingPostContent.trim(), 0, limits);
+    if (limitError) {
+      addToast(limitError, 'system', undefined, { skipPrefCheck: true });
+      return;
+    }
     try {
       const res = await fetch(`${API_URL}/api/posts/${postId}`, {
         method: 'PUT',
@@ -1981,6 +2108,26 @@ export default function App() {
     }
   };
 
+  const handleAdminReinstateUser = async (userId: number, targetUsername: string) => {
+    if (!currentUser || currentUser.role !== 'admin' || !token) return;
+    if (!confirm(`Reinstate @${targetUsername} and restore their deleted content?`)) return;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/users/${userId}/reinstate`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        addToast(`Account @${targetUsername} has been reinstated`, 'system', undefined, { skipPrefCheck: true });
+        fetchAdminStats();
+      } else {
+        addToast(data.error || 'Failed to reinstate user', 'system', undefined, { skipPrefCheck: true });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const isGuestPostView = !currentUser && activeTab === 'post';
   const isGuestProfileView = !currentUser && activeTab === 'profile';
   const showAuthOnly = !currentUser && !isGuestPostView && !isGuestProfileView;
@@ -1992,6 +2139,7 @@ export default function App() {
   };
   const showChatIcon =
     !!currentUser && shouldShowChatIcon(effectiveSettings, activeTab);
+  const postLimits = systemSettings ?? DEFAULT_SYSTEM_SETTINGS;
 
   return (
     <AppShell
@@ -2116,6 +2264,19 @@ export default function App() {
             onShare={() => postViewId && handleSharePost(postViewId)}
             onReportPost={(postId) => handleOpenReport('post', postId)}
             onReportComment={(commentId) => handleOpenReport('comment', commentId)}
+            onPinPost={handlePinPost}
+            onUnpinPost={handleUnpinPost}
+            onStartThreadReply={setThreadReplyTargetId}
+            onCancelThreadReply={() => {
+              setThreadReplyTargetId(null);
+              setThreadReplyContent('');
+            }}
+            onSubmitThreadReply={handleSubmitThreadReply}
+            threadReplyTargetId={threadReplyTargetId}
+            threadReplyContent={threadReplyContent}
+            onThreadReplyContentChange={setThreadReplyContent}
+            threadPosts={postViewThreadReplies}
+            postLimits={postLimits}
           />
         ) : activeTab === 'profile' ? (
           <ProfileView
@@ -2211,6 +2372,19 @@ export default function App() {
               : undefined}
             onReportPost={(postId) => handleOpenReport('post', postId)}
             onReportComment={(commentId) => handleOpenReport('comment', commentId)}
+            onPinPost={handlePinPost}
+            onUnpinPost={handleUnpinPost}
+            onStartThreadReply={setThreadReplyTargetId}
+            onCancelThreadReply={() => {
+              setThreadReplyTargetId(null);
+              setThreadReplyContent('');
+            }}
+            onSubmitThreadReply={handleSubmitThreadReply}
+            threadReplyTargetId={threadReplyTargetId}
+            threadReplyContent={threadReplyContent}
+            onThreadReplyContentChange={setThreadReplyContent}
+            onDeleteAccount={handleDeleteAccount}
+            postLimits={postLimits}
           />
         ) : currentUser && activeTab === 'feed' ? (
           <FeedView
@@ -2266,6 +2440,18 @@ export default function App() {
             onOpenPost={openPost}
             onReportPost={(postId) => handleOpenReport('post', postId)}
             onReportComment={(commentId) => handleOpenReport('comment', commentId)}
+            onPinPost={handlePinPost}
+            onUnpinPost={handleUnpinPost}
+            onStartThreadReply={setThreadReplyTargetId}
+            onCancelThreadReply={() => {
+              setThreadReplyTargetId(null);
+              setThreadReplyContent('');
+            }}
+            onSubmitThreadReply={handleSubmitThreadReply}
+            threadReplyTargetId={threadReplyTargetId}
+            threadReplyContent={threadReplyContent}
+            onThreadReplyContentChange={setThreadReplyContent}
+            postLimits={postLimits}
           />
         ) : currentUser && activeTab === 'admin' ? (
           <AdminDashboard
@@ -2273,9 +2459,11 @@ export default function App() {
             broadcastHistory={broadcastHistory}
             adminReports={adminReports}
             currentUser={currentUser}
+            token={token!}
             onImpersonateUser={handleImpersonateUser}
             onUpdateUserRole={handleUpdateUserRole}
             onDeleteUser={handleAdminDeleteUser}
+            onReinstateUser={handleAdminReinstateUser}
             onLoadAdminData={fetchAdminStats}
             onLoadBroadcastHistory={fetchBroadcastHistory}
             onLoadReports={fetchAdminReports}

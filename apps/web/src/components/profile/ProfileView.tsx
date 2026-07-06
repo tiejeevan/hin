@@ -1,5 +1,5 @@
 import { ArrowLeft, Lock } from 'lucide-react';
-import { FollowRequest, Post, Comment, User as UserType, UserSettings } from '@hin/types';
+import { FollowRequest, Post, Comment, User as UserType, UserSettings, SystemSettings } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { AuthForm } from '../auth/AuthForm';
 import { ProfileHeader } from './ProfileHeader';
@@ -85,6 +85,17 @@ interface ProfileViewProps {
   onReport?: () => void;
   onReportPost?: (postId: number) => void;
   onReportComment?: (commentId: number) => void;
+  onPinPost?: (postId: number) => void;
+  onUnpinPost?: (postId: number) => void;
+  onStartThreadReply?: (postId: number) => void;
+  onCancelThreadReply?: () => void;
+  onSubmitThreadReply?: (postId: number) => void;
+  threadReplyTargetId?: number | null;
+  threadReplyContent?: string;
+  onThreadReplyContentChange?: (content: string) => void;
+  threadPosts?: import('@hin/types').Post[];
+  postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
+  onDeleteAccount?: (password: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export function ProfileView({
@@ -166,6 +177,16 @@ export function ProfileView({
   onReport,
   onReportPost,
   onReportComment,
+  onPinPost,
+  onUnpinPost,
+  onStartThreadReply,
+  onCancelThreadReply,
+  onSubmitThreadReply,
+  threadReplyTargetId,
+  threadReplyContent,
+  onThreadReplyContentChange,
+  postLimits,
+  onDeleteAccount,
 }: ProfileViewProps) {
   const isOwnProfile = !!currentUser && profileUser?.id === currentUser.id;
   const canViewPosts = profileUser?.canViewPosts !== false;
@@ -224,6 +245,7 @@ export function ProfileView({
             <ProfileSettingsPanel
               settings={userSettings}
               token={token}
+              username={profileUser.username}
               requests={followRequests}
               highlighted={highlightSettings}
               onSettingsChange={onSettingsChange}
@@ -233,6 +255,7 @@ export function ProfileView({
               onClose={onCloseSettings}
               onUnblockUser={onUnblockUser}
               onUnmuteUser={onUnmuteUser}
+              onDeleteAccount={onDeleteAccount!}
             />
           )}
 
@@ -300,6 +323,15 @@ export function ProfileView({
                 onSignInRequired={handleSignInRequired}
                 onReportPost={onReportPost}
                 onReportComment={onReportComment}
+                onPinPost={onPinPost}
+                onUnpinPost={onUnpinPost}
+                onStartThreadReply={onStartThreadReply}
+                onCancelThreadReply={onCancelThreadReply}
+                onSubmitThreadReply={onSubmitThreadReply}
+                threadReplyTargetId={threadReplyTargetId}
+                threadReplyContent={threadReplyContent}
+                onThreadReplyContentChange={onThreadReplyContentChange}
+                postLimits={postLimits}
               />
             </>
           )}

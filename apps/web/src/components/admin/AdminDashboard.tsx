@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { History, Megaphone, Shield, Users, Flag } from 'lucide-react';
+import { History, Megaphone, Shield, Users, Flag, Settings } from 'lucide-react';
 import { BroadcastDelivery, ContentReport, ReviewReportAction, SystemBroadcast as SystemBroadcastRecord, User as UserType } from '@hin/types';
 import { AdminData } from '../../types/ui';
 import { AdminCollapsibleSection } from './AdminCollapsibleSection';
@@ -7,15 +7,18 @@ import { BroadcastAuditLog } from './BroadcastAuditLog';
 import { RegisteredAccounts } from './RegisteredAccounts';
 import { SystemBroadcast } from './SystemBroadcast';
 import { ReportsQueue } from './ReportsQueue';
+import { AdminUserSettings } from './AdminUserSettings';
 
 interface AdminDashboardProps {
   adminData: AdminData | null;
   broadcastHistory: SystemBroadcastRecord[] | null;
   adminReports: ContentReport[] | null;
   currentUser: UserType;
+  token: string;
   onImpersonateUser: (userId: number) => void;
   onUpdateUserRole: (userId: number, currentRole: 'user' | 'admin') => void;
   onDeleteUser: (userId: number, username: string) => void;
+  onReinstateUser: (userId: number, username: string) => void;
   onLoadAdminData: () => Promise<void>;
   onLoadBroadcastHistory: () => Promise<void>;
   onLoadReports: () => Promise<void>;
@@ -34,9 +37,11 @@ export function AdminDashboard({
   broadcastHistory,
   adminReports,
   currentUser,
+  token,
   onImpersonateUser,
   onUpdateUserRole,
   onDeleteUser,
+  onReinstateUser,
   onLoadAdminData,
   onLoadBroadcastHistory,
   onLoadReports,
@@ -49,6 +54,7 @@ export function AdminDashboard({
   const [auditOpen, setAuditOpen] = useState(false);
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [reportsOpen, setReportsOpen] = useState(false);
+  const [userSettingsOpen, setUserSettingsOpen] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [reportsLoading, setReportsLoading] = useState(false);
@@ -165,6 +171,17 @@ export function AdminDashboard({
       </AdminCollapsibleSection>
 
       <AdminCollapsibleSection
+        title="Platform Settings"
+        description="Configure platform-wide limits for users and posts."
+        icon={<Settings className="h-5 w-5" />}
+        iconClassName="bg-emerald-500/15 border-emerald-500/25 text-emerald-400"
+        open={userSettingsOpen}
+        onToggle={() => setUserSettingsOpen(prev => !prev)}
+      >
+        <AdminUserSettings token={token} />
+      </AdminCollapsibleSection>
+
+      <AdminCollapsibleSection
         title="Registered Accounts"
         description="Platform metrics and user administration."
         icon={<Users className="h-5 w-5" />}
@@ -180,6 +197,7 @@ export function AdminDashboard({
             onImpersonateUser={onImpersonateUser}
             onUpdateUserRole={onUpdateUserRole}
             onDeleteUser={onDeleteUser}
+            onReinstateUser={onReinstateUser}
           />
         ) : (
           <div className="p-6 text-center text-xs text-text-muted">Unable to load accounts.</div>

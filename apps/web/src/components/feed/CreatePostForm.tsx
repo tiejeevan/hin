@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { BarChart3, Globe, Loader2, Lock, MoreVertical, Send, Users, X } from 'lucide-react';
 import { useMentionAutocomplete } from '../../hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '../ui/MentionSuggestions';
-import type { PostVisibility } from '@hin/types';
+import type { PostVisibility, SystemSettings } from '@hin/types';
+import { DEFAULT_SYSTEM_SETTINGS, validatePostLimits } from '@hin/types';
 import { ImagePicker, PickedImage } from '../ui/ImagePicker';
 import { uploadCompressedImage } from '../../lib/compressImage';
 import { API_URL } from '../../config';
@@ -27,6 +28,7 @@ export type CreatePostSubmitPayload =
 interface CreatePostFormProps {
   content: string;
   token: string;
+  postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
   onContentChange: (value: string) => void;
   onSubmit: (e: React.FormEvent, payload: CreatePostSubmitPayload) => void | Promise<void>;
   onClose: () => void;
@@ -35,6 +37,7 @@ interface CreatePostFormProps {
 export function CreatePostForm({
   content,
   token,
+  postLimits = DEFAULT_SYSTEM_SETTINGS,
   onContentChange,
   onSubmit,
   onClose,
@@ -92,14 +95,21 @@ export function CreatePostForm({
     };
   }, [menuOpen, visibilityOpen]);
 
+  const maxMediaPerPost = postLimits.maxMediaPerPost;
+  const maxPostLength = postLimits.maxPostLength;
+
   const handleAddFiles = async (files: File[]) => {
+    if (maxMediaPerPost === 0) {
+      setError('Media attachments are disabled');
+      return;
+    }
     setError(null);
     const placeholders: PickedImage[] = files.map(file => ({
       previewUrl: URL.createObjectURL(file),
       remoteUrl: '',
       file,
     }));
-    setImages(prev => [...prev, ...placeholders].slice(0, 5));
+    setImages(prev => [...prev, ...placeholders].slice(0, maxMediaPerPost));
     setUploading(true);
 
     try {
@@ -153,6 +163,12 @@ export function CreatePostForm({
       return;
     }
 
+    const limitError = validatePostLimits(content.trim(), images.length, postLimits);
+    if (limitError) {
+      setError(limitError);
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     const mediaUrls = images.map(img => img.remoteUrl);
@@ -192,8 +208,14 @@ export function CreatePostForm({
               handleInputChange(e);
             }}
             onKeyDown={handleKeyDown}
+            maxLength={maxPostLength}
             className="w-full bg-bg-primary border border-border-custom rounded-xl p-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors resize-none"
           />
+          <div className="flex justify-end">
+            <span className={`text-[10px] ${content.length > maxPostLength ? 'text-rose-400' : 'text-text-muted'}`}>
+              {content.length}/{maxPostLength}
+            </span>
+          </div>
           {showDropdown && (
             <MentionSuggestions
               suggestions={suggestions}
@@ -220,7 +242,7 @@ export function CreatePostForm({
 
         <ImagePicker
           images={images}
-          max={5}
+          max={maxMediaPerPost}
           uploading={uploading}
           error={error}
           onAddFiles={handleAddFiles}

@@ -4,6 +4,8 @@ export type FollowStatus = 'none' | 'following' | 'requested' | 'follows_you';
 
 export type BlockStatus = 'none' | 'you_blocked' | 'blocked_you';
 export type MuteStatus = 'none' | 'muted';
+export type DeletionSource = 'self' | 'admin';
+export type AccountStatus = 'active' | 'self_deleted' | 'admin_deleted';
 
 export interface User {
   id: number;
@@ -14,6 +16,8 @@ export interface User {
   coverUrl?: string | null;
   createdAt: string;
   deletedAt?: string | null;
+  deletionSource?: DeletionSource | null;
+  accountStatus?: AccountStatus;
   postCount?: number | null;
   isPrivate?: boolean;
   followerCount?: number;
@@ -143,6 +147,54 @@ export interface Post {
   deletedAt?: string | null;
   visibility?: PostVisibility;
   poll?: Poll;
+  pinnedAt?: string | null;
+  threadRootId?: number | null;
+  parentPostId?: number | null;
+  threadReplyCount?: number;
+  threadPosts?: Post[];
+}
+
+export interface PostThreadPage {
+  root: Post;
+  replies: Post[];
+}
+
+/** Hard caps for admin-configurable system settings. */
+export const SYSTEM_SETTING_BOUNDS = {
+  maxPinnedPostsPerUser: { min: 0, max: 10 },
+  maxPostLength: { min: 100, max: 10000 },
+  maxMediaPerPost: { min: 0, max: 20 },
+} as const;
+
+/** Absolute upper bounds used by request-schema validation (≥ any admin limit). */
+export const ABSOLUTE_MAX_POST_LENGTH = SYSTEM_SETTING_BOUNDS.maxPostLength.max;
+export const ABSOLUTE_MAX_MEDIA_PER_POST = SYSTEM_SETTING_BOUNDS.maxMediaPerPost.max;
+
+export interface SystemSettings {
+  maxPinnedPostsPerUser: number;
+  maxPostLength: number;
+  maxMediaPerPost: number;
+}
+
+export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
+  maxPinnedPostsPerUser: 1,
+  maxPostLength: 1000,
+  maxMediaPerPost: 5,
+};
+
+export function validatePostLimits(
+  content: string,
+  mediaCount: number,
+  limits: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>,
+): string | null {
+  if (content.length > limits.maxPostLength) {
+    return `Post is too long (max ${limits.maxPostLength} characters)`;
+  }
+  if (mediaCount > limits.maxMediaPerPost) {
+    const label = limits.maxMediaPerPost === 1 ? 'image' : 'images';
+    return `Maximum ${limits.maxMediaPerPost} ${label} allowed`;
+  }
+  return null;
 }
 
 export interface MediaUpload {
@@ -249,14 +301,15 @@ export const PollOptionInputSchema = z.object({
 
 export const CreateTextPostSchema = z.object({
   type: z.literal('text').optional(),
-  content: z.string().min(1, 'Post content cannot be empty').max(1000, 'Post is too long'),
-  mediaUrls: z.array(z.string().url()).max(5, 'Maximum 5 images allowed').optional(),
+  content: z.string().min(1, 'Post content cannot be empty').max(ABSOLUTE_MAX_POST_LENGTH, 'Post is too long'),
+  mediaUrls: z.array(z.string().url()).max(ABSOLUTE_MAX_MEDIA_PER_POST, 'Too many images').optional(),
   visibility: z.enum(['public', 'followers', 'only_me']).optional().default('public'),
+  replyToPostId: z.number().int().positive().optional(),
 });
 
 export const CreatePollPostSchema = z.object({
   type: z.literal('poll'),
-  content: z.string().max(1000, 'Post is too long').optional().default(''),
+  content: z.string().max(ABSOLUTE_MAX_POST_LENGTH, 'Post is too long').optional().default(''),
   question: z.string().min(1, 'Poll question cannot be empty').max(500, 'Poll question is too long'),
   options: z.array(PollOptionInputSchema).min(2, 'At least 2 options required').max(10, 'Maximum 10 options allowed'),
   maxSelections: z.number().int().min(1).optional(),
@@ -265,7 +318,7 @@ export const CreatePollPostSchema = z.object({
   allowVoteRetraction: z.boolean().optional().default(true),
   isAnonymous: z.boolean().optional().default(false),
   resultsVisibility: z.enum(['always', 'after_vote', 'after_close']).optional().default('always'),
-  mediaUrls: z.array(z.string().url()).max(5, 'Maximum 5 images allowed').optional(),
+  mediaUrls: z.array(z.string().url()).max(ABSOLUTE_MAX_MEDIA_PER_POST, 'Too many images').optional(),
   visibility: z.enum(['public', 'followers', 'only_me']).optional().default('public'),
 }).superRefine((data, ctx) => {
   const maxSel = data.maxSelections ?? 1;
@@ -440,3 +493,18 @@ export const CreateReportSchema = z.object({
 export const ReviewReportSchema = z.object({
   action: z.enum(['dismiss', 'delete_content', 'delete_user']),
 });
+
+export const DeleteAccountSchema = z.object({
+  password: z.string().min(1, 'Password is required'),
+});
+
+export const UpdateSystemSettingsSchema = z.object({
+  maxPinnedPostsPerUser: z.number().int().min(SYSTEM_SETTING_BOUNDS.maxPinnedPostsPerUser.min).max(SYSTEM_SETTING_BOUNDS.maxPinnedPostsPerUser.max).optional(),
+  maxPostLength: z.number().int().min(SYSTEM_SETTING_BOUNDS.maxPostLength.min).max(SYSTEM_SETTING_BOUNDS.maxPostLength.max).optional(),
+  maxMediaPerPost: z.number().int().min(SYSTEM_SETTING_BOUNDS.maxMediaPerPost.min).max(SYSTEM_SETTING_BOUNDS.maxMediaPerPost.max).optional(),
+}).refine(
+  data => data.maxPinnedPostsPerUser !== undefined
+    || data.maxPostLength !== undefined
+    || data.maxMediaPerPost !== undefined,
+  { message: 'At least one setting must be provided' },
+);

@@ -2,12 +2,14 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, count, sql, isNull, desc } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { BroadcastDelivery, BroadcastSystemMessageSchema, Notification, ReportStatus, ReviewReportSchema, SystemBroadcast } from '@hin/types';
+import { BroadcastDelivery, BroadcastSystemMessageSchema, Notification, ReportStatus, ReviewReportSchema, SystemBroadcast, SystemSettings, UpdateSystemSettingsSchema } from '@hin/types';
 import { sign } from 'hono/jwt';
 import type { Env } from '../types';
 import { getAuthUser, JWT_SECRET } from '../lib/auth';
 import { isNotificationEnabled, toPublicSettings } from '../lib/user-settings';
 import { listReports, reviewReport } from '../lib/reports';
+import { softDeleteUser, reinstateUser, computeAccountStatus } from '../lib/user-lifecycle';
+import { getSystemSettings, updateSystemSettings } from '../lib/system-settings';
 
 const admin = new Hono<{ Bindings: Env }>();
 
@@ -21,6 +23,7 @@ admin.get('/stats', async (c) => {
   const db = drizzle(c.env.DB, { schema });
 
   const totalUsers = await db.select({ value: count() }).from(schema.users).where(sql`${schema.users.deletedAt} IS NULL`).get();
+  const deletedUsers = await db.select({ value: count() }).from(schema.users).where(sql`${schema.users.deletedAt} IS NOT NULL`).get();
   const totalPosts = await db.select({ value: count() }).from(schema.posts).where(sql`${schema.posts.deletedAt} IS NULL`).get();
   const totalComments = await db.select({ value: count() }).from(schema.comments).where(sql`${schema.comments.deletedAt} IS NULL`).get();
   const totalMessages = await db.select({ value: count() }).from(schema.messages).where(sql`${schema.messages.deletedAt} IS NULL`).get();
@@ -30,19 +33,29 @@ admin.get('/stats', async (c) => {
     username: schema.users.username,
     role: schema.users.role,
     createdAt: schema.users.createdAt,
+    deletedAt: schema.users.deletedAt,
+    deletionSource: schema.users.deletionSource,
   })
   .from(schema.users)
-  .where(sql`${schema.users.deletedAt} IS NULL`)
   .all();
 
   return c.json({
     stats: {
       users: totalUsers?.value || 0,
+      deletedUsers: deletedUsers?.value || 0,
       posts: totalPosts?.value || 0,
       comments: totalComments?.value || 0,
       messages: totalMessages?.value || 0,
     },
-    users: allUsers,
+    users: allUsers.map(u => ({
+      id: u.id,
+      username: u.username,
+      role: u.role,
+      createdAt: u.createdAt,
+      deletedAt: u.deletedAt,
+      deletionSource: u.deletionSource,
+      accountStatus: computeAccountStatus(u.deletedAt, u.deletionSource),
+    })),
   });
 });
 
@@ -318,16 +331,58 @@ admin.delete('/users/:id', async (c) => {
   }
 
   const db = drizzle(c.env.DB, { schema });
-  const user = await db.select().from(schema.users).where(eq(schema.users.id, userId)).get();
-  if (!user) return c.json({ error: 'User not found' }, 404);
-
-  // Soft delete user
-  await db.update(schema.users)
-    .set({ deletedAt: sql`CURRENT_TIMESTAMP` })
-    .where(eq(schema.users.id, userId))
-    .run();
+  const result = await softDeleteUser(db, userId, 'admin');
+  if (!result.ok) {
+    return c.json({ error: result.error }, result.code as 400 | 404);
+  }
 
   return c.json({ success: true });
+});
+
+admin.post('/users/:id/reinstate', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const userId = parseInt(c.req.param('id'));
+  if (isNaN(userId)) return c.json({ error: 'Invalid user id' }, 400);
+
+  const db = drizzle(c.env.DB, { schema });
+  const result = await reinstateUser(db, userId);
+  if (!result.ok) {
+    return c.json({ error: result.error }, result.code as 400 | 404);
+  }
+
+  return c.json({ success: true });
+});
+
+admin.get('/settings', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const systemSettings = await getSystemSettings(db);
+  return c.json(systemSettings satisfies SystemSettings);
+});
+
+admin.patch('/settings', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = UpdateSystemSettingsSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, 400);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const systemSettings = await updateSystemSettings(db, parsed.data);
+  return c.json(systemSettings satisfies SystemSettings);
 });
 
 // List content reports for admin review

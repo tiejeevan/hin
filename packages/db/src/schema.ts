@@ -13,6 +13,8 @@ export const users = sqliteTable('users', {
   isPrivate: integer('is_private').default(0).notNull(),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
   deletedAt: text('deleted_at'), // Soft delete for users
+  /** 'self' | 'admin' when deleted_at is set */
+  deletionSource: text('deletion_source'),
 }, (table) => ({
   deletedAtIdx: index('users_deleted_at_idx').on(table.deletedAt),
   isPrivateIdx: index('users_is_private_idx').on(table.isPrivate),
@@ -46,12 +48,18 @@ export const posts = sqliteTable('posts', {
   visibility: text('visibility').default('public').notNull(),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
   deletedAt: text('deleted_at'), // Soft delete
+  pinnedAt: text('pinned_at'),
+  threadRootId: integer('thread_root_id').references((): any => posts.id, { onDelete: 'set null' }),
+  parentPostId: integer('parent_post_id').references((): any => posts.id, { onDelete: 'set null' }),
 }, (table) => ({
   userIdIdx: index('posts_user_id_idx').on(table.userId),
   createdAtIdx: index('posts_created_at_idx').on(table.createdAt),
   deletedAtIdx: index('posts_deleted_at_idx').on(table.deletedAt),
   typeIdx: index('posts_type_idx').on(table.type),
   visibilityIdx: index('posts_visibility_idx').on(table.visibility),
+  userPinnedIdx: index('posts_user_pinned_idx').on(table.userId, table.pinnedAt),
+  threadRootIdx: index('posts_thread_root_id_idx').on(table.threadRootId),
+  parentPostIdx: index('posts_parent_post_id_idx').on(table.parentPostId),
 }));
 
 export const polls = sqliteTable('polls', {
@@ -285,6 +293,13 @@ export const contentReports = sqliteTable('content_reports', {
   targetIdx: index('content_reports_target_idx').on(table.targetType, table.targetId),
   reporterTargetIdx: index('content_reports_reporter_target_idx').on(table.reporterId, table.targetType, table.targetId),
 }));
+
+/** Admin-configurable platform settings (key-value). */
+export const systemSettings = sqliteTable('system_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
 
 /** Admin system message broadcasts — always persisted for audit, regardless of delivery mode. */
 export const systemBroadcasts = sqliteTable('system_broadcasts', {

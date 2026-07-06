@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, desc, and, count, sql, isNull, lt, inArray, notInArray } from 'drizzle-orm';
+import { eq, desc, and, count, sql, isNull, lt, inArray, notInArray, asc } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { Post, Comment, Notification, PostsPage, parseCreatePostBody, VotePollSchema } from '@hin/types';
+import { Post, Comment, Notification, PostsPage, PostThreadPage, parseCreatePostBody, VotePollSchema, validatePostLimits } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { linkPostMedia, parseMediaUrls, serializeMediaUrls, validateOwnedPostMedia } from '../lib/media';
@@ -12,6 +12,9 @@ import { getFollowingFeedUserIds } from '../lib/follows';
 import { getHiddenAuthorIds, shouldDeliverNotification } from '../lib/blocks';
 import { buildVisibilitySqlConditions, assertCanViewPost } from '../lib/postVisibility';
 import { getOrCreateUserSettings, isNotificationEnabled } from '../lib/user-settings';
+import { pinPost, unpinPost } from '../lib/post-pins';
+import { getSystemSettings } from '../lib/system-settings';
+import { validateThreadReply, countThreadReplies, assertCanViewThread, getThreadPostRows } from '../lib/post-threads';
 import type { PostVisibility } from '@hin/types';
 
 const posts = new Hono<{ Bindings: Env }>();
@@ -41,6 +44,9 @@ async function buildPostResponse(
     mediaUrls: string | null;
     visibility?: string | null;
     createdAt: string;
+    pinnedAt?: string | null;
+    threadRootId?: number | null;
+    parentPostId?: number | null;
     username: string;
     authorAvatarUrl?: string | null;
     authorRole?: string;
@@ -105,6 +111,9 @@ async function buildPostResponse(
   }
 
   const postType = (post.type ?? 'text') as Post['type'];
+  const effectiveRootId = post.threadRootId ?? post.id;
+  const threadReplyCount = await countThreadReplies(db, effectiveRootId);
+
   const response: Post = {
     id: post.id,
     userId: post.userId,
@@ -122,6 +131,10 @@ async function buildPostResponse(
     bookmarksCount,
     sharesCount,
     visibility: (post.visibility ?? 'public') as PostVisibility,
+    pinnedAt: post.pinnedAt ?? null,
+    threadRootId: post.threadRootId ?? null,
+    parentPostId: post.parentPostId ?? null,
+    threadReplyCount,
   };
 
   if (postType === 'poll') {
@@ -162,6 +175,7 @@ posts.get('/', async (c) => {
   const postConditions = [
     sql`${schema.posts.deletedAt} IS NULL`,
     sql`${schema.users.deletedAt} IS NULL`,
+    isNull(schema.posts.parentPostId),
   ];
 
   if (filterUserId) {
@@ -207,7 +221,7 @@ posts.get('/', async (c) => {
     postConditions.push(lt(schema.posts.id, cursor));
   }
 
-  const rows = await db.select({
+  const baseQuery = db.select({
     id: schema.posts.id,
     userId: schema.posts.userId,
     type: schema.posts.type,
@@ -215,16 +229,30 @@ posts.get('/', async (c) => {
     mediaUrls: schema.posts.mediaUrls,
     visibility: schema.posts.visibility,
     createdAt: schema.posts.createdAt,
+    pinnedAt: schema.posts.pinnedAt,
+    threadRootId: schema.posts.threadRootId,
+    parentPostId: schema.posts.parentPostId,
     username: schema.users.username,
     authorAvatarUrl: schema.users.avatarUrl,
     authorRole: schema.users.role,
   })
   .from(schema.posts)
   .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
-  .where(and(...postConditions))
-  .orderBy(desc(schema.posts.id))
-  .limit(limit + 1)
-  .all();
+  .where(and(...postConditions));
+
+  const rows = filterUserId
+    ? await baseQuery
+      .orderBy(
+        sql`CASE WHEN ${schema.posts.pinnedAt} IS NOT NULL THEN 0 ELSE 1 END`,
+        desc(schema.posts.pinnedAt),
+        desc(schema.posts.id),
+      )
+      .limit(limit + 1)
+      .all()
+    : await baseQuery
+      .orderBy(desc(schema.posts.id))
+      .limit(limit + 1)
+      .all();
 
   const hasMore = rows.length > limit;
   const pageRows = hasMore ? rows.slice(0, limit) : rows;
@@ -327,11 +355,17 @@ posts.post('/', async (c) => {
 
   const data = parsed.data;
   const mediaUrls = Array.isArray(data.mediaUrls) ? data.mediaUrls.filter(Boolean) : [];
-  if (mediaUrls.length > 5) {
-    return c.json({ error: 'Maximum 5 images allowed' }, 400);
+  const systemSettings = await getSystemSettings(db);
+  const limitError = validatePostLimits(
+    (data.content ?? '').trim(),
+    mediaUrls.length,
+    systemSettings,
+  );
+  if (limitError) {
+    return c.json({ error: limitError }, 400);
   }
   if (mediaUrls.length > 0) {
-    const validation = await validateOwnedPostMedia(db, authUser.id, mediaUrls);
+    const validation = await validateOwnedPostMedia(db, authUser.id, mediaUrls, systemSettings.maxMediaPerPost);
     if (!validation.ok) {
       return c.json({ error: validation.error }, 400);
     }
@@ -340,12 +374,35 @@ posts.post('/', async (c) => {
   const isPoll = 'type' in data && data.type === 'poll';
   const postType = isPoll ? 'poll' : 'text';
 
+  let threadRootId: number | null = null;
+  let parentPostId: number | null = null;
+  let visibility: PostVisibility = data.visibility ?? 'public';
+
+  const replyToPostId = 'replyToPostId' in data ? data.replyToPostId : undefined;
+  if (replyToPostId) {
+    if (isPoll) {
+      return c.json({ error: 'Poll replies in threads are not supported' }, 400);
+    }
+    const threadResult = await validateThreadReply(db, authUser.id, replyToPostId);
+    if (!threadResult.ok) {
+      return c.json({ error: threadResult.error }, threadResult.code as 400 | 403 | 404);
+    }
+    threadRootId = threadResult.fields.threadRootId;
+    parentPostId = threadResult.fields.parentPostId;
+    const parentPost = await db.select().from(schema.posts).where(eq(schema.posts.id, replyToPostId)).get();
+    if (parentPost) {
+      visibility = (parentPost.visibility ?? 'public') as PostVisibility;
+    }
+  }
+
   const [inserted] = await db.insert(schema.posts).values({
     userId: authUser.id,
     type: postType,
     content: (data.content ?? '').trim(),
     mediaUrls: serializeMediaUrls(mediaUrls),
-    visibility: data.visibility ?? 'public',
+    visibility,
+    threadRootId,
+    parentPostId,
   }).returning();
 
   if (mediaUrls.length > 0) {
@@ -377,20 +434,27 @@ posts.post('/', async (c) => {
     mediaUrls: inserted.mediaUrls,
     visibility: inserted.visibility,
     createdAt: inserted.createdAt,
+    pinnedAt: inserted.pinnedAt,
+    threadRootId: inserted.threadRootId,
+    parentPostId: inserted.parentPostId,
     username: authUser.username,
     authorAvatarUrl: authUser.avatarUrl,
     authorRole: authUser.role,
   }, authUser.id);
 
-  await notifyMentions(db, c.env, {
-    content: inserted.content,
-    senderId: authUser.id,
-    senderUsername: authUser.username,
-    entityId: inserted.id,
-    context: 'post',
-  });
+  if (!replyToPostId) {
+    await notifyMentions(db, c.env, {
+      content: inserted.content,
+      senderId: authUser.id,
+      senderUsername: authUser.username,
+      entityId: inserted.id,
+      context: 'post',
+    });
 
-  await broadcastEvent(c.env, { type: 'post_created', payload: { post: responsePost } });
+    await broadcastEvent(c.env, { type: 'post_created', payload: { post: responsePost } });
+  } else {
+    await broadcastEvent(c.env, { type: 'post_updated', payload: { post: responsePost } });
+  }
 
   return c.json(responsePost);
 });
@@ -413,6 +477,13 @@ posts.put('/:id', async (c) => {
   const { content } = await c.req.json<{ content: string }>();
   if (!content || content.trim() === '') {
     return c.json({ error: 'Content cannot be empty' }, 400);
+  }
+
+  const systemSettings = await getSystemSettings(db);
+  if (content.trim().length > systemSettings.maxPostLength) {
+    return c.json({
+      error: `Post is too long (max ${systemSettings.maxPostLength} characters)`,
+    }, 400);
   }
 
   // Preserve previous version for admin/system audit trail
@@ -736,6 +807,117 @@ posts.get('/:id/comments', async (c) => {
   return c.json(redactedComments);
 });
 
+posts.post('/:id/pin', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const postId = parseInt(c.req.param('id'), 10);
+  if (isNaN(postId)) return c.json({ error: 'Invalid post id' }, 400);
+
+  const db = drizzle(c.env.DB, { schema });
+  const result = await pinPost(db, authUser.id, postId);
+  if (!result.ok) {
+    return c.json({ error: result.error }, result.code as 400 | 403 | 404);
+  }
+
+  const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
+  if (!post) return c.json({ error: 'Post not found' }, 404);
+
+  const author = await db.select({
+    username: schema.users.username,
+    avatarUrl: schema.users.avatarUrl,
+    role: schema.users.role,
+  }).from(schema.users).where(eq(schema.users.id, post.userId)).get();
+
+  const responsePost = await buildPostResponse(db, {
+    id: post.id,
+    userId: post.userId,
+    type: post.type,
+    content: post.content,
+    mediaUrls: post.mediaUrls,
+    visibility: post.visibility,
+    createdAt: post.createdAt,
+    pinnedAt: post.pinnedAt,
+    threadRootId: post.threadRootId,
+    parentPostId: post.parentPostId,
+    username: author?.username || 'Unknown',
+    authorAvatarUrl: author?.avatarUrl,
+    authorRole: author?.role,
+  }, authUser.id);
+
+  return c.json(responsePost);
+});
+
+posts.delete('/:id/pin', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const postId = parseInt(c.req.param('id'), 10);
+  if (isNaN(postId)) return c.json({ error: 'Invalid post id' }, 400);
+
+  const db = drizzle(c.env.DB, { schema });
+  const result = await unpinPost(db, authUser.id, postId);
+  if (!result.ok) {
+    return c.json({ error: result.error }, result.code as 400 | 403 | 404);
+  }
+
+  const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
+  if (!post) return c.json({ error: 'Post not found' }, 404);
+
+  const author = await db.select({
+    username: schema.users.username,
+    avatarUrl: schema.users.avatarUrl,
+    role: schema.users.role,
+  }).from(schema.users).where(eq(schema.users.id, post.userId)).get();
+
+  const responsePost = await buildPostResponse(db, {
+    id: post.id,
+    userId: post.userId,
+    type: post.type,
+    content: post.content,
+    mediaUrls: post.mediaUrls,
+    visibility: post.visibility,
+    createdAt: post.createdAt,
+    pinnedAt: post.pinnedAt,
+    threadRootId: post.threadRootId,
+    parentPostId: post.parentPostId,
+    username: author?.username || 'Unknown',
+    authorAvatarUrl: author?.avatarUrl,
+    authorRole: author?.role,
+  }, authUser.id);
+
+  return c.json(responsePost);
+});
+
+posts.get('/:id/thread', async (c) => {
+  const postId = parseInt(c.req.param('id'), 10);
+  if (isNaN(postId)) return c.json({ error: 'Invalid post id' }, 400);
+
+  const db = drizzle(c.env.DB, { schema });
+  const authUser = await getAuthUser(c);
+  const currentUserId = authUser ? authUser.id : null;
+
+  const access = await assertCanViewThread(db, currentUserId, postId);
+  if (!access.ok) return c.json({ error: access.error }, access.status);
+
+  const rows = await getThreadPostRows(db, access.rootId);
+  if (rows.length === 0) return c.json({ error: 'Post not found' }, 404);
+
+  const pollPostIds = rows.filter(p => p.type === 'poll').map(p => p.id);
+  const postAuthorMap = new Map(rows.map(p => [p.id, p.userId]));
+  const pollMap = await loadPollsForPosts(db, pollPostIds, postAuthorMap, currentUserId);
+
+  const postsWithMetadata = await Promise.all(
+    rows.map(row => buildPostResponse(db, row, currentUserId, pollMap)),
+  );
+
+  const page: PostThreadPage = {
+    root: postsWithMetadata[0],
+    replies: postsWithMetadata.slice(1),
+  };
+  return c.json(page);
+});
+
 // Get single post (permalink)
 posts.get('/:id', async (c) => {
   const postId = parseInt(c.req.param('id'), 10);
@@ -757,6 +939,9 @@ posts.get('/:id', async (c) => {
       mediaUrls: schema.posts.mediaUrls,
       visibility: schema.posts.visibility,
       createdAt: schema.posts.createdAt,
+      pinnedAt: schema.posts.pinnedAt,
+      threadRootId: schema.posts.threadRootId,
+      parentPostId: schema.posts.parentPostId,
       username: schema.users.username,
       authorAvatarUrl: schema.users.avatarUrl,
       authorRole: schema.users.role,

@@ -10,7 +10,8 @@ import {
   ensureUserSettingsRow,
   settingsRowUpdatesFromPatch,
 } from '../lib/user-settings';
-import { UpdateUserSettingsSchema } from '@hin/types';
+import { UpdateUserSettingsSchema, DeleteAccountSchema } from '@hin/types';
+import { softDeleteUser, verifyPassword } from '../lib/user-lifecycle';
 
 const users = new Hono<{ Bindings: Env }>();
 
@@ -108,6 +109,34 @@ users.patch('/me/settings', async (c) => {
 
   const settings = await getOrCreateUserSettings(db, authUser.id);
   return c.json(settings);
+});
+
+users.delete('/me', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  if (authUser.role === 'admin') {
+    return c.json({ error: 'Admin accounts cannot be self-deleted' }, 400);
+  }
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = DeleteAccountSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, 400);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const passwordValid = await verifyPassword(db, authUser.id, parsed.data.password);
+  if (!passwordValid) {
+    return c.json({ error: 'Incorrect password' }, 401);
+  }
+
+  const result = await softDeleteUser(db, authUser.id, 'self');
+  if (!result.ok) {
+    return c.json({ error: result.error }, result.code as 400 | 404);
+  }
+
+  return c.json({ success: true });
 });
 
 // Search users by matching query, prioritizing followed and interacted users

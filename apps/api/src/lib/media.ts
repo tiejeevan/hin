@@ -20,7 +20,7 @@ export function parseMediaUrls(raw: string | null | undefined): string[] {
 
 export function serializeMediaUrls(urls: string[]): string | null {
   if (!urls.length) return null;
-  return JSON.stringify(urls.slice(0, 5));
+  return JSON.stringify(urls);
 }
 
 export async function linkPostMedia(
@@ -49,9 +49,11 @@ export async function validateOwnedPostMedia(
   db: Db,
   userId: number,
   mediaUrls: string[],
+  maxMedia: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (mediaUrls.length > 5) {
-    return { ok: false, error: 'Maximum 5 images allowed' };
+  if (mediaUrls.length > maxMedia) {
+    const label = maxMedia === 1 ? 'image' : 'images';
+    return { ok: false, error: `Maximum ${maxMedia} ${label} allowed` };
   }
   for (const url of mediaUrls) {
     const row = await db

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { Heart, MessageSquare, Shield, Trash2, Send, X, MoreVertical, Pencil, Link2, Bookmark, Share2, Flag } from 'lucide-react';
-import { Post, Comment, User as UserType } from '@hin/types';
+import { Heart, MessageSquare, Shield, Trash2, Send, X, MoreVertical, Pencil, Link2, Bookmark, Share2, Flag, Pin, GitBranch } from 'lucide-react';
+import { Post, Comment, User as UserType, DEFAULT_SYSTEM_SETTINGS } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { buildCommentTree } from '../../utils/comments';
 import { CommentItem } from './CommentItem';
@@ -25,6 +25,7 @@ interface PostCardProps {
   editingCommentId: number | null;
   editingCommentContent: string;
   hideAuthorHeader?: boolean;
+  showPinnedBadge?: boolean;
   readOnly?: boolean;
   highlightCommentId?: number | null;
   onSignInRequired?: () => void;
@@ -55,6 +56,16 @@ interface PostCardProps {
   onClosePoll: (postId: number) => Promise<void>;
   onReport?: (postId: number) => void;
   onReportComment?: (commentId: number) => void;
+  onPinPost?: (postId: number) => void;
+  onUnpinPost?: (postId: number) => void;
+  onStartThreadReply?: (postId: number) => void;
+  onCancelThreadReply?: () => void;
+  onSubmitThreadReply?: (postId: number) => void;
+  threadReplyTargetId?: number | null;
+  threadReplyContent?: string;
+  onThreadReplyContentChange?: (content: string) => void;
+  threadPosts?: Post[];
+  maxPostLength?: number;
 }
 
 export function PostCard({
@@ -70,6 +81,7 @@ export function PostCard({
   editingCommentId,
   editingCommentContent,
   hideAuthorHeader = false,
+  showPinnedBadge = false,
   readOnly = false,
   highlightCommentId = null,
   onSignInRequired,
@@ -100,6 +112,16 @@ export function PostCard({
   onClosePoll,
   onReport,
   onReportComment,
+  onPinPost,
+  onUnpinPost,
+  onStartThreadReply,
+  onCancelThreadReply,
+  onSubmitThreadReply,
+  threadReplyTargetId = null,
+  threadReplyContent = '',
+  onThreadReplyContentChange,
+  threadPosts = [],
+  maxPostLength = DEFAULT_SYSTEM_SETTINGS.maxPostLength,
 }: PostCardProps) {
   const token = localStorage.getItem('hin_token');
   
@@ -121,7 +143,11 @@ export function PostCard({
   const menuRef = useRef<HTMLDivElement>(null);
   const canManagePost = !readOnly && currentUser && (currentUser.role === 'admin' || currentUser.id === post.userId);
   const canReportPost = !readOnly && currentUser && currentUser.id !== post.userId && onReport;
+  const isRootPost = !post.parentPostId;
+  const canPinPost = canManagePost && isRootPost && onPinPost && onUnpinPost;
+  const canThreadReply = canManagePost && isRootPost && onStartThreadReply;
   const showPostMenu = canManagePost || canReportPost;
+  const isThreadReplyOpen = threadReplyTargetId === post.id;
 
   const requireAuth = (action: () => void) => {
     if (readOnly || !currentUser) {
@@ -198,6 +224,33 @@ export function PostCard({
                     <Pencil className="h-3.5 w-3.5" />
                     Edit
                   </button>
+                  {canPinPost && (
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        if (post.pinnedAt) onUnpinPost!(post.id);
+                        else onPinPost!(post.id);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-text-secondary hover:bg-bg-tertiary hover:text-indigo-400 transition-colors cursor-pointer min-h-[44px]"
+                    >
+                      <Pin className="h-3.5 w-3.5" />
+                      {post.pinnedAt ? 'Unpin' : 'Pin to profile'}
+                    </button>
+                  )}
+                  {canThreadReply && (
+                    <button
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onStartThreadReply!(post.id);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-text-secondary hover:bg-bg-tertiary hover:text-indigo-400 transition-colors cursor-pointer min-h-[44px]"
+                    >
+                      <GitBranch className="h-3.5 w-3.5" />
+                      Add to thread
+                    </button>
+                  )}
                   <button
                     role="menuitem"
                     onClick={() => {
@@ -232,6 +285,12 @@ export function PostCard({
       {!hideAuthorHeader && (
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
+            {showPinnedBadge && post.pinnedAt && (
+              <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-indigo-400 uppercase tracking-wide">
+                <Pin className="h-3 w-3" />
+                Pinned
+              </span>
+            )}
             <UserAvatar
               username={post.username}
               avatarUrl={post.authorAvatarUrl}
@@ -287,7 +346,13 @@ export function PostCard({
                 postAutocomplete.handleInputChange(e);
               }}
               onKeyDown={postAutocomplete.handleKeyDown}
+              maxLength={maxPostLength}
             />
+            <div className="flex justify-end">
+              <span className={`text-[10px] ${editingPostContent.length > maxPostLength ? 'text-rose-400' : 'text-text-muted'}`}>
+                {editingPostContent.length}/{maxPostLength}
+              </span>
+            </div>
             {postAutocomplete.showDropdown && (
               <MentionSuggestions
                 suggestions={postAutocomplete.suggestions}
@@ -364,6 +429,74 @@ export function PostCard({
           </div>
         )}
       </div>
+
+      {showPinnedBadge && hideAuthorHeader && post.pinnedAt && (
+        <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-indigo-400 uppercase tracking-wide">
+          <Pin className="h-3 w-3" />
+          Pinned
+        </span>
+      )}
+
+      {threadPosts.length > 0 && (
+        <div className="space-y-3 border-l-2 border-indigo-500/30 pl-4 ml-2">
+          {threadPosts.map(reply => (
+            <div key={reply.id} className="space-y-2">
+              <p className="text-[10px] text-text-muted">
+                {new Date(reply.createdAt).toLocaleString()}
+              </p>
+              <MentionsText
+                content={reply.content}
+                onViewProfile={onViewProfile}
+                className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left"
+              />
+              {reply.mediaUrls.length > 0 && (
+                <PostMediaGallery urls={reply.mediaUrls} onImageClick={() => {}} />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isThreadReplyOpen && onSubmitThreadReply && onThreadReplyContentChange && (
+        <form
+          className="space-y-2 border border-border-custom rounded-xl p-3 bg-bg-primary/40"
+          onSubmit={e => {
+            e.preventDefault();
+            onSubmitThreadReply(post.id);
+          }}
+        >
+          <p className="text-xs text-text-muted">Add to your thread</p>
+          <textarea
+            rows={3}
+            value={threadReplyContent}
+            onChange={e => onThreadReplyContentChange(e.target.value)}
+            maxLength={maxPostLength}
+            className="w-full bg-bg-primary border border-border-custom rounded-xl p-3 text-sm text-text-primary focus:outline-none focus:border-indigo-500 transition-colors resize-none"
+            placeholder="Continue your thread…"
+          />
+          <div className="flex justify-end">
+            <span className={`text-[10px] ${threadReplyContent.length > maxPostLength ? 'text-rose-400' : 'text-text-muted'}`}>
+              {threadReplyContent.length}/{maxPostLength}
+            </span>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => onCancelThreadReply?.()}
+              className="text-xs text-text-muted hover:text-text-primary px-3 py-1.5 cursor-pointer min-h-[44px]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!threadReplyContent.trim()}
+              className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold px-4 py-1.5 rounded-xl transition-all cursor-pointer min-h-[44px]"
+            >
+              Post reply
+            </button>
+          </div>
+        </form>
+      )}
 
       <div className="flex items-center gap-6">
         <button

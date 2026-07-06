@@ -9,6 +9,7 @@ import type {
   ReviewReportAction,
 } from '@hin/types';
 import { assertCanViewPost } from './postVisibility';
+import { softDeleteUser } from './user-lifecycle';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -302,11 +303,10 @@ export async function reviewReport(
     if (!user || user.deletedAt) {
       return { ok: false, error: 'User not found', code: 404 };
     }
-    await db
-      .update(schema.users)
-      .set({ deletedAt: sql`CURRENT_TIMESTAMP` })
-      .where(eq(schema.users.id, report.targetId))
-      .run();
+    const deleteResult = await softDeleteUser(db, report.targetId, 'admin');
+    if (!deleteResult.ok) {
+      return { ok: false, error: deleteResult.error, code: deleteResult.code as 400 | 404 };
+    }
     await db
       .update(schema.contentReports)
       .set({ status: 'action_taken', reviewedBy: adminId, reviewedAt })

@@ -1,4 +1,4 @@
-import { Post, Comment, User as UserType } from '@hin/types';
+import { Post, Comment, User as UserType, SystemSettings } from '@hin/types';
 import { PostCard } from '../feed/PostCard';
 import { CommentNode } from '../../types/ui';
 
@@ -39,6 +39,15 @@ interface ProfilePostsProps {
   onSignInRequired?: () => void;
   onReportPost?: (postId: number) => void;
   onReportComment?: (commentId: number) => void;
+  onPinPost?: (postId: number) => void;
+  onUnpinPost?: (postId: number) => void;
+  onStartThreadReply?: (postId: number) => void;
+  onCancelThreadReply?: () => void;
+  onSubmitThreadReply?: (postId: number) => void;
+  threadReplyTargetId?: number | null;
+  threadReplyContent?: string;
+  onThreadReplyContentChange?: (content: string) => void;
+  postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
 }
 
 export function ProfilePosts({
@@ -78,7 +87,73 @@ export function ProfilePosts({
   onSignInRequired,
   onReportPost,
   onReportComment,
+  onPinPost,
+  onUnpinPost,
+  onStartThreadReply,
+  onCancelThreadReply,
+  onSubmitThreadReply,
+  threadReplyTargetId,
+  threadReplyContent,
+  onThreadReplyContentChange,
+  postLimits,
 }: ProfilePostsProps) {
+  const pinnedPosts = posts.filter(p => p.pinnedAt);
+  const regularPosts = posts.filter(p => !p.pinnedAt);
+
+  const renderPost = (post: Post) => (
+    <PostCard
+      key={post.id}
+      post={post}
+      currentUser={currentUser ?? null}
+      readOnly={readOnly}
+      commentsList={postComments[post.id] || []}
+      isCommentsExpanded={expandedComments[post.id] || false}
+      isNewlyCreated={false}
+      editingPostId={editingPostId}
+      editingPostContent={editingPostContent}
+      newCommentText={newCommentText[post.id] || ''}
+      replyingTo={replyingTo[post.id] || null}
+      editingCommentId={editingCommentId}
+      editingCommentContent={editingCommentContent}
+      hideAuthorHeader
+      showPinnedBadge
+      onToggleLike={onToggleLike}
+      onToggleComments={onToggleComments}
+      onDeletePost={onDeletePost}
+      onStartPostEdit={onStartPostEdit}
+      onCancelPostEdit={onCancelPostEdit}
+      onSavePostEdit={onSavePostEdit}
+      onEditPostContentChange={onEditPostContentChange}
+      onCreateComment={onCreateComment}
+      onCommentTextChange={onCommentTextChange}
+      onCancelReply={onCancelReply}
+      onDeleteComment={onDeleteComment}
+      onStartCommentEdit={onStartCommentEdit}
+      onCancelCommentEdit={onCancelCommentEdit}
+      onSaveCommentEdit={onSaveCommentEdit}
+      onEditCommentContentChange={onEditCommentContentChange}
+      onReply={onReply}
+      onToggleCommentLike={onToggleCommentLike}
+      onViewProfile={onViewProfile}
+      onVotePoll={onVotePoll}
+      onRetractPollVote={onRetractPollVote}
+      onClosePoll={onClosePoll}
+      onOpenPost={onOpenPost}
+      onSignInRequired={onSignInRequired}
+      onReport={onReportPost}
+      onReportComment={onReportComment}
+      onPinPost={onPinPost}
+      onUnpinPost={onUnpinPost}
+      onStartThreadReply={onStartThreadReply}
+      onCancelThreadReply={onCancelThreadReply}
+      onSubmitThreadReply={onSubmitThreadReply}
+      threadReplyTargetId={threadReplyTargetId}
+      threadReplyContent={threadReplyContent}
+      onThreadReplyContentChange={onThreadReplyContentChange}
+      maxPostLength={postLimits?.maxPostLength}
+    />
+  );
+
   return (
     <div className="space-y-3">
       <h2 className="text-sm font-semibold text-text-primary text-left">Posts</h2>
@@ -88,49 +163,17 @@ export function ProfilePosts({
           No posts yet.
         </div>
       ) : (
-        posts.map(post => (
-          <PostCard
-            key={post.id}
-            post={post}
-            currentUser={currentUser ?? null}
-            readOnly={readOnly}
-            commentsList={postComments[post.id] || []}
-            isCommentsExpanded={expandedComments[post.id] || false}
-            isNewlyCreated={false}
-            editingPostId={editingPostId}
-            editingPostContent={editingPostContent}
-            newCommentText={newCommentText[post.id] || ''}
-            replyingTo={replyingTo[post.id] || null}
-            editingCommentId={editingCommentId}
-            editingCommentContent={editingCommentContent}
-            hideAuthorHeader
-            onToggleLike={onToggleLike}
-            onToggleComments={onToggleComments}
-            onDeletePost={onDeletePost}
-            onStartPostEdit={onStartPostEdit}
-            onCancelPostEdit={onCancelPostEdit}
-            onSavePostEdit={onSavePostEdit}
-            onEditPostContentChange={onEditPostContentChange}
-            onCreateComment={onCreateComment}
-            onCommentTextChange={onCommentTextChange}
-            onCancelReply={onCancelReply}
-            onDeleteComment={onDeleteComment}
-            onStartCommentEdit={onStartCommentEdit}
-            onCancelCommentEdit={onCancelCommentEdit}
-            onSaveCommentEdit={onSaveCommentEdit}
-            onEditCommentContentChange={onEditCommentContentChange}
-            onReply={onReply}
-            onToggleCommentLike={onToggleCommentLike}
-            onViewProfile={onViewProfile}
-            onVotePoll={onVotePoll}
-            onRetractPollVote={onRetractPollVote}
-            onClosePoll={onClosePoll}
-            onOpenPost={onOpenPost}
-            onSignInRequired={onSignInRequired}
-            onReport={onReportPost}
-            onReportComment={onReportComment}
-          />
-        ))
+        <>
+          {pinnedPosts.length > 0 && (
+            <div className="space-y-3">
+              {pinnedPosts.map(renderPost)}
+              {regularPosts.length > 0 && (
+                <div className="border-t border-border-custom pt-3" />
+              )}
+            </div>
+          )}
+          {regularPosts.map(renderPost)}
+        </>
       )}
     </div>
   );

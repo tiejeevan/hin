@@ -1,5 +1,5 @@
 import { ArrowLeft } from 'lucide-react';
-import { Post, Comment, User as UserType } from '@hin/types';
+import { Post, Comment, User as UserType, SystemSettings } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { PostCard } from './PostCard';
 import { AuthForm } from '../auth/AuthForm';
@@ -57,6 +57,16 @@ interface PostViewProps {
   onShare: () => void;
   onReportPost?: (postId: number) => void;
   onReportComment?: (commentId: number) => void;
+  onPinPost?: (postId: number) => void;
+  onUnpinPost?: (postId: number) => void;
+  onStartThreadReply?: (postId: number) => void;
+  onCancelThreadReply?: () => void;
+  onSubmitThreadReply?: (postId: number) => void;
+  threadReplyTargetId?: number | null;
+  threadReplyContent?: string;
+  onThreadReplyContentChange?: (content: string) => void;
+  threadPosts?: Post[];
+  postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
 }
 
 export function PostView({
@@ -112,6 +122,16 @@ export function PostView({
   onShare,
   onReportPost,
   onReportComment,
+  onPinPost,
+  onUnpinPost,
+  onStartThreadReply,
+  onCancelThreadReply,
+  onSubmitThreadReply,
+  threadReplyTargetId,
+  threadReplyContent,
+  onThreadReplyContentChange,
+  threadPosts,
+  postLimits,
 }: PostViewProps) {
   if (isLoading) {
     return (
@@ -240,6 +260,16 @@ export function PostView({
         onClosePoll={onClosePoll}
         onReport={onReportPost}
         onReportComment={onReportComment}
+        onPinPost={onPinPost}
+        onUnpinPost={onUnpinPost}
+        onStartThreadReply={onStartThreadReply}
+        onCancelThreadReply={onCancelThreadReply}
+        onSubmitThreadReply={onSubmitThreadReply}
+        threadReplyTargetId={threadReplyTargetId}
+        threadReplyContent={threadReplyContent}
+        onThreadReplyContentChange={onThreadReplyContentChange}
+        threadPosts={threadPosts}
+        maxPostLength={postLimits?.maxPostLength}
       />
     </div>
   );

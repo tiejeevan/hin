@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { Loader2 } from 'lucide-react';
-import { Post, Comment, User as UserType } from '@hin/types';
+import { Post, Comment, User as UserType, SystemSettings } from '@hin/types';
 import { CommentNode, FeedMode } from '../../types/ui';
 import { CreatePostForm } from './CreatePostForm';
 import type { CreatePostSubmitPayload } from './CreatePostForm';
@@ -54,6 +54,15 @@ interface FeedViewProps {
   onOpenPost: (postId: number) => void;
   onReportPost?: (postId: number) => void;
   onReportComment?: (commentId: number) => void;
+  onPinPost?: (postId: number) => void;
+  onUnpinPost?: (postId: number) => void;
+  onStartThreadReply?: (postId: number) => void;
+  onCancelThreadReply?: () => void;
+  onSubmitThreadReply?: (postId: number) => void;
+  threadReplyTargetId?: number | null;
+  threadReplyContent?: string;
+  onThreadReplyContentChange?: (content: string) => void;
+  postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
 }
 
 export function FeedView({
@@ -103,6 +112,15 @@ export function FeedView({
   onOpenPost,
   onReportPost,
   onReportComment,
+  onPinPost,
+  onUnpinPost,
+  onStartThreadReply,
+  onCancelThreadReply,
+  onSubmitThreadReply,
+  threadReplyTargetId,
+  threadReplyContent,
+  onThreadReplyContentChange,
+  postLimits,
 }: FeedViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef(onLoadMore);
@@ -148,6 +166,7 @@ export function FeedView({
         <CreatePostForm
           content={newPostContent}
           token={token}
+          postLimits={postLimits}
           onContentChange={onNewPostContentChange}
           onSubmit={onCreatePost}
           onClose={onCloseCreatePost}
@@ -203,6 +222,15 @@ export function FeedView({
                 onOpenPost={onOpenPost}
                 onReport={onReportPost}
                 onReportComment={onReportComment}
+                onPinPost={onPinPost}
+                onUnpinPost={onUnpinPost}
+                onStartThreadReply={onStartThreadReply}
+                onCancelThreadReply={onCancelThreadReply}
+                onSubmitThreadReply={onSubmitThreadReply}
+                threadReplyTargetId={threadReplyTargetId}
+                threadReplyContent={threadReplyContent}
+                onThreadReplyContentChange={onThreadReplyContentChange}
+                maxPostLength={postLimits?.maxPostLength}
               />
             ))}
             <div ref={sentinelRef} className="h-1" aria-hidden />
