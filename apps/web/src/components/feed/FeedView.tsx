@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { Loader2, Plus } from 'lucide-react';
+import { useCallback, useEffect, useRef } from 'react';
+import { Loader2 } from 'lucide-react';
 import { Post, Comment, User as UserType } from '@hin/types';
 import { CommentNode, FeedMode } from '../../types/ui';
 import { CreatePostForm } from './CreatePostForm';
@@ -9,7 +9,6 @@ import { FeedModeSelector } from './FeedModeSelector';
 
 interface FeedViewProps {
   posts: Post[];
-  users: UserType[];
   currentUser: UserType;
   showNewPostForm: boolean;
   newPostContent: string;
@@ -28,7 +27,6 @@ interface FeedViewProps {
   feedMode: FeedMode;
   onFeedModeChange: (mode: FeedMode) => void;
   onLoadMore: () => void;
-  onOpenCreatePost: () => void;
   onCloseCreatePost: () => void;
   onNewPostContentChange: (value: string) => void;
   onCreatePost: (e: React.FormEvent, payload: CreatePostSubmitPayload) => void | Promise<void>;
@@ -42,7 +40,7 @@ interface FeedViewProps {
   onCreateComment: (postId: number, e: React.FormEvent) => void;
   onCommentTextChange: (postId: number, text: string) => void;
   onCancelReply: (postId: number) => void;
-  onViewProfile: (userId: number) => void;
+  onViewProfile: (userIdOrUsername: number | string) => void;
   onDeleteComment: (postId: number, commentId: number) => void;
   onStartCommentEdit: (commentId: number, content: string) => void;
   onCancelCommentEdit: () => void;
@@ -58,7 +56,6 @@ interface FeedViewProps {
 
 export function FeedView({
   posts,
-  users,
   currentUser,
   showNewPostForm,
   newPostContent,
@@ -77,7 +74,6 @@ export function FeedView({
   feedMode,
   onFeedModeChange,
   onLoadMore,
-  onOpenCreatePost,
   onCloseCreatePost,
   onNewPostContentChange,
   onCreatePost,
@@ -105,40 +101,44 @@ export function FeedView({
   onOpenPost,
 }: FeedViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef(onLoadMore);
+  const isLoadingMoreRef = useRef(isLoadingMore);
+  const hasMorePostsRef = useRef(hasMorePosts);
 
   useEffect(() => {
-    const root = scrollRef.current;
-    const sentinel = sentinelRef.current;
-    if (!root || !sentinel || !hasMorePosts) return;
+    loadMoreRef.current = onLoadMore;
+    isLoadingMoreRef.current = isLoadingMore;
+    hasMorePostsRef.current = hasMorePosts;
+  });
 
-    const observer = new IntersectionObserver(
-      entries => {
-        if (entries[0]?.isIntersecting && !isLoadingMore) {
-          onLoadMore();
-        }
-      },
-      { root, rootMargin: '200px', threshold: 0 }
-    );
+  const observerRef = useRef<IntersectionObserver | null>(null);
 
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMorePosts, isLoadingMore, onLoadMore, posts.length]);
+  const sentinelRef = useCallback((node: HTMLDivElement | null) => {
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+
+    if (node) {
+      const observer = new IntersectionObserver(
+        entries => {
+          if (entries[0]?.isIntersecting && !isLoadingMoreRef.current && hasMorePostsRef.current) {
+            loadMoreRef.current();
+          }
+        },
+        { root: null, rootMargin: '200px', threshold: 0 }
+      );
+      observer.observe(node);
+      observerRef.current = observer;
+    }
+  }, []);
 
   return (
     <div ref={scrollRef} className="flex-grow overflow-y-auto p-4 md:p-6 relative">
       <div className="max-w-2xl mx-auto w-full space-y-4 pb-20 md:pb-4">
       <FeedModeSelector feedMode={feedMode} onFeedModeChange={onFeedModeChange} />
 
-      <div className="hidden md:flex justify-end">
-        <button
-          onClick={onOpenCreatePost}
-          className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer min-h-[44px]"
-        >
-          <Plus className="h-4 w-4" />
-          Create Post
-        </button>
-      </div>
+
 
       {showNewPostForm && (
         <CreatePostForm
@@ -166,7 +166,6 @@ export function FeedView({
                 key={post.id}
                 post={post}
                 currentUser={currentUser}
-                users={users}
                 commentsList={postComments[post.id] || []}
                 isCommentsExpanded={expandedComments[post.id] || false}
                 isNewlyCreated={newlyCreatedPostId === post.id}

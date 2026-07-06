@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { BarChart3, Globe, Loader2, Lock, MoreVertical, Send, Users, X } from 'lucide-react';
+import { useMentionAutocomplete } from '../../hooks/useMentionAutocomplete';
+import { MentionSuggestions } from '../ui/MentionSuggestions';
 import type { PostVisibility } from '@hin/types';
 import { ImagePicker, PickedImage } from '../ui/ImagePicker';
 import { uploadCompressedImage } from '../../lib/compressImage';
@@ -37,6 +39,20 @@ export function CreatePostForm({
   onSubmit,
   onClose,
 }: CreatePostFormProps) {
+  const {
+    suggestions,
+    showDropdown,
+    activeIndex,
+    inputRef,
+    handleInputChange,
+    handleKeyDown,
+    selectSuggestion,
+  } = useMentionAutocomplete({
+    value: content,
+    onChange: onContentChange,
+    token,
+  });
+
   const [hasPoll, setHasPoll] = useState(false);
   const [images, setImages] = useState<PickedImage[]>([]);
   const [pollDraft, setPollDraft] = useState<PollDraft>(defaultPollDraft);
@@ -165,13 +181,27 @@ export function CreatePostForm({
   return (
     <div className="bg-bg-secondary border border-border-custom rounded-2xl p-4 space-y-3">
       <form onSubmit={handleSubmit} className="space-y-3">
-        <textarea
-          rows={3}
-          placeholder="What is on your mind?"
-          value={content}
-          onChange={e => onContentChange(e.target.value)}
-          className="w-full bg-bg-primary border border-border-custom rounded-xl p-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors resize-none"
-        />
+        <div className="relative">
+          <textarea
+            ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+            rows={3}
+            placeholder="What is on your mind?"
+            value={content}
+            onChange={e => {
+              onContentChange(e.target.value);
+              handleInputChange(e);
+            }}
+            onKeyDown={handleKeyDown}
+            className="w-full bg-bg-primary border border-border-custom rounded-xl p-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors resize-none"
+          />
+          {showDropdown && (
+            <MentionSuggestions
+              suggestions={suggestions}
+              activeIndex={activeIndex}
+              onSelect={selectSuggestion}
+            />
+          )}
+        </div>
 
         {hasPoll && (
           <section className="space-y-3 pt-1 border-t border-border-custom/60">

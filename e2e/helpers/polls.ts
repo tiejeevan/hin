@@ -13,12 +13,7 @@ export interface PollDraftInput {
 
 export async function openCreatePostForm(page: Page) {
   const fab = page.locator('[aria-label="Create post"]');
-  const desktopButton = page.getByRole('button', { name: 'Create Post', exact: true });
-  if (await desktopButton.isVisible()) {
-    await desktopButton.click();
-  } else {
-    await fab.click();
-  }
+  await fab.click();
   await expect(page.getByPlaceholder('What is on your mind?')).toBeVisible();
 }
 

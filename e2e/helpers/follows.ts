@@ -10,7 +10,7 @@ export { openProfileSettings, expandSettingsSection };
 const API_URL = process.env.PLAYWRIGHT_API_URL ?? 'http://localhost:8787';
 
 export async function createTextPost(page: Page, content: string) {
-  await page.getByRole('button', { name: 'Create Post' }).first().click();
+  await page.locator('[aria-label="Create post"]').first().click();
   await page.getByPlaceholder('What is on your mind?').fill(content);
   await page.getByRole('button', { name: 'Publish post' }).click();
   await expect(page.getByText(content)).toBeVisible();

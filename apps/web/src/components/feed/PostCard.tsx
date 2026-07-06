@@ -9,11 +9,12 @@ import { ImageLightbox } from './ImageLightbox';
 import { PostMediaGallery } from './PostMediaGallery';
 import { PostPollBody } from './PostPollBody';
 import { UserAvatar } from '../profile/UserAvatar';
+import { useMentionAutocomplete } from '../../hooks/useMentionAutocomplete';
+import { MentionSuggestions } from '../ui/MentionSuggestions';
 
 interface PostCardProps {
   post: Post;
   currentUser: UserType | null;
-  users: UserType[];
   commentsList: Comment[];
   isCommentsExpanded: boolean;
   isNewlyCreated: boolean;
@@ -48,7 +49,7 @@ interface PostCardProps {
   onEditCommentContentChange: (content: string) => void;
   onReply: (postId: number, comment: CommentNode) => void;
   onToggleCommentLike: (postId: number, commentId: number) => void;
-  onViewProfile: (userId: number) => void;
+  onViewProfile: (userIdOrUsername: number | string) => void;
   onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
@@ -57,7 +58,6 @@ interface PostCardProps {
 export function PostCard({
   post,
   currentUser,
-  users,
   commentsList,
   isCommentsExpanded,
   isNewlyCreated,
@@ -97,12 +97,25 @@ export function PostCard({
   onRetractPollVote,
   onClosePoll,
 }: PostCardProps) {
+  const token = localStorage.getItem('hin_token');
+  
+  const postAutocomplete = useMentionAutocomplete({
+    value: editingPostContent,
+    onChange: onEditPostContentChange,
+    token,
+  });
+
+  const commentAutocomplete = useMentionAutocomplete({
+    value: newCommentText,
+    onChange: (val) => onCommentTextChange(post.id, val),
+    token,
+  });
+
   const nestedComments = buildCommentTree(commentsList);
   const [menuOpen, setMenuOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const canManagePost = !readOnly && currentUser && (currentUser.role === 'admin' || currentUser.id === post.userId);
-  const author = users.find(u => u.id === post.userId);
 
   const requireAuth = (action: () => void) => {
     if (readOnly || !currentUser) {
@@ -198,18 +211,18 @@ export function PostCard({
           <div className="flex items-center gap-2.5">
             <UserAvatar
               username={post.username}
-              avatarUrl={author?.avatarUrl}
+              avatarUrl={post.authorAvatarUrl}
               size="sm"
-              onClick={() => onViewProfile(post.userId)}
+              onClick={() => onViewProfile(post.username)}
             />
             <div className="text-left">
               <button
                 type="button"
-                onClick={() => onViewProfile(post.userId)}
+                onClick={() => onViewProfile(post.username)}
                 className="text-xs font-bold text-text-primary flex items-center gap-1 hover:text-indigo-400 transition-colors cursor-pointer"
               >
                 {post.username}
-                {author?.role === 'admin' && <Shield className="h-3 w-3 text-amber-500" />}
+                {post.authorRole === 'admin' && <Shield className="h-3 w-3 text-amber-500" />}
               </button>
               <span className="text-[9px] text-text-muted flex items-center gap-1">
                 <button
@@ -240,13 +253,25 @@ export function PostCard({
 
       <div className="space-y-3">
         {editingPostId === post.id ? (
-          <div className="space-y-2.5 mt-2">
+          <div className="space-y-2.5 mt-2 relative">
             <textarea
+              ref={postAutocomplete.inputRef as React.RefObject<HTMLTextAreaElement>}
               rows={3}
               className="w-full bg-bg-primary border border-border-custom rounded-xl p-3 text-sm text-text-primary focus:outline-none focus:border-indigo-500 transition-colors resize-none"
               value={editingPostContent}
-              onChange={e => onEditPostContentChange(e.target.value)}
+              onChange={e => {
+                onEditPostContentChange(e.target.value);
+                postAutocomplete.handleInputChange(e);
+              }}
+              onKeyDown={postAutocomplete.handleKeyDown}
             />
+            {postAutocomplete.showDropdown && (
+              <MentionSuggestions
+                suggestions={postAutocomplete.suggestions}
+                activeIndex={postAutocomplete.activeIndex}
+                onSelect={postAutocomplete.selectSuggestion}
+              />
+            )}
             <div className="flex justify-end gap-2">
               <button
                 onClick={onCancelPostEdit}
@@ -273,7 +298,6 @@ export function PostCard({
                 >
                   <MentionsText
                     content={post.content}
-                    users={users}
                     onViewProfile={onViewProfile}
                     className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left"
                   />
@@ -281,7 +305,6 @@ export function PostCard({
               ) : (
                 <MentionsText
                   content={post.content}
-                  users={users}
                   onViewProfile={onViewProfile}
                   className="text-sm text-text-secondary leading-relaxed whitespace-pre-line text-left"
                 />
@@ -389,14 +412,28 @@ export function PostCard({
 
           {!readOnly && (
           <form onSubmit={e => onCreateComment(post.id, e)} className="flex items-center gap-2">
-            <input
-              type="text"
-              required
-              placeholder={replyingTo ? 'Write a reply...' : 'Write a comment...'}
-              value={newCommentText}
-              onChange={e => onCommentTextChange(post.id, e.target.value)}
-              className="flex-grow bg-bg-primary border border-border-custom rounded-xl px-3.5 py-2.5 text-xs text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
-            />
+            <div className="relative flex-grow">
+              <input
+                ref={commentAutocomplete.inputRef as React.RefObject<HTMLInputElement>}
+                type="text"
+                required
+                placeholder={replyingTo ? 'Write a reply...' : 'Write a comment...'}
+                value={newCommentText}
+                onChange={e => {
+                  onCommentTextChange(post.id, e.target.value);
+                  commentAutocomplete.handleInputChange(e);
+                }}
+                onKeyDown={commentAutocomplete.handleKeyDown}
+                className="w-full bg-bg-primary border border-border-custom rounded-xl px-3.5 py-2.5 text-xs text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
+              />
+              {commentAutocomplete.showDropdown && (
+                <MentionSuggestions
+                  suggestions={commentAutocomplete.suggestions}
+                  activeIndex={commentAutocomplete.activeIndex}
+                  onSelect={commentAutocomplete.selectSuggestion}
+                />
+              )}
+            </div>
             <button
               type="submit"
               className="bg-indigo-600 hover:bg-indigo-500 text-white p-2.5 rounded-xl transition-colors shrink-0 cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
@@ -426,7 +463,6 @@ export function PostCard({
                   depth={0}
                   postId={post.id}
                   currentUser={currentUser}
-                  users={users}
                   readOnly={readOnly}
                   editingCommentId={editingCommentId}
                   editingCommentContent={editingCommentContent}

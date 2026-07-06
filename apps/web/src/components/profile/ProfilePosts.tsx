@@ -4,7 +4,6 @@ import { CommentNode } from '../../types/ui';
 
 interface ProfilePostsProps {
   posts: Post[];
-  users: UserType[];
   currentUser: UserType;
   expandedComments: Record<number, boolean>;
   postComments: Record<number, Comment[]>;
@@ -31,7 +30,7 @@ interface ProfilePostsProps {
   onEditCommentContentChange: (content: string) => void;
   onReply: (postId: number, comment: CommentNode) => void;
   onToggleCommentLike: (postId: number, commentId: number) => void;
-  onViewProfile: (userId: number) => void;
+  onViewProfile: (userIdOrUsername: number | string) => void;
   onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
@@ -40,7 +39,6 @@ interface ProfilePostsProps {
 
 export function ProfilePosts({
   posts,
-  users,
   currentUser,
   expandedComments,
   postComments,
@@ -87,7 +85,6 @@ export function ProfilePosts({
             key={post.id}
             post={post}
             currentUser={currentUser}
-            users={users}
             commentsList={postComments[post.id] || []}
             isCommentsExpanded={expandedComments[post.id] || false}
             isNewlyCreated={false}

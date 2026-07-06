@@ -42,6 +42,8 @@ async function buildPostResponse(
     visibility?: string | null;
     createdAt: string;
     username: string;
+    authorAvatarUrl?: string | null;
+    authorRole?: string;
   },
   currentUserId: number | null,
   pollMap?: Map<number, import('@hin/types').Poll>,
@@ -107,6 +109,8 @@ async function buildPostResponse(
     id: post.id,
     userId: post.userId,
     username: post.username,
+    authorAvatarUrl: post.authorAvatarUrl,
+    authorRole: post.authorRole,
     type: postType,
     content: post.content,
     mediaUrls: parseMediaUrls(post.mediaUrls),
@@ -212,6 +216,8 @@ posts.get('/', async (c) => {
     visibility: schema.posts.visibility,
     createdAt: schema.posts.createdAt,
     username: schema.users.username,
+    authorAvatarUrl: schema.users.avatarUrl,
+    authorRole: schema.users.role,
   })
   .from(schema.posts)
   .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
@@ -278,6 +284,8 @@ posts.get('/bookmarks', async (c) => {
       visibility: schema.posts.visibility,
       createdAt: schema.posts.createdAt,
       username: schema.users.username,
+      authorAvatarUrl: schema.users.avatarUrl,
+      authorRole: schema.users.role,
       bookmarkCreatedAt: schema.postBookmarks.createdAt,
     })
     .from(schema.postBookmarks)
@@ -370,6 +378,8 @@ posts.post('/', async (c) => {
     visibility: inserted.visibility,
     createdAt: inserted.createdAt,
     username: authUser.username,
+    authorAvatarUrl: authUser.avatarUrl,
+    authorRole: authUser.role,
   }, authUser.id);
 
   await notifyMentions(db, c.env, {
@@ -420,7 +430,11 @@ posts.put('/:id', async (c) => {
     .where(eq(schema.posts.id, postId))
     .returning();
 
-  const author = await db.select({ username: schema.users.username }).from(schema.users).where(eq(schema.users.id, updated.userId)).get();
+  const author = await db.select({
+    username: schema.users.username,
+    avatarUrl: schema.users.avatarUrl,
+    role: schema.users.role,
+  }).from(schema.users).where(eq(schema.users.id, updated.userId)).get();
 
   const responsePost = await buildPostResponse(db, {
     id: updated.id,
@@ -431,6 +445,8 @@ posts.put('/:id', async (c) => {
     visibility: updated.visibility,
     createdAt: updated.createdAt,
     username: author?.username || 'Unknown',
+    authorAvatarUrl: author?.avatarUrl,
+    authorRole: author?.role,
   }, authUser.id);
 
   await broadcastEvent(c.env, { type: 'post_updated', payload: { post: responsePost } });
@@ -742,6 +758,8 @@ posts.get('/:id', async (c) => {
       visibility: schema.posts.visibility,
       createdAt: schema.posts.createdAt,
       username: schema.users.username,
+      authorAvatarUrl: schema.users.avatarUrl,
+      authorRole: schema.users.role,
     })
     .from(schema.posts)
     .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))

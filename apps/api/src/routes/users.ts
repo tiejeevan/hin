@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and, count, sql } from 'drizzle-orm';
+import { eq, and, count, sql, or, like, isNull } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
@@ -116,6 +116,121 @@ users.patch('/me/settings', async (c) => {
 
   const settings = await getOrCreateUserSettings(db, authUser.id);
   return c.json(settings);
+});
+
+// Search users by matching query, prioritizing followed and interacted users
+users.get('/search', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const q = c.req.query('q') || '';
+  if (q.length < 2) return c.json([]);
+
+  const db = drizzle(c.env.DB, { schema });
+  const queryPattern = `%${q}%`;
+
+  try {
+    // 1. Fetch matching users (excluding soft-deleted and self)
+    const matchingUsers = await db.select(USER_PUBLIC_FIELDS)
+      .from(schema.users)
+      .where(
+        and(
+          like(schema.users.username, queryPattern),
+          isNull(schema.users.deletedAt),
+          sql`${schema.users.id} != ${authUser.id}`
+        )
+      )
+      .all();
+
+    if (matchingUsers.length === 0) return c.json([]);
+
+    // 2. Fetch followed user IDs to prioritize them
+    const followed = await db.select({ followingId: schema.userFollows.followingId })
+      .from(schema.userFollows)
+      .where(
+        and(
+          eq(schema.userFollows.followerId, authUser.id),
+          isNull(schema.userFollows.deletedAt)
+        )
+      )
+      .all();
+    const followedSet = new Set(followed.map(f => f.followingId));
+
+    // 3. Fetch interacted users from messages
+    const interactions = await db.select({
+      senderId: schema.messages.senderId,
+      receiverId: schema.messages.receiverId
+    })
+    .from(schema.messages)
+    .where(
+      and(
+        or(
+          eq(schema.messages.senderId, authUser.id),
+          eq(schema.messages.receiverId, authUser.id)
+        ),
+        isNull(schema.messages.deletedAt)
+      )
+    )
+    .all();
+
+    const interactedSet = new Set<number>();
+    for (const m of interactions) {
+      if (m.senderId !== authUser.id) interactedSet.add(m.senderId);
+      if (m.receiverId !== authUser.id) interactedSet.add(m.receiverId);
+    }
+
+    // 4. Sort: followed first, then interacted, then alphabetical
+    const sorted = matchingUsers.map(u => {
+      const publicUser = toPublicUser(u);
+      return {
+        ...publicUser,
+        isFollowing: followedSet.has(u.id),
+        hasInteracted: interactedSet.has(u.id)
+      };
+    })
+    .sort((a, b) => {
+      if (a.isFollowing && !b.isFollowing) return -1;
+      if (!a.isFollowing && b.isFollowing) return 1;
+
+      if (a.hasInteracted && !b.hasInteracted) return -1;
+      if (!a.hasInteracted && b.hasInteracted) return 1;
+
+      return a.username.localeCompare(b.username);
+    });
+
+    // Limit to top 10 results
+    return c.json(sorted.slice(0, 10));
+  } catch (e) {
+    console.error('Error searching users:', e);
+    return c.json({ error: 'Internal Server Error' }, 500);
+  }
+});
+
+// Get user by username
+users.get('/username/:username', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const username = c.req.param('username');
+
+  try {
+    const user = await db.select(USER_PUBLIC_FIELDS)
+      .from(schema.users)
+      .where(
+        and(
+          eq(schema.users.username, username),
+          isNull(schema.users.deletedAt)
+        )
+      )
+      .get();
+
+    if (!user) return c.json({ error: 'User not found' }, 404);
+    return c.json(toPublicUser(user));
+  } catch (e) {
+    console.error('Error fetching user by username:', e);
+    return c.json({ error: 'Internal Server Error' }, 500);
+  }
 });
 
 // Get single user profile

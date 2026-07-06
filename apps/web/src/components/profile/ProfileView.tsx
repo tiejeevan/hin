@@ -20,7 +20,6 @@ interface ProfileViewProps {
   isSettingsOpen: boolean;
   highlightSettings?: boolean;
   followBusy: boolean;
-  users: UserType[];
   expandedComments: Record<number, boolean>;
   postComments: Record<number, Comment[]>;
   newCommentText: Record<number, string>;
@@ -64,7 +63,7 @@ interface ProfileViewProps {
   onEditCommentContentChange: (content: string) => void;
   onReply: (postId: number, comment: CommentNode) => void;
   onToggleCommentLike: (postId: number, commentId: number) => void;
-  onViewProfile: (userId: number) => void;
+  onViewProfile: (userIdOrUsername: number | string) => void;
   onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
@@ -86,7 +85,6 @@ export function ProfileView({
   isSettingsOpen,
   highlightSettings = false,
   followBusy,
-  users,
   expandedComments,
   postComments,
   newCommentText,
@@ -217,7 +215,6 @@ export function ProfileView({
               )}
               <ProfilePosts
                 posts={profilePosts}
-                users={users}
                 currentUser={currentUser}
                 expandedComments={expandedComments}
                 postComments={postComments}

@@ -9,7 +9,6 @@ interface PostViewProps {
   isLoading: boolean;
   error: { status: number; message: string } | null;
   currentUser: UserType | null;
-  users: UserType[];
   readOnly: boolean;
   highlightCommentId: number | null;
   commentsList: Comment[];
@@ -49,7 +48,7 @@ interface PostViewProps {
   onEditCommentContentChange: (content: string) => void;
   onReply: (postId: number, comment: CommentNode) => void;
   onToggleCommentLike: (postId: number, commentId: number) => void;
-  onViewProfile: (userId: number) => void;
+  onViewProfile: (userIdOrUsername: number | string) => void;
   onVotePoll: (postId: number, optionIds: number[]) => Promise<void>;
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
@@ -63,7 +62,6 @@ export function PostView({
   isLoading,
   error,
   currentUser,
-  users,
   readOnly,
   highlightCommentId,
   commentsList,
@@ -200,7 +198,6 @@ export function PostView({
       <PostCard
         post={post}
         currentUser={currentUser}
-        users={users}
         commentsList={commentsList}
         isCommentsExpanded={isCommentsExpanded}
         isNewlyCreated={false}

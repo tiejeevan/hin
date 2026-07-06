@@ -3,13 +3,14 @@ import { Heart, MoreVertical, Pencil, Trash2 } from 'lucide-react';
 import { User as UserType } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { MentionsText } from './MentionsText';
+import { useMentionAutocomplete } from '../../hooks/useMentionAutocomplete';
+import { MentionSuggestions } from '../ui/MentionSuggestions';
 
 interface CommentItemProps {
   comment: CommentNode;
   depth: number;
   postId: number;
   currentUser: UserType | null;
-  users: UserType[];
   readOnly?: boolean;
   editingCommentId: number | null;
   editingCommentContent: string;
@@ -20,7 +21,7 @@ interface CommentItemProps {
   onEditContentChange: (content: string) => void;
   onReply: (postId: number, comment: CommentNode) => void;
   onToggleCommentLike: (postId: number, commentId: number) => void;
-  onViewProfile: (userId: number) => void;
+  onViewProfile: (userIdOrUsername: number | string) => void;
   onSignInRequired?: () => void;
 }
 
@@ -29,7 +30,6 @@ export function CommentItem({
   depth = 0,
   postId,
   currentUser,
-  users,
   readOnly = false,
   editingCommentId,
   editingCommentContent,
@@ -43,6 +43,12 @@ export function CommentItem({
   onViewProfile,
   onSignInRequired,
 }: CommentItemProps) {
+  const token = localStorage.getItem('hin_token');
+  const commentEditAutocomplete = useMentionAutocomplete({
+    value: editingCommentContent,
+    onChange: onEditContentChange,
+    token,
+  });
   const isDeleted = !!comment.deletedAt || comment.username === 'deleted';
   const isEditing = editingCommentId === comment.id;
   const canManage = !readOnly && !isDeleted && currentUser && (currentUser.role === 'admin' || currentUser.id === comment.userId);
@@ -97,13 +103,25 @@ export function CommentItem({
               </div>
 
               {isEditing ? (
-                <div className="space-y-2 mt-1.5">
+                <div className="space-y-2 mt-1.5 relative">
                   <input
+                    ref={commentEditAutocomplete.inputRef as React.RefObject<HTMLInputElement>}
                     type="text"
                     className="w-full bg-bg-primary border border-border-custom rounded-xl px-3 py-1.5 text-xs text-text-primary focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
                     value={editingCommentContent}
-                    onChange={e => onEditContentChange(e.target.value)}
+                    onChange={e => {
+                      onEditContentChange(e.target.value);
+                      commentEditAutocomplete.handleInputChange(e);
+                    }}
+                    onKeyDown={commentEditAutocomplete.handleKeyDown}
                   />
+                  {commentEditAutocomplete.showDropdown && (
+                    <MentionSuggestions
+                      suggestions={commentEditAutocomplete.suggestions}
+                      activeIndex={commentEditAutocomplete.activeIndex}
+                      onSelect={commentEditAutocomplete.selectSuggestion}
+                    />
+                  )}
                   <div className="flex justify-end gap-1.5">
                     <button
                       onClick={onCancelEdit}
@@ -126,7 +144,6 @@ export function CommentItem({
               ) : (
                 <MentionsText
                   content={comment.content}
-                  users={users}
                   onViewProfile={onViewProfile}
                   className="text-text-secondary text-xs mt-0.5 leading-relaxed break-words"
                 />
@@ -218,7 +235,6 @@ export function CommentItem({
           depth={depth + 1}
           postId={postId}
           currentUser={currentUser}
-          users={users}
           readOnly={readOnly}
           editingCommentId={editingCommentId}
           editingCommentContent={editingCommentContent}

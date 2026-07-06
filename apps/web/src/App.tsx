@@ -40,7 +40,7 @@ export default function App() {
     const saved = localStorage.getItem('hin_user');
     return saved ? JSON.parse(saved) : null;
   });
-  const [users, setUsers] = useState<UserType[]>([]);
+  // Removed global users state
   const [posts, setPosts] = useState<import('@hin/types').Post[]>([]);
   const [feedNextCursor, setFeedNextCursor] = useState<number | string | null>(null);
   const [isLoadingMorePosts, setIsLoadingMorePosts] = useState(false);
@@ -58,7 +58,7 @@ export default function App() {
   const followedUserIdsRef = useRef<Set<number>>(new Set());
   const blockedUserIdsRef = useRef<Set<number>>(new Set());
   const mutedUserIdsRef = useRef<Set<number>>(new Set());
-  const usersRef = useRef<UserType[]>([]);
+  // Removed usersRef
   const feedLoadingRef = useRef(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('feed');
 
@@ -164,9 +164,7 @@ export default function App() {
     mutedUserIdsRef.current = mutedUserIds;
   }, [mutedUserIds]);
 
-  useEffect(() => {
-    usersRef.current = users;
-  }, [users]);
+  // Removed usersRef effect
 
   const addFollowRequest = useCallback((request: FollowRequest) => {
     setFollowRequests(prev => {
@@ -336,7 +334,6 @@ export default function App() {
       setCurrentUser(updatedUser);
       localStorage.setItem('hin_user', JSON.stringify(updatedUser));
       setProfileUser(prev => (prev?.id === currentUser.id ? { ...prev, isPrivate: settings.isPrivate } : prev));
-      setUsers(prev => prev.map(u => (u.id === currentUser.id ? { ...u, isPrivate: settings.isPrivate } : u)));
     }
   };
 
@@ -393,9 +390,30 @@ export default function App() {
     if (userId === currentUser?.id) fetchFollowRequests();
   };
 
+  const openProfileByUsername = async (username: string) => {
+    try {
+      const res = await fetch(`${API_URL}/api/users/username/${username}`, { headers: getHeaders() });
+      if (res.ok) {
+        const user = await res.json();
+        openProfile(user.id);
+      } else {
+        addToast(`User @${username} not found`, 'system', undefined, { skipPrefCheck: true });
+      }
+    } catch (e) {
+      console.error('Error opening profile by username:', e);
+    }
+  };
+
+  const handleViewProfile = (idOrUsername: number | string) => {
+    if (typeof idOrUsername === 'number') {
+      openProfile(idOrUsername);
+    } else {
+      openProfileByUsername(idOrUsername);
+    }
+  };
+
   const handleProfileSaved = (updated: UserType) => {
     setProfileUser(updated);
-    setUsers(prev => prev.map(u => (u.id === updated.id ? updated : u)));
     if (currentUser?.id === updated.id) {
       setCurrentUser(updated);
       localStorage.setItem('hin_user', JSON.stringify(updated));
@@ -410,15 +428,7 @@ export default function App() {
     setShowNotifications(false);
   };
 
-  const fetchUsers = async () => {
-    if (!token) return;
-    try {
-      const res = await fetch(`${API_URL}/api/users`, { headers: getHeaders() });
-      if (res.ok) setUsers(await res.json());
-    } catch (e) {
-      console.error('Error fetching users:', e);
-    }
-  };
+  // Removed fetchUsers
 
   const fetchPosts = async (opts?: { cursor?: number | string | null; append?: boolean; mode?: FeedMode }) => {
     const append = opts?.append ?? false;
@@ -621,7 +631,6 @@ export default function App() {
 
   useEffect(() => {
     if (token) {
-      fetchUsers();
       fetchPosts();
       fetchNotifications();
       fetchThreads();
@@ -631,7 +640,6 @@ export default function App() {
       fetchFollowRequests();
       fetchUserSettings();
     } else {
-      setUsers([]);
       setPosts([]);
       setFeedNextCursor(null);
       setNotifications([]);
@@ -808,11 +816,6 @@ export default function App() {
               if (notif.type === 'follow_accepted') {
                 const targetUserId = notif.senderId;
                 setFollowedUserIds(prev => new Set([...prev, targetUserId]));
-                setUsers(prev =>
-                  prev.map(u =>
-                    u.id === targetUserId ? { ...u, followStatus: 'following', canViewPosts: true } : u,
-                  ),
-                );
                 setProfileUser(prev =>
                   prev?.id === targetUserId
                     ? { ...prev, followStatus: 'following', canViewPosts: true }
@@ -830,11 +833,6 @@ export default function App() {
             case 'follow_approved': {
               const { targetUserId } = message.payload as { targetUserId: number };
               setFollowedUserIds(prev => new Set([...prev, targetUserId]));
-              setUsers(prev =>
-                prev.map(u =>
-                  u.id === targetUserId ? { ...u, followStatus: 'following', canViewPosts: true } : u,
-                ),
-              );
               setProfileUser(prev =>
                 prev?.id === targetUserId
                   ? { ...prev, followStatus: 'following', canViewPosts: true }
@@ -1474,13 +1472,20 @@ export default function App() {
     }
   };
 
-  const handleNotificationClick = (n: Notification) => {
+  const handleNotificationClick = async (n: Notification) => {
     handleMarkNotifRead(n.id);
     setShowNotifications(false);
     if (n.type === 'system') return;
     if (n.type === 'message') {
-      const sender = users.find(u => u.id === n.senderId);
-      if (sender) startChat(sender);
+      try {
+        const res = await fetch(`${API_URL}/api/users/${n.senderId}`, { headers: getHeaders() });
+        if (res.ok) {
+          const sender = await res.json();
+          startChat(sender);
+        }
+      } catch (e) {
+        console.error('Error fetching sender profile:', e);
+      }
     } else if (n.type === 'follow_request') {
       openProfile(currentUser!.id, { highlightFollowRequests: true });
     } else if (n.type === 'follow' || n.type === 'follow_accepted') {
@@ -1496,7 +1501,6 @@ export default function App() {
 
   const updateProfileFollowState = (userId: number, patch: Partial<UserType>) => {
     setProfileUser(prev => (prev?.id === userId ? { ...prev, ...patch } : prev));
-    setUsers(prev => prev.map(u => (u.id === userId ? { ...u, ...patch } : u)));
   };
 
   const handleFollow = async (userId: number) => {
@@ -1733,11 +1737,7 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  useEffect(() => {
-    if (currentUser && postViewId && activeTab === 'post') {
-      fetchUsers();
-    }
-  }, [currentUser?.id, postViewId, activeTab]);
+  // Removed auto-fetch users effect
 
   const handleSystemBroadcast = async (message: string, delivery: BroadcastDelivery) => {
     if (!currentUser || currentUser.role !== 'admin' || !token) {
@@ -1839,7 +1839,6 @@ export default function App() {
       if (res.ok) {
         addToast(`Account @${targetUsername} has been soft-deleted`, 'system', undefined, { skipPrefCheck: true });
         if (adminData) fetchAdminStats();
-        fetchUsers();
       }
     } catch (e) {
       console.error(e);
@@ -1917,7 +1916,6 @@ export default function App() {
             isLoading={postViewLoading}
             error={postViewError}
             currentUser={currentUser}
-            users={users}
             readOnly={!currentUser}
             highlightCommentId={highlightCommentId}
             commentsList={postViewId ? (postComments[postViewId] ?? []) : []}
@@ -1966,12 +1964,12 @@ export default function App() {
             onEditCommentContentChange={setEditingCommentContent}
             onReply={(pid, comment: CommentNode) => setReplyingTo(prev => ({ ...prev, [pid]: comment }))}
             onToggleCommentLike={handleToggleCommentLike}
-            onViewProfile={userId => {
+            onViewProfile={idOrUsername => {
               if (!currentUser) {
                 handleGuestSignIn();
                 return;
               }
-              openProfile(userId);
+              handleViewProfile(idOrUsername);
             }}
             onVotePoll={handleVotePoll}
             onRetractPollVote={handleRetractPollVote}
@@ -1983,7 +1981,6 @@ export default function App() {
         ) : currentUser && activeTab === 'feed' ? (
           <FeedView
             posts={posts}
-            users={users}
             currentUser={currentUser}
             showNewPostForm={showNewPostForm}
             newPostContent={newPostContent}
@@ -2002,10 +1999,6 @@ export default function App() {
             feedMode={feedMode}
             onFeedModeChange={handleFeedModeChange}
             onLoadMore={loadMorePosts}
-            onOpenCreatePost={() => {
-              setShowMessagesDropdown(false);
-              setShowNewPostForm(true);
-            }}
             onCloseCreatePost={() => setShowNewPostForm(false)}
             onNewPostContentChange={setNewPostContent}
             onCreatePost={handleCreatePost}
@@ -2022,7 +2015,7 @@ export default function App() {
             onCreateComment={handleCreateComment}
             onCommentTextChange={(postId, text) => setNewCommentText(prev => ({ ...prev, [postId]: text }))}
             onCancelReply={postId => setReplyingTo(prev => ({ ...prev, [postId]: null }))}
-            onViewProfile={openProfile}
+            onViewProfile={handleViewProfile}
             onDeleteComment={handleDeleteComment}
             onStartCommentEdit={(id, content) => {
               setEditingCommentId(id);
@@ -2054,7 +2047,6 @@ export default function App() {
             isSettingsOpen={isProfileSettingsOpen}
             highlightSettings={highlightFollowRequests}
             followBusy={followBusy}
-            users={users}
             expandedComments={expandedComments}
             postComments={postComments}
             newCommentText={newCommentText}
@@ -2107,7 +2099,7 @@ export default function App() {
             onEditCommentContentChange={setEditingCommentContent}
             onReply={(postId, comment: CommentNode) => setReplyingTo(prev => ({ ...prev, [postId]: comment }))}
             onToggleCommentLike={handleToggleCommentLike}
-            onViewProfile={openProfile}
+            onViewProfile={handleViewProfile}
             onVotePoll={handleVotePoll}
             onRetractPollVote={handleRetractPollVote}
             onClosePoll={handleClosePoll}
@@ -2174,7 +2166,7 @@ export default function App() {
             mode={followersModal}
             token={token}
             onClose={() => setFollowersModal(null)}
-            onViewProfile={openProfile}
+            onViewProfile={handleViewProfile}
           />
         )}
       </section>

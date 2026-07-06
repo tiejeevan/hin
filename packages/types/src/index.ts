@@ -102,6 +102,8 @@ export interface Post {
   id: number;
   userId: number;
   username: string;
+  authorAvatarUrl?: string | null;
+  authorRole?: string;
   type: PostType;
   content: string;
   mediaUrls: string[];
