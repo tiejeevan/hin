@@ -1,0 +1,1506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Platform Reviver — Architecture</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --surface-2: #243044;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --accent: #5b9fd4;
+      --accent-2: #7c6cf0;
+      --success: #3ecf8e;
+      --warn: #f0b429;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    header {
+      background: linear-gradient(135deg, #1a2a3a 0%, #1e1b3a 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 2.5rem 2rem 2rem;
+    }
+
+    header .badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: rgba(91, 159, 212, 0.12);
+      border: 1px solid rgba(91, 159, 212, 0.3);
+      border-radius: 999px;
+      padding: 0.25rem 0.75rem;
+      margin-bottom: 1rem;
+    }
+
+    header h1 {
+      font-size: clamp(1.75rem, 4vw, 2.5rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.75rem;
+    }
+
+    header p {
+      color: var(--muted);
+      max-width: 52rem;
+      font-size: 1.05rem;
+    }
+
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      padding: 1rem 2rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.85rem;
+      padding: 0.4rem 0.85rem;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      transition: color 0.15s, background 0.15s, border-color 0.15s;
+    }
+
+    nav a:hover {
+      color: var(--text);
+      background: var(--surface-2);
+      border-color: var(--border);
+    }
+
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    section {
+      margin-bottom: 3rem;
+      scroll-margin-top: 4rem;
+    }
+
+    section h2 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: var(--text);
+    }
+
+    section .desc {
+      color: var(--muted);
+      margin-bottom: 1.25rem;
+      max-width: 48rem;
+      font-size: 0.95rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .loops {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .loop-item {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+
+    .loop-item strong {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--accent);
+      margin-bottom: 0.35rem;
+    }
+
+    .loop-item span {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      overflow-x: auto;
+    }
+
+    .diagram .mermaid {
+      display: flex;
+      justify-content: center;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.6rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-top: 0.35rem;
+      flex-shrink: 0;
+    }
+
+    .dot-dev { background: var(--accent); }
+    .dot-admin { background: var(--accent-2); }
+    .dot-user { background: var(--success); }
+    .dot-sys { background: var(--warn); }
+
+    .principles {
+      list-style: none;
+      display: grid;
+      gap: 0.5rem;
+    }
+
+    .principles li {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    .principles li strong { color: var(--text); }
+
+    .goals-list {
+      list-style: none;
+      display: grid;
+      gap: 0.4rem;
+      counter-reset: goal;
+    }
+
+    .goals-list li {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6rem 0.85rem 0.6rem 2.5rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      position: relative;
+    }
+
+    .goals-list li::before {
+      counter-increment: goal;
+      content: counter(goal);
+      position: absolute;
+      left: 0.75rem;
+      top: 0.6rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--accent);
+      background: rgba(91, 159, 212, 0.15);
+      width: 1.25rem;
+      height: 1.25rem;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .goals-list li strong { color: var(--text); }
+
+    .goals-group {
+      margin-bottom: 1.25rem;
+    }
+
+    .goals-group h3 {
+      font-size: 0.9rem;
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 0.75rem;
+    }
+
+    .mini-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    .mini-table th, .mini-table td {
+      border: 1px solid var(--border);
+      padding: 0.5rem 0.75rem;
+      text-align: left;
+    }
+
+    .mini-table th {
+      background: var(--surface-2);
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .mini-table td { color: var(--muted); }
+
+    .phase-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1rem;
+      border-left: 3px solid var(--accent);
+    }
+
+    .phase-card.v2 { border-left-color: var(--accent-2); }
+    .phase-card.v3 { border-left-color: var(--success); }
+    .phase-card.v4 { border-left-color: var(--warn); }
+
+    .phase-card h3 {
+      font-size: 1.1rem;
+      margin-bottom: 0.25rem;
+      color: var(--text);
+    }
+
+    .phase-card .phase-tag {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+    }
+
+    .phase-card .phase-desc {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+
+    .phase-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+
+    .phase-item {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.5rem 0.65rem;
+      font-size: 0.75rem;
+    }
+
+    .phase-item strong {
+      display: block;
+      color: var(--text);
+      font-size: 0.7rem;
+      margin-bottom: 0.2rem;
+    }
+
+    .phase-item span { color: var(--muted); }
+
+    .exit-list {
+      list-style: none;
+      margin-top: 0.75rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .exit-list li {
+      padding: 0.25rem 0 0.25rem 1.25rem;
+      position: relative;
+    }
+
+    .exit-list li::before {
+      content: "☐";
+      position: absolute;
+      left: 0;
+      color: var(--accent);
+      font-size: 0.75rem;
+    }
+
+    .handoff {
+      margin-top: 1rem;
+      padding: 1rem 1.1rem;
+      background: rgba(91, 159, 212, 0.06);
+      border: 1px dashed rgba(91, 159, 212, 0.35);
+      border-radius: 8px;
+    }
+
+    .handoff-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+    }
+
+    .handoff-note {
+      font-size: 0.78rem;
+      color: var(--muted);
+      font-style: italic;
+      margin-bottom: 0.75rem;
+    }
+
+    .handoff-block {
+      margin-bottom: 0.85rem;
+    }
+
+    .handoff-block:last-child { margin-bottom: 0; }
+
+    .handoff-block h4 {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 0.35rem;
+    }
+
+    .handoff-block h4 em {
+      font-weight: 400;
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    .handoff-list {
+      list-style: none;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    .handoff-list li {
+      padding: 0.2rem 0 0.2rem 1.1rem;
+      position: relative;
+    }
+
+    .handoff-list li::before {
+      content: "☐";
+      position: absolute;
+      left: 0;
+      color: var(--accent);
+      font-size: 0.7rem;
+    }
+
+    .handoff-list.next li::before { content: "→"; color: var(--success); }
+
+    .handoff-template {
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.65rem 0.75rem;
+      white-space: pre-wrap;
+      line-height: 1.5;
+    }
+
+    .workflow-note {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.1rem;
+      margin-bottom: 1rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .workflow-note strong { color: var(--text); }
+
+    .starter-badge {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 0.9rem;
+    }
+
+    .starter-badge strong {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--text);
+      margin-bottom: 0.2rem;
+    }
+
+    .starter-badge span {
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    .starter-badge .phase-pill {
+      display: inline-block;
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--accent);
+      background: rgba(91, 159, 212, 0.12);
+      border-radius: 4px;
+      padding: 0.1rem 0.4rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .safety-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+
+    .safety-item {
+      font-size: 0.78rem;
+      color: var(--muted);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.5rem 0.65rem;
+    }
+
+    .safety-item strong {
+      display: block;
+      color: var(--success);
+      font-size: 0.72rem;
+      margin-bottom: 0.15rem;
+    }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    footer a:hover { text-decoration: underline; }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 0.75rem;
+    }
+
+    .status-item {
+      background: var(--surface-2);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      border: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+
+    .status-item .label { color: var(--muted); margin-bottom: 0.25rem; }
+    .status-item .value { font-weight: 600; }
+    .status-item .value.yes { color: var(--success); }
+    .status-item .value.no { color: #e07070; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="badge">HIN · Design Reference</div>
+    <h1>Platform Reviver</h1>
+    <p>
+      High-level architecture for badges, points, levels, and goals.
+      Keep the platform alive — always something to do, earn, and work toward.
+      This page will be enriched in future iterations.
+    </p>
+  </header>
+
+  <nav>
+    <a href="#loops">Engagement Loops</a>
+    <a href="#vision">Vision</a>
+    <a href="#ownership">Who Defines What</a>
+    <a href="#hub">Gamification Hub</a>
+    <a href="#data">Data Model</a>
+    <a href="#flow">Action Flow</a>
+    <a href="#stack">HIN Stack</a>
+    <a href="#metrics">Metric Types</a>
+    <a href="#starter">Starter Pack</a>
+    <a href="#plan">v1–v4 Plan</a>
+    <a href="#goals">Important Goals</a>
+    <a href="#toggle">Admin Toggle</a>
+    <a href="#events">Events & Wins</a>
+    <a href="#engine">Rule Engine</a>
+    <a href="#instant">Instant Delivery</a>
+    <a href="#security">Client Security</a>
+    <a href="#costs">Costs & Capacity</a>
+    <a href="#principles">Principles</a>
+  </nav>
+
+  <main>
+
+    <!-- Engagement Loops -->
+    <section id="loops">
+      <h2>Engagement Loops</h2>
+      <p class="desc">Why gamification matters — social platforms stay alive when users have recurring reasons to return.</p>
+      <div class="card">
+        <div class="loops">
+          <div class="loop-item"><strong>Daily loop</strong><span>Login streaks, daily goals → return tomorrow</span></div>
+          <div class="loop-item"><strong>Action loop</strong><span>Share, comment, follow → +points per action</span></div>
+          <div class="loop-item"><strong>Milestone loop</strong><span>Badges at 10, 50, 100 → long-term purpose</span></div>
+          <div class="loop-item"><strong>Status loop</strong><span>Levels on profile → social proof</span></div>
+          <div class="loop-item"><strong>Discovery loop</strong><span>Progress bars → "I'm almost there"</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- High-Level Vision -->
+    <section id="vision">
+      <h2>High-Level Vision</h2>
+      <p class="desc">Three actors — User, Admin, System — connected through one gamification pipeline.</p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+    subgraph USER["User experience"]
+        U1["Do actions\npost · share · comment · follow · login"]
+        U2["Earn points"]
+        U3["Level up"]
+        U4["Unlock badges"]
+        U5["See progress toward goals"]
+    end
+
+    subgraph ADMIN["Admin experience"]
+        A1["CRUD badges\nimage · name · description"]
+        A2["Set earning rules\nmetric + threshold"]
+        A3["Point values per action"]
+        A4["Level thresholds"]
+    end
+
+    subgraph SYSTEM["System — automatic"]
+        S1["Track actions"]
+        S2["Update stat counters"]
+        S3["Evaluate badge rules"]
+        S4["Award points and badges"]
+        S5["Notify user"]
+    end
+
+    U1 --> S1
+    S1 --> S2 --> S3 --> S4 --> S5
+    S4 --> U2 & U3 & U4 & U5
+    ADMIN --> S2 & S3
+        </pre>
+      </div>
+    </section>
+
+    <!-- Who Defines What -->
+    <section id="ownership">
+      <h2>Who Defines What</h2>
+      <p class="desc">Developers own the engine. Admins own the economy. The runtime connects both.</p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+    subgraph DEV["Developers — code"]
+        D1["Action catalog\ncomment_created · post_shared · login..."]
+        D2["Route hooks\nwhen actions fire"]
+        D3["Metric handlers\nunique count · streak logic"]
+        D4["Level formula"]
+    end
+
+    subgraph ADMIN["Admin — UI"]
+        B1["Badge image · name · description"]
+        B2["Rule: metric_key + threshold"]
+        B3["Points per action"]
+        B4["Level breakpoints"]
+    end
+
+    subgraph RUNTIME["Runtime — automatic"]
+        R1["User acts"] --> R2["Emit event"]
+        R2 --> R3["Update stats + points"]
+        R3 --> R4["Evaluate badges"]
+        R4 --> R5["Recalculate level"]
+        R5 --> R6["Notify"]
+    end
+
+    DEV --> RUNTIME
+    ADMIN --> RUNTIME
+        </pre>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><span class="legend-dot dot-dev"></span><span><strong>Developers</strong> — action types, metric logic, route hooks</span></div>
+        <div class="legend-item"><span class="legend-dot dot-admin"></span><span><strong>Admin</strong> — badge art, thresholds, point values, levels</span></div>
+        <div class="legend-item"><span class="legend-dot dot-sys"></span><span><strong>System</strong> — hub evaluates rules on every action</span></div>
+        <div class="legend-item"><span class="legend-dot dot-user"></span><span><strong>User</strong> — linked via <code>users.id</code>, never username</span></div>
+      </div>
+    </section>
+
+    <!-- Gamification Hub -->
+    <section id="hub">
+      <h2>Gamification Hub</h2>
+      <p class="desc">Single entry point. API routes stay thin — one call after each successful action.</p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+    subgraph TRIGGERS["API route triggers"]
+        T1["POST /login"]
+        T2["POST /share"]
+        T3["POST /follow"]
+        T4["POST /post"]
+        T5["POST /comment"]
+    end
+
+    subgraph HUB["Gamification Hub"]
+        H1["processUserAction\nuserId · action · metadata"]
+        H2["updateStats"]
+        H3["awardPoints"]
+        H4["evaluateBadges"]
+        H5["updateLevel"]
+    end
+
+    subgraph REGISTRY["Metric Registry"]
+        M1["unique_posts_shared"]
+        M2["unique_posts_commented"]
+        M3["follower_count"]
+        M4["login_streak"]
+    end
+
+    subgraph STORAGE["Database"]
+        DB1["user_stat_counters"]
+        DB2["user_gamification"]
+        DB3["user_badges"]
+        DB4["points_ledger"]
+    end
+
+    T1 & T2 & T3 & T4 & T5 --> H1
+    H1 --> H2 --> H3 --> H4 --> H5
+    H2 --> REGISTRY --> STORAGE
+    H3 & H4 & H5 --> STORAGE
+        </pre>
+      </div>
+    </section>
+
+    <!-- Data Model -->
+    <section id="data">
+      <h2>Data Model</h2>
+      <p class="desc">Everything links to <code>users.id</code>. Flexible <code>metric_key</code> counters — no new column per goal.</p>
+      <div class="diagram">
+        <pre class="mermaid">
+erDiagram
+    users ||--o| user_gamification : has
+    users ||--o{ user_stat_counters : tracks
+    users ||--o{ user_badges : earns
+    users ||--o{ points_ledger : history
+    badges ||--o{ badge_rules : defines
+    badges ||--o{ user_badges : grants
+
+    users {
+        int id PK
+        string username
+    }
+
+    user_gamification {
+        int user_id PK_FK
+        int total_points
+        int level
+    }
+
+    user_stat_counters {
+        int user_id FK
+        string metric_key
+        int value
+    }
+
+    badges {
+        int id PK
+        string name
+        string image_url
+        bool is_active
+    }
+
+    badge_rules {
+        int badge_id FK
+        string metric_key
+        string operator
+        int threshold
+    }
+
+    user_badges {
+        int user_id FK
+        int badge_id FK
+        datetime earned_at
+    }
+
+    points_ledger {
+        int user_id FK
+        string action_type
+        int delta
+    }
+        </pre>
+      </div>
+    </section>
+
+    <!-- Action Flow -->
+    <section id="flow">
+      <h2>End-to-End Action Flow</h2>
+      <p class="desc">Example: user shares a post. Stats update, points awarded, badges evaluated, level recalculated.</p>
+      <div class="diagram">
+        <pre class="mermaid">
+sequenceDiagram
+    participant U as User
+    participant API as API Route
+    participant Hub as Gamification Hub
+    participant Stats as Stat Counters
+    participant Rules as Rule Engine
+    participant DB as Database
+    participant N as Notifications
+
+    U->>API: Share post
+    API->>API: Insert post_shares
+    API->>Hub: processAction(userId, post_shared, postId)
+    Hub->>Stats: unique_posts_shared += 1 if new post
+    Hub->>Hub: awardPoints(+5)
+    Hub->>Rules: evaluate all active badges
+    Rules->>DB: counter >= threshold?
+    alt threshold met
+        Rules->>DB: insert user_badges
+        Rules->>N: badge earned notification
+    end
+    Hub->>Hub: recalculate level
+    Hub->>API: pointsEarned, badgesEarned, progress
+    API->>U: Response
+        </pre>
+      </div>
+    </section>
+
+    <!-- HIN Stack -->
+    <section id="stack">
+      <h2>HIN Monorepo Placement</h2>
+      <p class="desc">Where Platform Reviver lives inside the existing codebase.</p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+    subgraph WEB["apps/web"]
+        W1["Profile — LevelBadge · BadgeGrid"]
+        W2["GoalProgress bars"]
+        W3["AdminDashboard — AdminBadges section"]
+    end
+
+    subgraph API["apps/api"]
+        A1["lib/gamification/ — hub · registry · evaluator"]
+        A2["routes/admin/badges"]
+        A3["routes/me/gamification"]
+        A4["hooks in posts · comments · follows · auth"]
+    end
+
+    subgraph PKG["packages"]
+        P1["db — schema + migrations"]
+        P2["types — Zod schemas + shared types"]
+    end
+
+    subgraph CF["Cloudflare"]
+        C1["D1 — SQLite"]
+        C2["R2 — badge images"]
+    end
+
+    WEB <-->|REST| API
+    API --> PKG
+    API --> CF
+        </pre>
+      </div>
+      <div class="card" style="margin-top: 1rem;">
+        <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text);">Current HIN status</h3>
+        <div class="status-grid">
+          <div class="status-item"><div class="label">users.id identity</div><div class="value yes">Ready</div></div>
+          <div class="status-item"><div class="label">Admin panel</div><div class="value yes">Ready</div></div>
+          <div class="status-item"><div class="label">R2 image upload</div><div class="value yes">Ready</div></div>
+          <div class="status-item"><div class="label">Shares · follows · comments</div><div class="value yes">Ready</div></div>
+          <div class="status-item"><div class="label">Gamification tables</div><div class="value no">Not yet</div></div>
+          <div class="status-item"><div class="label">Login streak tracking</div><div class="value no">Not yet</div></div>
+          <div class="status-item"><div class="label">Gamification hub</div><div class="value no">Not yet</div></div>
+          <div class="status-item"><div class="label">Badge notifications</div><div class="value yes">Infra ready</div></div>
+        </div>
+      </div>
+    </section>
+
+    </section>
+
+    <!-- Metric Types -->
+    <section id="metrics">
+      <h2>Metric Types &amp; Naming</h2>
+      <p class="desc">Developers register metrics by type. Admin picks metric + threshold and owns badge name, icon, description.</p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+    subgraph TYPES["Metric types"]
+        T1["Instant\n3 pics in one post"]
+        T2["Cumulative\n10 unique shares"]
+        T3["Streak\n7-day login"]
+        T4["Duration\n100 min in Hin"]
+    end
+        </pre>
+      </div>
+      <div class="card" style="margin-top: 1rem;">
+        <table class="mini-table">
+          <thead>
+            <tr><th>Example</th><th>Type</th><th>Metric key (dev)</th><th>Admin rule</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>3 pics in single post</td><td>Instant</td><td><code>posts_with_3_images</code></td><td>≥ 1</td></tr>
+            <tr><td>10 unique shares</td><td>Cumulative</td><td><code>unique_posts_shared</code></td><td>≥ 10</td></tr>
+            <tr><td>7-day login streak</td><td>Streak</td><td><code>login_streak</code></td><td>≥ 7</td></tr>
+            <tr><td>100 minutes in Hin</td><td>Duration</td><td><code>total_session_minutes</code></td><td>≥ 100</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card" style="margin-top: 0.75rem;">
+        <div class="two-col">
+          <div>
+            <h3 style="font-size: 0.85rem; color: var(--accent); margin-bottom: 0.5rem;">Developer sets (internal)</h3>
+            <ul class="principles" style="gap: 0.35rem;">
+              <li style="padding: 0.5rem 0.75rem; font-size: 0.8rem;"><code>metric_key</code> · <code>action_type</code></li>
+              <li style="padding: 0.5rem 0.75rem; font-size: 0.8rem;">Condition logic (e.g. mediaCount ≥ 3)</li>
+              <li style="padding: 0.45rem 0.7rem; font-size: 0.78rem;">Catalog label in admin dropdown</li>
+              <li style="padding: 0.45rem 0.7rem; font-size: 0.78rem;">Friendly default — admin can rebrand badge copy</li>
+            </ul>
+          </div>
+          <div>
+            <h3 style="font-size: 0.85rem; color: var(--accent-2); margin-bottom: 0.5rem;">Admin sets (display)</h3>
+            <ul class="principles" style="gap: 0.35rem;">
+              <li style="padding: 0.5rem 0.75rem; font-size: 0.8rem;">Badge name · description · icon (R2)</li>
+              <li style="padding: 0.5rem 0.75rem; font-size: 0.8rem;">Threshold (≥ 1, ≥ 10, ≥ 7)</li>
+              <li style="padding: 0.5rem 0.75rem; font-size: 0.8rem;">Point values · level breakpoints</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Starter Pack & Actions -->
+    <section id="starter">
+      <h2>Starter Pack, Actions &amp; Naming</h2>
+      <p class="desc">Launch badges by phase, programmed actions (stable code), friendly default names admin can rebrand later.</p>
+
+      <div class="card">
+        <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text);">Starter badges (seed when phase ships)</h3>
+        <div class="loops" style="margin-bottom: 0;">
+          <div class="starter-badge">
+            <span class="phase-pill">v2</span>
+            <strong>Getting Started</strong>
+            <span>10 posts · <code>total_posts</code> ≥ 10</span>
+          </div>
+          <div class="starter-badge">
+            <span class="phase-pill">v2</span>
+            <strong>Rising Voice</strong>
+            <span>10 followers · <code>follower_count</code> ≥ 10</span>
+          </div>
+          <div class="starter-badge">
+            <span class="phase-pill">v2</span>
+            <strong>Crowd Favorite</strong>
+            <span>10 likes on one post · <code>max_likes_single_post</code> ≥ 10</span>
+          </div>
+          <div class="starter-badge">
+            <span class="phase-pill">v3</span>
+            <strong>Week Regular</strong>
+            <span>7-day streak · <code>login_streak</code> ≥ 7</span>
+          </div>
+          <div class="starter-badge">
+            <span class="phase-pill">v4</span>
+            <strong>Warming Up</strong>
+            <span>5 min active · <code>total_session_minutes</code> ≥ 5</span>
+          </div>
+        </div>
+        <p style="font-size: 0.78rem; color: var(--muted); margin-top: 0.75rem;">Seed via migration or admin script — not hardcoded React. Don't seed badges before their metric is wired.</p>
+      </div>
+
+      <div class="card" style="margin-top: 0.75rem;">
+        <h3 style="font-size: 0.95rem; margin-bottom: 0.5rem; color: var(--text);">Streak ≠ duration</h3>
+        <table class="mini-table">
+          <thead>
+            <tr><th>Idea</th><th>Measures</th><th>Action</th><th>Metric</th><th>Phase</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>7-day active streak</td><td>Calendar days app opened</td><td><code>session_active</code></td><td><code>login_streak</code></td><td>v3</td></tr>
+            <tr><td>5 minutes active</td><td>Time on site (tab active)</td><td><code>session_tick</code></td><td><code>total_session_minutes</code></td><td>v4</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card" style="margin-top: 0.75rem;">
+        <h3 style="font-size: 0.95rem; margin-bottom: 0.5rem; color: var(--text);">Programmed actions (developer emits from routes)</h3>
+        <table class="mini-table">
+          <thead>
+            <tr><th>Event</th><th><code>action_type</code></th><th><code>metric_key</code></th><th>Default label</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Publish post</td><td><code>post_created</code></td><td><code>total_posts</code></td><td>Publish a post</td></tr>
+            <tr><td>Gain follower</td><td><code>user_followed</code></td><td><code>follower_count</code></td><td>Gain a follower</td></tr>
+            <tr><td>Open app (bootstrap)</td><td><code>session_active</code></td><td><code>login_streak</code></td><td>Daily visit</td></tr>
+            <tr><td>Tab heartbeat</td><td><code>session_tick</code></td><td><code>total_session_minutes</code></td><td>Time on Hin</td></tr>
+            <tr><td>Like on user's post</td><td><code>post_liked</code></td><td><code>max_likes_single_post</code></td><td>Likes on your post</td></tr>
+          </tbody>
+        </table>
+        <p style="font-size: 0.78rem; color: var(--muted); margin-top: 0.65rem;">Paired decrements: <code>post_deleted</code>, <code>user_unfollowed</code>, <code>post_unliked</code>. Admin cannot invent action types from UI.</p>
+      </div>
+
+      <div class="card" style="margin-top: 0.75rem;">
+        <h3 style="font-size: 0.95rem; margin-bottom: 0.5rem; color: var(--text);">Two names: stable code + nice defaults</h3>
+        <div class="two-col">
+          <div>
+            <h4 style="font-size: 0.8rem; color: var(--accent); margin-bottom: 0.4rem;">Developer (don't rename)</h4>
+            <ul class="principles" style="gap: 0.35rem;">
+              <li style="padding: 0.45rem 0.7rem; font-size: 0.78rem;"><code>action_type</code> · <code>metric_key</code></li>
+              <li style="padding: 0.45rem 0.7rem; font-size: 0.78rem;">Default catalog label</li>
+              <li style="padding: 0.45rem 0.7rem; font-size: 0.78rem;">Route hook: <code>processUserAction()</code></li>
+            </ul>
+          </div>
+          <div>
+            <h4 style="font-size: 0.8rem; color: var(--accent-2); margin-bottom: 0.4rem;">Admin (can change anytime)</h4>
+            <ul class="principles" style="gap: 0.35rem;">
+              <li style="padding: 0.45rem 0.7rem; font-size: 0.78rem;">Badge name · description · icon</li>
+              <li style="padding: 0.45rem 0.7rem; font-size: 0.78rem;">Threshold (10 → 25, etc.)</li>
+              <li style="padding: 0.45rem 0.7rem; font-size: 0.78rem;">Users see badge name + progress only</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 0.75rem;">
+        <h3 style="font-size: 0.95rem; margin-bottom: 0.5rem; color: var(--text);">Existing app safety</h3>
+        <p class="desc" style="margin-bottom: 0.5rem;">Gamification is additive and off by default — social features unchanged until admin enables.</p>
+        <div class="safety-grid">
+          <div class="safety-item"><strong>Flag OFF</strong>Hub no-ops; zero gamification D1 writes</div>
+          <div class="safety-item"><strong>Hook after write</strong>Post/like/follow succeeds first</div>
+          <div class="safety-item"><strong>New tables only</strong>No schema changes to posts/comments</div>
+          <div class="safety-item"><strong>Sequential phases</strong>v1→v2→v3→v4; agent handoff each phase</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- v1-v4 Implementation Plan -->
+    <section id="plan">
+      <h2>Implementation Plan (v1 → v4)</h2>
+      <p class="desc">Four shippable phases across D1, API, web, R2, and RealtimeDO. Same hub — no rewrites.</p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+    V1["v1 Foundation\nFlag · hub · schema"]
+    V2["v2 Core rewards\nBadges · points · admin"]
+    V3["v3 Engagement\nStreaks · events · WS"]
+    V4["v4 Scale\nDuration · abuse · ops"]
+
+    V1 --> V2 --> V3 --> V4
+        </pre>
+      </div>
+
+      <div class="workflow-note">
+        <strong>Agent workflow:</strong> Implement v1 → v2 → v3 → v4 <strong>sequentially</strong> (one phase per PR). After each phase, fill in that phase's <strong>Agent Handoff</strong> — what's done, what to verify, next steps. Do not start the next phase until verification passes.
+      </div>
+
+      <div class="phase-card v1" style="margin-top: 0;">
+        <div class="phase-tag">v1 — Foundation</div>
+        <h3>Hub off by default</h3>
+        <p class="phase-desc">Pipeline skeleton. Zero user UI. Zero D1 cost when OFF.</p>
+        <div class="phase-grid">
+          <div class="phase-item"><strong>DB</strong><span>user_gamification, counters, badges, rules, level_config, flag</span></div>
+          <div class="phase-item"><strong>API</strong><span>lib/gamification hub, registry, evaluator</span></div>
+          <div class="phase-item"><strong>Web</strong><span>None (admin placeholder OK)</span></div>
+          <div class="phase-item"><strong>R2</strong><span>—</span></div>
+          <div class="phase-item"><strong>DO</strong><span>—</span></div>
+        </div>
+        <ul class="exit-list">
+          <li>Migration on local D1</li>
+          <li>Flag OFF → hub no-op, zero gamification writes</li>
+          <li>Metric catalog API for admin</li>
+        </ul>
+        <div class="handoff">
+          <div class="handoff-title">v1 Agent Handoff</div>
+          <p class="handoff-note">Agent: fill in when v1 is complete. Next agent reads this before starting v2.</p>
+          <div class="handoff-block">
+            <h4>What's done <em>(agent fills in)</em></h4>
+            <pre class="handoff-template">Migration: packages/db/migrations/________.sql
+Hub: apps/api/src/lib/gamification/{hub,registry,evaluator,counters,settings}.ts
+Admin routes: /api/admin/gamification/...
+gamification_enabled default: false</pre>
+          </div>
+          <div class="handoff-block">
+            <h4>What to verify</h4>
+            <ul class="handoff-list">
+              <li>Migration applies; existing app (login, feed, post) unchanged</li>
+              <li>Flag OFF → processUserAction zero D1 writes</li>
+              <li>Metrics catalog API returns JSON</li>
+              <li>Composite PK upsert + transaction rollback tests pass</li>
+            </ul>
+          </div>
+          <div class="handoff-block">
+            <h4>Next steps → v2</h4>
+            <ul class="handoff-list next">
+              <li>Add user_badges, points_ledger; seed level_config</li>
+              <li>Implement 4 metric handlers + route hooks</li>
+              <li>Admin CRUD, profile UI, badge_award / level_up notifications</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase-card v2">
+        <div class="phase-tag">v2 — Core rewards</div>
+        <h3>Points, levels, badges, admin CRUD</h3>
+        <p class="phase-desc">Admin turns ON. Users earn on real actions. Badge images in R2.</p>
+        <div class="phase-grid">
+          <div class="phase-item"><strong>DB</strong><span>user_badges, points_ledger</span></div>
+          <div class="phase-item"><strong>API</strong><span>4 metrics, hooks, admin CRUD, g in bootstrap</span></div>
+          <div class="phase-item"><strong>Web</strong><span>AdminGamification, BadgeGrid, LevelBadge</span></div>
+          <div class="phase-item"><strong>R2</strong><span>badge upload type</span></div>
+          <div class="phase-item"><strong>DO</strong><span>badge → broadcast-notification</span></div>
+        </div>
+        <p style="font-size: 0.8rem; color: var(--muted); margin-top: 0.75rem;"><strong style="color: var(--text);">v2 metrics:</strong> total_posts · follower_count · max_likes_single_post · unique_posts_shared</p>
+        <p style="font-size: 0.8rem; color: var(--muted); margin-top: 0.35rem;"><strong style="color: var(--text);">v2 seed badges:</strong> Getting Started · Rising Voice · Crowd Favorite</p>
+        <ul class="exit-list">
+          <li>Admin creates badge without deploy</li>
+          <li>3-image post + 100 unique shares award badges</li>
+          <li>Toggle OFF freezes earning</li>
+        </ul>
+        <div class="handoff">
+          <div class="handoff-title">v2 Agent Handoff</div>
+          <p class="handoff-note">Agent: fill in when v2 is complete. Next agent reads this before starting v3.</p>
+          <div class="handoff-block">
+            <h4>What's done <em>(agent fills in)</em></h4>
+            <pre class="handoff-template">Route hooks: posts, follows (+ decrements)
+Notification types: badge_award, level_up
+Frontend: AdminGamification, BadgeGrid, LevelBadge
+Bootstrap g block: yes / no</pre>
+          </div>
+          <div class="handoff-block">
+            <h4>What to verify</h4>
+            <ul class="handoff-list">
+              <li>Flag OFF → no earning; existing social actions unchanged</li>
+              <li>Flag ON → badge + points on share/follow/post</li>
+              <li>Decrement on soft-delete / unfollow</li>
+              <li>badge_award / level_up notifications; no rule leakage in API</li>
+            </ul>
+          </div>
+          <div class="handoff-block">
+            <h4>Next steps → v3</h4>
+            <ul class="handoff-list next">
+              <li>user_streaks + events tables</li>
+              <li>session_active on bootstrap (not POST /login)</li>
+              <li>Comment hooks, event cache, WS toasts</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase-card v3">
+        <div class="phase-tag">v3 — Engagement</div>
+        <h3>Streaks, events, instant delivery</h3>
+        <p class="phase-desc">Login streaks, time-boxed competitions, WebSocket toasts — no refresh.</p>
+        <div class="phase-grid">
+          <div class="phase-item"><strong>DB</strong><span>user_streaks, events, participants, wins</span></div>
+          <div class="phase-item"><strong>API</strong><span>bootstrap streak, events CRUD, leaderboard</span></div>
+          <div class="phase-item"><strong>Web</strong><span>GoalProgress, Events, GamificationToast</span></div>
+          <div class="phase-item"><strong>R2</strong><span>event banner images</span></div>
+          <div class="phase-item"><strong>DO</strong><span>gamification_reward / system_toast</span></div>
+        </div>
+        <p style="font-size: 0.8rem; color: var(--muted); margin-top: 0.75rem;"><strong style="color: var(--text);">v3 seed badge:</strong> Week Regular (login_streak ≥ 7)</p>
+        <ul class="exit-list">
+          <li>7-day streak badge via bootstrap</li>
+          <li>Admin event → top N win exclusive badge</li>
+          <li>Instant progress + toast via API + WS</li>
+        </ul>
+        <div class="handoff">
+          <div class="handoff-title">v3 Agent Handoff</div>
+          <p class="handoff-note">Agent: fill in when v3 is complete. Next agent reads this before starting v4.</p>
+          <div class="handoff-block">
+            <h4>What's done <em>(agent fills in)</em></h4>
+            <pre class="handoff-template">Streak: GET /api/me/bootstrap → session_active
+Comments: comment_created / comment_deleted
+Events cache: 5-min TTL + admin invalidation
+WS: gamification_reward toast handler</pre>
+          </div>
+          <div class="handoff-block">
+            <h4>What to verify</h4>
+            <ul class="handoff-list">
+              <li>Streak increments on bootstrap; same-day idempotent</li>
+              <li>Comment progress + decrement on soft-delete</li>
+              <li>Event join, leaderboard, winners on end</li>
+              <li>v2 regression checks still pass</li>
+            </ul>
+          </div>
+          <div class="handoff-block">
+            <h4>Next steps → v4</h4>
+            <ul class="handoff-list next">
+              <li>session_tick heartbeat + total_session_minutes</li>
+              <li>Anti-abuse caps, admin user lookup, ledger archival</li>
+              <li>E2E tests + ~100 concurrent load test</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="phase-card v4">
+        <div class="phase-tag">v4 — Scale &amp; polish</div>
+        <h3>Duration, anti-abuse, operations</h3>
+        <p class="phase-desc">Session time, farming prevention, admin user lookup, ledger archival.</p>
+        <div class="phase-grid">
+          <div class="phase-item"><strong>DB</strong><span>ledger archival, session indexes</span></div>
+          <div class="phase-item"><strong>API</strong><span>session_tick, caps, admin user stats</span></div>
+          <div class="phase-item"><strong>Web</strong><span>AdminUserGamification, quests optional</span></div>
+          <div class="phase-item"><strong>R2</strong><span>event banners</span></div>
+          <div class="phase-item"><strong>DO</strong><span>hibernation optimize, batch notify</span></div>
+        </div>
+        <p style="font-size: 0.8rem; color: var(--muted); margin-top: 0.75rem;"><strong style="color: var(--text);">v4 seed badge:</strong> Warming Up (total_session_minutes ≥ 5)</p>
+        <ul class="exit-list">
+          <li>100 minutes in Hin badge via heartbeat</li>
+          <li>Daily point cap + rate limits</li>
+          <li>E2E tests · 100 concurrent load OK</li>
+        </ul>
+        <div class="handoff">
+          <div class="handoff-title">v4 Agent Handoff</div>
+          <p class="handoff-note">Agent: fill in when v4 is complete. Core rollout done.</p>
+          <div class="handoff-block">
+            <h4>What's done <em>(agent fills in)</em></h4>
+            <pre class="handoff-template">Session tick: POST /api/me/session-tick
+Anti-abuse: daily cap, rate limits
+Ledger archival + admin user lookup
+E2E: e2e/________.spec.ts
+Load test: _____ users, _____ D1 writes/day</pre>
+          </div>
+          <div class="handoff-block">
+            <h4>What to verify</h4>
+            <ul class="handoff-list">
+              <li>Session minutes + daily cap enforced</li>
+              <li>Farming blocked; admin manual award works</li>
+              <li>Ledger archival; E2E green; load test OK</li>
+            </ul>
+          </div>
+          <div class="handoff-block">
+            <h4>Next steps → after v4</h4>
+            <ul class="handoff-list next">
+              <li>Monitor D1/Worker usage; enable in production when ready</li>
+              <li>New goals: registry entry + hook + admin badge (no hub rewrite)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 0.5rem;">
+        <table class="mini-table">
+          <thead>
+            <tr><th>Phase</th><th>DB</th><th>Backend</th><th>Frontend</th><th>R2</th><th>DO</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>v1</strong></td><td>Core tables</td><td>Hub OFF</td><td>—</td><td>—</td><td>—</td></tr>
+            <tr><td><strong>v2</strong></td><td>user_badges</td><td>4 metrics, admin</td><td>Profile + admin</td><td>Badges</td><td>Notifications</td></tr>
+            <tr><td><strong>v3</strong></td><td>Events, streaks</td><td>Events engine</td><td>Toasts, events</td><td>Banners</td><td>WS toasts</td></tr>
+            <tr><td><strong>v4</strong></td><td>Archival</td><td>Heartbeat, abuse</td><td>Support UI</td><td>Banners</td><td>Optimize</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Important Goals -->
+    <section id="goals">
+      <h2>Important Goals (Master Checklist)</h2>
+      <p class="desc">43 point-by-point targets — product, architecture, security, cost, events, and instant delivery.</p>
+
+      <div class="card">
+        <div class="goals-group">
+          <h3>Product</h3>
+          <ol class="goals-list">
+            <li>Keep platform alive — always something to do beyond post and chat.</li>
+            <li>Admin <strong>ON/OFF toggle</strong> — when OFF, earning frozen; progress kept.</li>
+            <li>When ON: points, levels, badges, event wins in real time.</li>
+            <li>Admin configures badges, points, levels, events dynamically.</li>
+            <li>Developers own action catalog; admin wires rewards to metrics.</li>
+            <li>Link everything to <strong>users.id</strong> only.</li>
+            <li><strong>Instant rewards</strong> — no page refresh.</li>
+            <li>Rules and internals stay server-side.</li>
+          </ol>
+        </div>
+        <div class="goals-group">
+          <h3>Architecture</h3>
+          <ol class="goals-list" style="counter-reset: goal 8">
+            <li>One hub — <code>processUserAction()</code> only entry point.</li>
+            <li><strong>Rule engine</strong> — generic DB evaluator, not per-badge if statements.</li>
+            <li>Metric registry — <code>metric_key</code> handlers, not column per badge.</li>
+            <li>Three layers: points/levels, badges, events/wins.</li>
+            <li>Feature flag — OFF = zero gamification D1 cost.</li>
+            <li>Evaluate on write, not read.</li>
+            <li>Cached counters — increment, don't COUNT(*).</li>
+            <li>Generic UI components — data-driven.</li>
+            <li>Passive rules — follower count on followed user.</li>
+            <li>Idempotent awards — unique (user_id, badge_id).</li>
+          </ol>
+        </div>
+        <div class="goals-group">
+          <h3>Security & Client Exposure</h3>
+          <ol class="goals-list" style="counter-reset: goal 18">
+            <li>Server authoritative — client never awards.</li>
+            <li>No public rules API — metric keys never to users.</li>
+            <li>Minimal public DTO — level, badges, goal progress only.</li>
+            <li>Piggyback <code>g</code> block on normal route responses.</li>
+            <li>Admin gamification CRUD — admin role only.</li>
+            <li>Don't rely on hiding Network tab — minimize payload instead.</li>
+          </ol>
+        </div>
+        <div class="goals-group">
+          <h3>Cost, Events & Delivery</h3>
+          <ol class="goals-list" style="counter-reset: goal 24">
+            <li>Free tier: ~100 concurrent OK; 1K accounts with low DAU OK.</li>
+            <li>Upgrade at ~70K+ requests or D1 writes/day → Paid $5/mo.</li>
+            <li>R2 badges negligible; plan ledger archival.</li>
+            <li>Anti-abuse — rate limits, unique counts, daily caps.</li>
+            <li>Milestone toasts only — not every +1 point.</li>
+            <li>Time-boxed events — leaderboard, first-to-N, raffle.</li>
+            <li>Evaluate active events only.</li>
+            <li>API response updates UI; WebSocket for toasts + bell.</li>
+            <li>Reuse RealtimeDO — no new realtime infra.</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- Admin Toggle -->
+    <section id="toggle">
+      <h2>Admin Master Toggle</h2>
+      <p class="desc"><code>gamification_enabled</code> in system_settings — OFF means hub no-op, zero extra D1.</p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+    API["API route"] --> HUB["processUserAction()"]
+    HUB --> CHECK{"gamification_enabled?"}
+    CHECK -->|OFF| SKIP["Return immediately\n0 gamification ops"]
+    CHECK -->|ON| RUN["stats → points → badges → levels → events"]
+        </pre>
+      </div>
+    </section>
+
+    <!-- Events -->
+    <section id="events">
+      <h2>Events & Wins</h2>
+      <p class="desc">Time-boxed competitions on top of permanent badges and points.</p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+    ACTION["User action"] --> PTS["Points · Levels"]
+    ACTION --> BADGE["Permanent badges"]
+    ACTION --> EVENT["Active events"]
+    EVENT --> WIN["Leaderboard · First-to-N · Raffle"]
+    WIN --> PRIZE["Exclusive badge · bonus points"]
+        </pre>
+      </div>
+      <div class="card" style="margin-top: 1rem;">
+        <table class="mini-table">
+          <thead><tr><th>Win type</th><th>How it works</th></tr></thead>
+          <tbody>
+            <tr><td>Leaderboard</td><td>Top N by metric at event end</td></tr>
+            <tr><td>First to N</td><td>First X users hit threshold</td></tr>
+            <tr><td>Threshold</td><td>Everyone who hits goal during window</td></tr>
+            <tr><td>Raffle</td><td>Random draw from participants</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Rule Engine -->
+    <section id="engine">
+      <h2>Rule Engine</h2>
+      <p class="desc">Generic server evaluator — not AI, not admin SQL. Written once; admin adds rules in DB.</p>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+    STATS["user_stat_counters"] --> ENG["Rule engine"]
+    RULES["badge_rules · event_rules"] --> ENG
+    ENG --> AWARD["Award badge · points · win"]
+    ENG --> NOTIFY["Notification + WebSocket"]
+        </pre>
+      </div>
+      <div class="card" style="margin-top: 1rem;">
+        <div class="two-col">
+          <div>
+            <strong style="color: var(--text); font-size: 0.9rem;">Without engine</strong>
+            <p style="color: var(--muted); font-size: 0.85rem; margin-top: 0.35rem;">if (shares >= 100) in every route → deploy per badge</p>
+          </div>
+          <div>
+            <strong style="color: var(--text); font-size: 0.9rem;">With engine</strong>
+            <p style="color: var(--muted); font-size: 0.85rem; margin-top: 0.35rem;">One loop over DB rules → admin creates badges in UI</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Instant Delivery -->
+    <section id="instant">
+      <h2>Instant Delivery (No Refresh)</h2>
+      <p class="desc">Path 1: API response updates React state. Path 2: WebSocket toast + notification bell.</p>
+      <div class="diagram">
+        <pre class="mermaid">
+sequenceDiagram
+    participant U as User
+    participant API as API
+    participant Hub as Hub
+    participant WS as WebSocket
+
+    U->>API: Action
+    API->>Hub: evaluate
+    API->>U: Response with g payload
+    Note over U: Instant UI update
+    Hub->>WS: badge or level-up toast
+    WS->>U: Bell + toast
+        </pre>
+      </div>
+    </section>
+
+    <!-- Client Security -->
+    <section id="security">
+      <h2>Client Exposure & Security</h2>
+      <p class="desc">Cannot hide UI outcomes from Network tab. Hide implementation — rules, metrics, thresholds stay server-only.</p>
+      <div class="card">
+        <div class="two-col">
+          <div>
+            <h3 style="font-size: 0.85rem; color: #e07070; margin-bottom: 0.5rem;">Server only</h3>
+            <ul class="principles" style="gap: 0.35rem;">
+              <li style="padding: 0.5rem 0.75rem; font-size: 0.8rem;">badge_rules, metric_key, action types</li>
+              <li style="padding: 0.5rem 0.75rem; font-size: 0.8rem;">Thresholds, rule engine logic</li>
+              <li style="padding: 0.5rem 0.75rem; font-size: 0.8rem;">Admin CRUD payloads</li>
+            </ul>
+          </div>
+          <div>
+            <h3 style="font-size: 0.85rem; color: var(--success); margin-bottom: 0.5rem;">Client may receive</h3>
+            <ul class="principles" style="gap: 0.35rem;">
+              <li style="padding: 0.5rem 0.75rem; font-size: 0.8rem;">level, points, badge name + image</li>
+              <li style="padding: 0.5rem 0.75rem; font-size: 0.8rem;">goal label + progress</li>
+              <li style="padding: 0.5rem 0.75rem; font-size: 0.8rem;">pointsEarned this action only</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top: 0.75rem;">
+        <table class="mini-table">
+          <thead><tr><th>Looks hidden in Network</th><th>Actual cause</th></tr></thead>
+          <tbody>
+            <tr><td>No XHR data</td><td>SSR/RSC — data in Document</td></tr>
+            <tr><td>Empty Preview</td><td>Binary/protobuf — still in Response</td></tr>
+            <tr><td>No JSON</td><td>WebSocket — check WS tab</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Costs -->
+    <section id="costs">
+      <h2>Cost & Cloudflare Capacity</h2>
+      <p class="desc">Design cost-aware from day one. Gamification OFF = zero extra D1.</p>
+      <div class="card">
+        <table class="mini-table">
+          <thead><tr><th>Scenario</th><th>Free tier?</th></tr></thead>
+          <tbody>
+            <tr><td>~100 users online at once</td><td style="color: var(--success);">Yes — comfortable</td></tr>
+            <tr><td>1,000 accounts (~10–20% DAU)</td><td style="color: var(--success);">Yes</td></tr>
+            <tr><td>1,000 daily active users</td><td style="color: var(--warn);">Borderline — monitor</td></tr>
+            <tr><td>Gamification OFF</td><td style="color: var(--success);">Zero extra gamification cost</td></tr>
+            <tr><td>Growing past ~70K req/day</td><td>Workers Paid $5/mo</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="diagram" style="margin-top: 1rem;">
+        <pre class="mermaid">
+flowchart LR
+    subgraph CHEAP["Cost wins"]
+        C1["Flag OFF = no-op"]
+        C2["Counters not COUNT"]
+        C3["Evaluate on write"]
+        C4["Active events only"]
+    end
+
+    subgraph IMPACT["Gamification ON impact"]
+        I1["R2 badges: negligible"]
+        I2["D1 writes: +4-8 per action"]
+        I3["DO: reuse notifications"]
+    end
+        </pre>
+      </div>
+    </section>
+
+    <!-- Principles -->
+    <section id="principles">
+      <h2>Core Principles</h2>
+      <p class="desc">Rules to keep the system future-proof as new goals are added.</p>
+      <div class="card">
+        <ul class="principles">
+          <li><strong>One identity:</strong> Link everything to <code>users.id</code> — not username, not a separate Gamification ID.</li>
+          <li><strong>One hub:</strong> <code>processUserAction()</code> is the only entry point. Routes do not contain badge logic.</li>
+          <li><strong>Admin toggle:</strong> <code>gamification_enabled</code> — OFF freezes earning with zero D1 cost.</li>
+          <li><strong>Rule engine:</strong> Generic evaluator over DB rules — admin creates badges without deploys.</li>
+          <li><strong>Metric registry:</strong> New goal = new <code>metric_key</code> handler, not a schema migration per badge.</li>
+          <li><strong>Instant delivery:</strong> API response + WebSocket — no page refresh.</li>
+          <li><strong>Minimal client DTO:</strong> Rules and metric keys server-only; Network obscurity is not security.</li>
+          <li><strong>Data-driven UI:</strong> Generic <code>BadgeGrid</code> and <code>GoalProgress</code> — no React component per badge.</li>
+          <li><strong>Idempotent awards:</strong> Unique <code>(user_id, badge_id)</code> — never earn the same badge twice.</li>
+          <li><strong>Passive rules:</strong> Follower count updates on the <em>followed</em> user, not the follower.</li>
+        </ul>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>
+      Platform Reviver · HIN gamification design reference ·
+      <a href="platform%20reviver.md">platform reviver.md</a> ·
+      Living document — March 2026 · starter pack · actions &amp; naming · agent handoffs · 43 goals · D1 · R2 · RealtimeDO
+    </p>
+  </footer>
+
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        primaryColor: '#243044',
+        primaryTextColor: '#e7ecf3',
+        primaryBorderColor: '#5b9fd4',
+        lineColor: '#5b9fd4',
+        secondaryColor: '#1a2332',
+        tertiaryColor: '#1e1b3a',
+        fontFamily: 'Segoe UI, system-ui, sans-serif',
+      },
+      flowchart: { curve: 'basis', htmlLabels: true },
+      sequence: { actorMargin: 60, messageMargin: 40 },
+    });
+  </script>
+
+</body>
+</html>
