@@ -12,6 +12,7 @@ import {
 } from '../lib/user-settings';
 import { UpdateUserSettingsSchema, DeleteAccountSchema } from '@hin/types';
 import { softDeleteUser, verifyPassword } from '../lib/user-lifecycle';
+import { toGamificationPublic } from '../lib/gamification/public';
 
 const users = new Hono<{ Bindings: Env }>();
 
@@ -255,6 +256,26 @@ users.get('/username/:username', async (c) => {
     console.error('Error fetching user by username:', e);
     return c.json({ error: 'Internal Server Error' }, 500);
   }
+});
+
+users.get('/:id/gamification', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const userId = parseInt(c.req.param('id'), 10);
+  if (isNaN(userId)) return c.json({ error: 'Invalid user id' }, 400);
+
+  const db = drizzle(c.env.DB, { schema });
+  const user = await db.select({ id: schema.users.id })
+    .from(schema.users)
+    .where(and(eq(schema.users.id, userId), isNull(schema.users.deletedAt)))
+    .get();
+
+  if (!user) return c.json({ error: 'User not found' }, 404);
+
+  const isSelf = authUser.id === userId;
+  const gamification = await toGamificationPublic(db, userId, { includeGoals: isSelf });
+  return c.json(gamification);
 });
 
 // Get single user profile

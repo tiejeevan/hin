@@ -1,8 +1,10 @@
 import { LogOut, Shield, User } from 'lucide-react';
-import { User as UserType, Notification } from '@hin/types';
+import { User as UserType, Notification, type GamificationPublic } from '@hin/types';
 import { NotificationBell } from '../notifications/NotificationBell';
 import { NotificationPanel } from '../notifications/NotificationPanel';
 import { UserAvatar } from '../profile/UserAvatar';
+import { LevelBadge } from '../gamification/LevelBadge';
+import { PointsDisplay } from '../gamification/PointsDisplay';
 import { useEffect, useRef, useState } from 'react';
 
 interface AppHeaderProps {
@@ -19,6 +21,8 @@ interface AppHeaderProps {
   onMarkAllNotificationsRead: () => void;
   onOpenProfile: (userId: number) => void;
   onLogout: () => void;
+  gamification?: GamificationPublic | null;
+  showGamification?: boolean;
 }
 
 export function AppHeader({
@@ -35,6 +39,8 @@ export function AppHeader({
   onMarkAllNotificationsRead,
   onOpenProfile,
   onLogout,
+  gamification,
+  showGamification = false,
 }: AppHeaderProps) {
   const bellRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -66,6 +72,12 @@ export function AppHeader({
 
       {currentUser && (
         <div className="flex items-center gap-3">
+          {showGamification && gamification && (
+            <div className="hidden sm:flex items-center gap-2 pr-1 border-r border-border-custom">
+              <LevelBadge level={gamification.level} />
+              <PointsDisplay totalPoints={gamification.totalPoints} compact />
+            </div>
+          )}
           {currentUser.role === 'admin' && onOpenAdmin && (
             <button
               type="button"

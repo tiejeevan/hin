@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "wrangler dev --port 8787 --ip 0.0.0.0",
     "deploy": "wrangler deploy",
-    "build": "echo 'No build step required'"
+    "build": "echo 'No build step required'",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@hin/db": "*",
@@ -17,6 +19,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240529.0",
     "@types/bcryptjs": "^2.4.6",
+    "vitest": "^3.2.4",
     "wrangler": "^3.57.1"
   }
 }

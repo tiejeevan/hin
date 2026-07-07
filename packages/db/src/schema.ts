@@ -337,6 +337,159 @@ export const systemSettings = sqliteTable('system_settings', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+/** Per-user gamification summary (points + level). */
+export const userGamification = sqliteTable('user_gamification', {
+  userId: integer('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  totalPoints: integer('total_points').default(0).notNull(),
+  level: integer('level').default(1).notNull(),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+/** Flexible metric counters keyed by (user_id, metric_key). */
+export const userStatCounters = sqliteTable('user_stat_counters', {
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  metricKey: text('metric_key').notNull(),
+  value: integer('value').default(0).notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.metricKey] }),
+}));
+
+/** Admin-defined badge definitions. */
+export const badges = sqliteTable('badges', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  description: text('description').default('').notNull(),
+  imageUrl: text('image_url'),
+  isActive: integer('is_active').default(1).notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text('deleted_at'),
+}, (table) => ({
+  isActiveIdx: index('badges_is_active_idx').on(table.isActive),
+}));
+
+/** Earning rules attached to badges (metric + threshold). */
+export const badgeRules = sqliteTable('badge_rules', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  badgeId: integer('badge_id').notNull().references(() => badges.id, { onDelete: 'cascade' }),
+  metricKey: text('metric_key').notNull(),
+  operator: text('operator').default('>=').notNull(),
+  threshold: integer('threshold').notNull(),
+}, (table) => ({
+  badgeIdIdx: index('badge_rules_badge_id_idx').on(table.badgeId),
+  metricKeyIdx: index('badge_rules_metric_key_idx').on(table.metricKey),
+}));
+
+/** Points awarded per action_type (admin-configurable). */
+export const pointRules = sqliteTable('point_rules', {
+  actionType: text('action_type').primaryKey(),
+  points: integer('points').default(0).notNull(),
+  isActive: integer('is_active').default(1).notNull(),
+});
+
+/** Level breakpoints: level N starts at min_points total. */
+export const levelConfig = sqliteTable('level_config', {
+  level: integer('level').primaryKey(),
+  minPoints: integer('min_points').notNull(),
+});
+
+/** Badges earned by users (idempotent — one row per user + badge). */
+export const userBadges = sqliteTable('user_badges', {
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  badgeId: integer('badge_id').notNull().references(() => badges.id, { onDelete: 'cascade' }),
+  earnedAt: text('earned_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.badgeId] }),
+  badgeIdIdx: index('user_badges_badge_id_idx').on(table.badgeId),
+}));
+
+/** Audit log of point changes per action. */
+export const pointsLedger = sqliteTable('points_ledger', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  actionType: text('action_type').notNull(),
+  delta: integer('delta').notNull(),
+  metadata: text('metadata'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  userIdIdx: index('points_ledger_user_id_idx').on(table.userId),
+  createdAtIdx: index('points_ledger_created_at_idx').on(table.createdAt),
+}));
+
+/** Archived points_ledger rows older than retention window. */
+export const pointsLedgerArchive = sqliteTable('points_ledger_archive', {
+  id: integer('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  actionType: text('action_type').notNull(),
+  delta: integer('delta').notNull(),
+  metadata: text('metadata'),
+  createdAt: text('created_at').notNull(),
+  archivedAt: text('archived_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  userIdIdx: index('points_ledger_archive_user_id_idx').on(table.userId),
+  createdAtIdx: index('points_ledger_archive_created_at_idx').on(table.createdAt),
+}));
+
+/** Calendar-day streak tracking (login, etc.). */
+export const userStreaks = sqliteTable('user_streaks', {
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  streakType: text('streak_type').notNull(),
+  current: integer('current').default(0).notNull(),
+  longest: integer('longest').default(0).notNull(),
+  lastActivityDate: text('last_activity_date'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.streakType] }),
+}));
+
+/** Time-boxed gamification events. */
+export const events = sqliteTable('events', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  description: text('description').default('').notNull(),
+  startsAt: text('starts_at').notNull(),
+  endsAt: text('ends_at').notNull(),
+  status: text('status').default('draft').notNull(),
+  bannerUrl: text('banner_url'),
+  requiresOptIn: integer('requires_opt_in').default(1).notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  statusIdx: index('events_status_idx').on(table.status),
+  endsAtIdx: index('events_ends_at_idx').on(table.endsAt),
+}));
+
+/** Win rules attached to events. */
+export const eventRules = sqliteTable('event_rules', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  eventId: integer('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
+  metricKey: text('metric_key').notNull(),
+  winType: text('win_type').notNull(),
+  config: text('config').notNull(),
+}, (table) => ({
+  eventIdIdx: index('event_rules_event_id_idx').on(table.eventId),
+}));
+
+/** Opted-in participants and event-period scores. */
+export const eventParticipants = sqliteTable('event_participants', {
+  eventId: integer('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  score: integer('score').default(0).notNull(),
+  joinedAt: text('joined_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.eventId, table.userId] }),
+  scoreIdx: index('event_participants_score_idx').on(table.eventId, table.score),
+}));
+
+/** Recorded event prizes per user. */
+export const eventWins = sqliteTable('event_wins', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  eventId: integer('event_id').notNull().references(() => events.id, { onDelete: 'cascade' }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  prizeType: text('prize_type').notNull(),
+  prizeRef: text('prize_ref'),
+  wonAt: text('won_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  eventUserIdx: index('event_wins_event_user_idx').on(table.eventId, table.userId),
+}));
+
 /** Admin system message broadcasts — always persisted for audit, regardless of delivery mode. */
 export const systemBroadcasts = sqliteTable('system_broadcasts', {
   id: integer('id').primaryKey({ autoIncrement: true }),

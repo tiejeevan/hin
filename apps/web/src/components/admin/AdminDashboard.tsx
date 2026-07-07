@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { History, Megaphone, Shield, Users, Flag, Settings } from 'lucide-react';
+import { History, Megaphone, Shield, Users, Flag, Settings, Award } from 'lucide-react';
 import { BroadcastDelivery, ContentReport, ReviewReportAction, SystemBroadcast as SystemBroadcastRecord, User as UserType } from '@hin/types';
 import { AdminData } from '../../types/ui';
 import { AdminCollapsibleSection } from './AdminCollapsibleSection';
@@ -8,6 +8,8 @@ import { RegisteredAccounts } from './RegisteredAccounts';
 import { SystemBroadcast } from './SystemBroadcast';
 import { ReportsQueue } from './ReportsQueue';
 import { AdminUserSettings } from './AdminUserSettings';
+import { AdminGamification } from './AdminGamification';
+import { AdminEvents } from './AdminEvents';
 
 interface AdminDashboardProps {
   adminData: AdminData | null;
@@ -55,6 +57,8 @@ export function AdminDashboard({
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [reportsOpen, setReportsOpen] = useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = useState(false);
+  const [gamificationOpen, setGamificationOpen] = useState(false);
+  const [eventsOpen, setEventsOpen] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [reportsLoading, setReportsLoading] = useState(false);
@@ -168,6 +172,28 @@ export function AdminDashboard({
         onToggle={toggleAudit}
       >
         <BroadcastAuditLog history={broadcastHistory ?? []} />
+      </AdminCollapsibleSection>
+
+      <AdminCollapsibleSection
+        title="Platform Reviver"
+        description="Gamification toggle, badges, point rules, and level thresholds."
+        icon={<Award className="h-5 w-5" />}
+        iconClassName="bg-amber-500/15 border-amber-500/25 text-amber-400"
+        open={gamificationOpen}
+        onToggle={() => setGamificationOpen(prev => !prev)}
+      >
+        <AdminGamification token={token} />
+      </AdminCollapsibleSection>
+
+      <AdminCollapsibleSection
+        title="Gamification Events"
+        description="Time-boxed events, leaderboards, and win rules."
+        icon={<Award className="h-5 w-5" />}
+        iconClassName="bg-orange-500/15 border-orange-500/25 text-orange-400"
+        open={eventsOpen}
+        onToggle={() => setEventsOpen(prev => !prev)}
+      >
+        <AdminEvents token={token} />
       </AdminCollapsibleSection>
 
       <AdminCollapsibleSection

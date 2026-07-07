@@ -7,6 +7,7 @@ import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { getOrCreateUserSettings, isNotificationEnabled } from '../lib/user-settings';
 import { shouldDeliverNotification } from '../lib/blocks';
+import { processUserActionSafe } from '../lib/gamification/hub';
 
 const comments = new Hono<{ Bindings: Env }>();
 
@@ -275,6 +276,15 @@ comments.delete('/:id', async (c) => {
       })
     );
   } catch (e) {}
+
+  await processUserActionSafe(
+    db,
+    c.env,
+    comment.userId,
+    'comment_deleted',
+    { postId: comment.postId, commentId },
+    authUser.username,
+  );
 
   return c.json({ success: true });
 });

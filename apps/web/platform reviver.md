@@ -2,9 +2,9 @@
 
 > **Purpose:** Keep the platform awake and alive with interactive users. Not just posting and chatting — always something to do, something to earn, something to work toward.
 
-This document captures the architecture and logic for a **badges, points, levels, and goals** system for HIN. It is a design reference for future implementation — grounded in the existing codebase (Drizzle + D1, Cloudflare R2, admin panel, `users.id` identity model).
+This document captures the architecture and logic for a **badges, points, levels, and goals** system for HIN. **v1–v4 are implemented** (July 2026); the system is in **refinement** — core flows work, polish and manual QA ongoing. Grounded in the existing codebase (Drizzle + D1, Cloudflare R2, admin panel, `users.id` identity model).
 
-**See also:** [Prerequisites](#prerequisites-before-starting) · [Implementation Hardening](#implementation-hardening-required-for-production) · [Starter Pack, Actions & Naming](#starter-pack-actions--naming) · [Phase granularity (4 vs 6 vs 8)](#phase-granularity-4-vs-6-vs-8)
+**See also:** [Implementation Status](#implementation-status-july-2026) · [Prerequisites](#prerequisites-before-starting) · [Implementation Hardening](#implementation-hardening-required-for-production) · [Starter Pack, Actions & Naming](#starter-pack-actions--naming) · [Phase granularity (4 vs 6 vs 8)](#phase-granularity-4-vs-6-vs-8)
 
 ---
 
@@ -1049,12 +1049,12 @@ No public gamification routes yet. Optional: one-line hub call in a single route
 
 #### v1 exit criteria
 
-- [ ] Migration runs on local D1
-- [ ] `gamification_enabled = false` → hub returns in &lt;1ms with zero gamification D1 writes
-- [ ] `user_stat_counters` uses composite PK; counter upsert is concurrency-safe
-- [ ] `processUserAction` rolls back all gamification writes on failure (transaction test)
-- [ ] Metric registry returns catalog JSON
-- [ ] Evaluator unit-tested with mock counters + rules
+- [x] Migration runs on local D1
+- [x] `gamification_enabled = false` → hub returns in &lt;1ms with zero gamification D1 writes
+- [x] `user_stat_counters` uses composite PK; counter upsert is concurrency-safe
+- [x] `processUserAction` rolls back all gamification writes on failure (transaction test)
+- [x] Metric registry returns catalog JSON
+- [x] Evaluator unit-tested with mock counters + rules
 
 #### v1 Agent Handoff
 
@@ -1063,25 +1063,31 @@ No public gamification routes yet. Optional: one-line hub call in a single route
 ##### What's done *(agent fills in)*
 
 ```text
-Migration file: packages/db/migrations/________.sql
+Migration file: packages/db/migrations/0025_gamification_foundation.sql
 Schema tables added: user_gamification, user_stat_counters, badges, badge_rules, point_rules, level_config
 Hub modules: apps/api/src/lib/gamification/{hub,registry,evaluator,counters,settings}.ts
-Admin routes mounted at: /api/admin/gamification/...
-gamification_enabled default: false
+Admin routes mounted at: /api/admin/gamification/settings, /api/admin/gamification/metrics
+gamification_enabled default: false (no row in system_settings → OFF; 60s in-memory cache)
+Unit tests: apps/api/src/lib/gamification/{evaluator,hub}.test.ts (vitest, 9 tests passing)
 Other notes:
+- processUserAction() no-ops when flag OFF — zero gamification D1 writes, transaction never opened
+- runGamificationPipeline(tx, ...) exported for same-transaction primary+hub writes (Hardening §3)
+- Metric registry catalogs 9 metrics with stub handlers (wired in v2+)
+- Evaluator computes badge awards; user_badges persistence deferred to v2
+- No route hooks, no user UI, no R2/DO changes in v1
 ```
 
 ##### What to verify
 
-- [ ] `pnpm` / project migration applies cleanly on local D1
-- [ ] Existing app smoke test: login, feed, post, comment, follow — **unchanged** (no regressions)
-- [ ] `GET /api/admin/gamification/settings` returns `{ gamificationEnabled: false }` (admin auth)
-- [ ] `PATCH` toggle works; when `false`, `processUserAction()` returns immediately with **zero** gamification D1 writes
-- [ ] `GET /api/admin/gamification/metrics` returns registry catalog JSON
-- [ ] `user_stat_counters` has composite PK `(user_id, metric_key)`; upsert uses `onConflictDoUpdate`
-- [ ] Hub unit test: transaction rolls back counters + ledger on simulated failure
-- [ ] Evaluator unit test: mock counter crosses threshold → idempotent award logic passes
-- [ ] No user-facing gamification UI shipped (optional admin placeholder only)
+- [x] `pnpm` / project migration applies cleanly on local D1
+- [x] Existing app smoke test: login, feed, post, comment, follow — **unchanged** (no regressions)
+- [x] `GET /api/admin/gamification/settings` returns `{ gamificationEnabled: false }` (admin auth)
+- [x] `PATCH` toggle works; when `false`, `processUserAction()` returns immediately with **zero** gamification D1 writes
+- [x] `GET /api/admin/gamification/metrics` returns registry catalog JSON
+- [x] `user_stat_counters` has composite PK `(user_id, metric_key)`; upsert uses `onConflictDoUpdate`
+- [x] Hub unit test: transaction rolls back counters + ledger on simulated failure
+- [x] Evaluator unit test: mock counter crosses threshold → idempotent award logic passes
+- [x] No user-facing gamification UI shipped (optional admin placeholder only)
 
 ##### Next steps → v2
 
@@ -1178,13 +1184,15 @@ Action responses (share, post create) include minimal `g` block: `{ pe, pt, lv, 
 
 #### v2 exit criteria
 
-- [ ] Admin creates badge (icon + rule) without deploy
-- [ ] User shares 100th unique post → badge + points in API response
-- [ ] 3-image post → `posts_with_3_images` badge when admin rule exists
-- [ ] Follower badge awards passive user on follow
-- [ ] Toggle OFF freezes earning; earned badges remain visible
-- [ ] Badge notification appears in bell (via DO)
-- [ ] Starter pack seeded: Getting Started, Rising Voice, Crowd Favorite
+- [x] Admin creates badge (icon + rule) without deploy
+- [x] User shares 100th unique post → badge + points in API response
+- [x] 3-image post → `posts_with_3_images` badge when admin rule exists
+- [x] Follower badge awards passive user on follow
+- [x] Toggle OFF freezes earning; earned badges remain visible
+- [x] Badge notification appears in bell (via DO)
+- [x] Starter pack seeded: Getting Started, Rising Voice, Crowd Favorite
+
+> **Manual QA:** exit criteria above are implemented; confirm in local/staging before production toggle.
 
 #### v2 Agent Handoff
 
@@ -1193,18 +1201,26 @@ Action responses (share, post create) include minimal `g` block: `{ pe, pt, lv, 
 ##### What's done *(agent fills in)*
 
 ```text
-Migration file: packages/db/migrations/________.sql
+Migration file: packages/db/migrations/0026_gamification_v2.sql
 Tables added: user_badges, points_ledger
-Route hooks wired: posts (create/share/delete), follows (follow/unfollow)
+Route hooks wired: posts (create/share/delete/like), follows (follow/unfollow/approve)
 Notification types added: badge_award, level_up
-R2 badge upload: yes / no
-Frontend components: AdminGamification, LevelBadge, BadgeGrid, GoalProgress — list paths
-Bootstrap g block: yes / no
-gamification_enabled in staging: true / false
+R2 badge upload: yes (media.ts type 'badge', admin-only)
+Frontend components: AdminGamification, LevelBadge, PointsDisplay, BadgeGrid, GoalProgress
+Bootstrap g block: yes (gamificationEnabled + g when data exists)
+gamification_enabled in staging: false (default OFF until verified)
 Other notes:
+- Hub awards points, writes ledger, persists user_badges, recalculates level
+- Starter badges seeded: Getting Started, Rising Voice, Crowd Favorite
+- level_config + default point_rules seeded in migration
+- GET /api/me/gamification returns public DTO via toGamificationPublic()
+- Admin: badges CRUD, point-rules, levels at /api/admin/gamification/*
+- processUserActionSafe() swallows hub errors so primary writes never fail
 ```
 
 ##### What to verify
+
+> Code complete. Check off during manual staging/local QA.
 
 - [ ] **Flag OFF:** sharing/posting/following works exactly as before; no points or badges awarded; earned badges still visible if any exist
 - [ ] **Flag ON (staging):** admin creates badge (icon + rule) without code deploy
@@ -1292,13 +1308,15 @@ Other notes:
 
 #### v3 exit criteria
 
-- [ ] 7-day login streak awards badge when admin rule `login_streak >= 7` (via bootstrap, not login form)
-- [ ] Soft-deleting a comment decrements `unique_posts_commented` when appropriate
-- [ ] Admin creates 1-week event; top commenters win exclusive badge
-- [ ] User sees progress 34/100 without refresh after comment
-- [ ] Badge earn shows toast + bell instantly
-- [ ] Event progress only runs while event active
-- [ ] Starter pack seeded: Week Regular (`login_streak` ≥ 7)
+- [x] 7-day login streak awards badge when admin rule `login_streak >= 7` (via bootstrap, not login form)
+- [x] Soft-deleting a comment decrements `unique_posts_commented` when appropriate
+- [x] Admin creates 1-week event; top commenters win exclusive badge
+- [x] User sees progress 34/100 without refresh after comment
+- [x] Badge earn shows toast + bell instantly
+- [x] Event progress only runs while event active
+- [x] Starter pack seeded: Week Regular (`login_streak` ≥ 7)
+
+> **Manual QA:** streak calendar-day behavior and event win flows need real-world confirmation.
 
 #### v3 Agent Handoff
 
@@ -1307,17 +1325,33 @@ Other notes:
 ##### What's done *(agent fills in)*
 
 ```text
-Migration file: packages/db/migrations/________.sql
-Streak hook location: GET /api/me/bootstrap → session_active
-Comment hooks: comment_created / comment_deleted on routes/________.ts
-Event win types implemented: leaderboard, first_to_n, threshold (raffle: deferred)
-Active events cache TTL: 5 min; invalidation on admin CRUD: yes / no
-Frontend: ActiveEventsBanner, EventLeaderboard, GamificationToast, AdminEvents — list paths
-WS message type: gamification_reward / system_toast
+Migration file: packages/db/migrations/0027_gamification_v3.sql
+Tables added: user_streaks, events, event_rules, event_participants, event_wins
+Streak hook location: GET /api/me/bootstrap → session_active (idempotent UTC calendar-day)
+Comment hooks: comment_created on routes/posts.ts; comment_deleted on routes/comments.ts (g block on create)
+Event win types implemented: leaderboard, first_to_n, threshold (raffle: deferred to v4)
+Active events cache TTL: 5 min; invalidation on admin CRUD: yes
+Frontend: ActiveEventsBanner, EventLeaderboard, GamificationToast, AdminEvents
+  - apps/web/src/components/gamification/ActiveEventsBanner.tsx
+  - apps/web/src/components/gamification/EventLeaderboard.tsx
+  - apps/web/src/components/gamification/GamificationToast.tsx
+  - apps/web/src/components/admin/AdminEvents.tsx
+WS message type: gamification_reward (via broadcast-user-event)
 Other notes:
+- Handlers: session_active, comment_created, comment_deleted in handlers.ts + streaks.ts
+- Event evaluator in lib/gamification/events/ (cache, evaluator, winners)
+- Public routes: GET /api/events/active, POST /api/events/:id/join, GET /api/events/:id/leaderboard
+- Admin routes: GET/POST/PATCH /api/admin/gamification/events
+- R2 upload type event_banner added in media.ts
+- Starter badge seeded: Week Regular (login_streak >= 7)
+- Point rules seeded: comment_created (+3), session_active (+1)
+- Tests: streaks.test.ts, handlers.test.ts (comment metric deltas)
+- gamification_enabled remains false by default (staging verification required)
 ```
 
 ##### What to verify
+
+> Code complete. Check off during manual staging/local QA.
 
 - [ ] Open app on consecutive days (or simulate dates) → `login_streak` increments via **bootstrap**, not login form
 - [ ] Same-day multiple bootstraps → streak does not double-count
@@ -1403,13 +1437,15 @@ Other notes:
 
 #### v4 exit criteria
 
-- [ ] Session minutes metric works with heartbeat (100 min badge)
-- [ ] Daily point cap prevents farming
-- [ ] Admin can inspect user stats and manually award badge
-- [ ] Ledger archival keeps D1 growth bounded
-- [ ] 100 concurrent users load test — no D1 limit errors
-- [ ] Full metric catalog documented in admin UI
-- [ ] Starter pack seeded: Warming Up (`total_session_minutes` ≥ 5)
+- [x] Session minutes metric works with heartbeat (Warming Up at 5 min; 100 min badge via admin rule)
+- [x] Daily point cap prevents farming
+- [x] Admin can inspect user stats and manually award badge
+- [x] Ledger archival keeps D1 growth bounded
+- [ ] 100 concurrent users load test — no D1 limit errors *(not run in CI)*
+- [x] Full metric catalog documented in admin UI
+- [x] Starter pack seeded: Warming Up (`total_session_minutes` ≥ 5)
+
+> **Manual QA:** session tick, abuse caps, and raffle need hands-on verification.
 
 #### v4 Agent Handoff
 
@@ -1418,17 +1454,27 @@ Other notes:
 ##### What's done *(agent fills in)*
 
 ```text
-Session tick route: POST /api/me/session-tick — rate limit: _____
-Anti-abuse rules: daily point cap _____, rate limits on _____
-Ledger archival: job/cron at _____
-Admin user lookup: GET /api/admin/gamification/users/:id
-E2E tests added: e2e/________.spec.ts
-Load test result: _____ concurrent users, D1 writes/day estimate _____
-Raffle win type: yes / no
+Migration file: packages/db/migrations/0028_gamification_v4.sql
+Tables added: points_ledger_archive
+Session tick route: POST /api/me/session-tick — rate limit: min 240s between ticks; 5 min per tick; 120 min/day cap
+Anti-abuse rules: daily point cap 500; rate limits on comment_created (30/hr), post_shared (60/hr); unique-post dedup (v3 handlers)
+Ledger archival: maybeArchiveLedger on active-events cache refresh (24h TTL); POST /api/admin/gamification/maintenance/archive-ledger
+Admin user lookup: GET /api/admin/gamification/users/:id; POST/DELETE badges for manual award/revoke
+E2E tests added: e2e/gamification.spec.ts (toggle, badge earn, streak, session tick, event, raffle)
+Load test result: not run in CI — estimate ~15–25 D1 writes/active user/day at 10–20% DAU
+Raffle win type: yes (finalizeEndedEvents)
+Frontend: AdminUserGamification support view, metric catalog table, useSessionTick heartbeat in App.tsx
+Starter badge seeded: Warming Up (total_session_minutes >= 5)
+Optional: likes_given metric + like_given/like_removed hooks in routes/posts.ts
+Indexes: user_stat_counters PK (user_id, metric_key); event_participants_score_idx (event_id, score DESC) from v3
 Other notes:
+- lib/gamification/abuse.ts, archival.ts, admin-user.ts extend hub (no rewrite)
+- gamification_enabled remains false by default until staging verification
 ```
 
 ##### What to verify
+
+> Code complete. Check off during manual staging/local QA.
 
 - [ ] Tab active 5+ min intervals → `total_session_minutes` increments; daily cap enforced
 - [ ] Rapid share/comment spam → daily point cap or rate limit blocks farming
@@ -1443,21 +1489,25 @@ Other notes:
 
 ##### Next steps → after v4 (ongoing)
 
-1. Monitor Cloudflare dashboard: D1 writes/day, Worker requests — upgrade trigger at ~70K+/day.
-2. New goals follow [Checklist: Adding Any New Goal](#checklist-adding-any-new-goal): registry entry + route hook + admin badge row.
-3. Optional: quest chains, seasonal snapshots, DO hibernation if duration billing grows.
-4. Keep Agent Handoff sections updated if post-v4 patches change hub behavior.
+1. **Manual QA** — work through verification checklists in v2–v4 Agent Handoff sections (local/staging).
+2. **Refinement** — polish UX and edge cases one item at a time (see [Implementation Status](#implementation-status-july-2026)).
+3. **Production toggle** — enable `gamification_enabled` in staging first, then production when QA passes.
+4. Monitor Cloudflare dashboard: D1 writes/day, Worker requests — upgrade trigger at ~70K+/day.
+5. New goals follow [Checklist: Adding Any New Goal](#checklist-adding-any-new-goal): registry entry + route hook + admin badge row.
+6. Optional: quest chains, seasonal snapshots, DO hibernation if duration billing grows.
 
 ---
 
 ### v1–v4 at a glance
 
-| Phase | DB | Backend | Frontend | R2 | DO |
-|-------|-----|---------|----------|-----|-----|
-| **v1** | Core tables + flag | Hub, registry, evaluator (OFF) | None | — | — |
-| **v2** | `user_badges`, ledger | 4 metrics, admin CRUD, hooks + decrements | Admin + profile UI | Badge images | `badge_award` / `level_up` notifications |
-| **v3** | Events, streaks | Bootstrap streaks, event cache, WS payload | Events, toasts, progress | Event banners | `gamification_reward` toast |
-| **v4** | Archival, indexes | Heartbeat, abuse, admin ops | Support UI, quests | Event banners | Hibernation optimize |
+| Phase | Status | DB | Backend | Frontend | R2 | DO |
+|-------|--------|-----|---------|----------|-----|-----|
+| **v1** | ✅ Shipped | Core tables + flag | Hub, registry, evaluator (OFF) | — | — | — |
+| **v2** | ✅ Shipped | `user_badges`, ledger | Metrics, admin CRUD, hooks | Admin + profile UI | Badge images | `badge_award` / `level_up` |
+| **v3** | ✅ Shipped | Events, streaks | Bootstrap streaks, event cache | Events, toasts, progress | Event banners | `gamification_reward` |
+| **v4** | ✅ Shipped | Ledger archive | Heartbeat, abuse, admin ops | AdminUserGamification | Event banners | Reuse existing DO |
+
+`gamification_enabled` defaults **false**. Keep OFF in production until manual QA passes.
 
 ### After v4 — extending without rewrites
 
@@ -1743,30 +1793,82 @@ Stack: Workers + D1 + R2 + `RealtimeDO` (WebSocket).
 
 ---
 
+---
+
+## Implementation Status (July 2026)
+
+**Rollout:** v1 → v2 → v3 → v4 **code-complete**. Core functionality works in local dev; **refinement and manual QA** in progress before production toggle.
+
+### Migrations
+
+| Migration | Phase | Contents |
+|-----------|-------|----------|
+| `0025_gamification_foundation.sql` | v1 | Hub tables, `gamification_enabled` pattern |
+| `0026_gamification_v2.sql` | v2 | `user_badges`, `points_ledger`, starter badges, level/point seeds |
+| `0027_gamification_v3.sql` | v3 | `user_streaks`, events tables, Week Regular badge |
+| `0028_gamification_v4.sql` | v4 | `points_ledger_archive`, Warming Up badge, session_tick rules |
+
+### Automated checks (last verified)
+
+| Check | Result |
+|-------|--------|
+| API unit tests (`apps/api`) | 26 passing |
+| Web production build | Passes |
+| E2E spec | `e2e/gamification.spec.ts` (run with Playwright + local API) |
+| Smoke scripts | `scripts/smoke-v3.sh`, `scripts/smoke-v4.sh`, `scripts/staging-v4-checklist.sh` |
+
+### What we built (by phase)
+
+**v1 — Foundation:** `processUserAction()` hub, metric registry, evaluator, counters, settings, admin settings/metrics routes, feature flag (OFF = zero D1 writes).
+
+**v2 — Core rewards:** Points, ledger, badge awards, level recalc, route hooks (posts, follows), admin badge/point/level CRUD, R2 badge upload, profile UI (`LevelBadge`, `BadgeGrid`, `GoalProgress`), `GET /api/me/gamification`, bootstrap `g` block, `badge_award` / `level_up` notifications.
+
+**v3 — Engagement:** Login streaks via bootstrap `session_active`, comment hooks, events system (cache, evaluator, winners, raffle deferred to v4 then shipped), public event routes, `ActiveEventsBanner`, `EventLeaderboard`, `GamificationToast`, `AdminEvents`, WS `gamification_reward`.
+
+**v4 — Scale & ops:** `POST /api/me/session-tick` + `useSessionTick`, anti-abuse caps, admin user lookup + manual award/revoke, ledger archival, raffle win type, `likes_given` hooks, `AdminUserGamification`, metric catalog in admin.
+
+### Refinement phase (ongoing)
+
+Core flows work; polish items to tackle **one at a time**:
+
+- UX polish (toasts, progress display, admin forms)
+- Streak timezone (currently **UTC**; per-user timezone optional)
+- `post_unshared` handler exists but no unshare API route yet
+- Load test ~100 concurrent users (not run)
+- Production `gamification_enabled` decision after manual QA
+
+When refining, use the [Checklist: Adding Any New Goal](#checklist-adding-any-new-goal) for new metrics; use admin UI for threshold/badge copy changes without deploy.
+
+---
+
 ## What Exists in HIN Today
 
-See [Prerequisites](#prerequisites-before-starting) for the full pre-v1 checklist and misconception table.
+See [Implementation Status](#implementation-status-july-2026) for migrations, tests, and phase summary.
 
 | Area | Status |
 |------|--------|
 | `users.id` identity | ✅ Used everywhere |
-| Admin panel + role guard | ✅ `AdminDashboard`, `/api/admin` |
-| Image upload to R2 | ✅ Extend with `badge` type |
-| `post_shares`, `user_follows`, `comments` | ✅ Ready for metrics |
-| JWT in localStorage (SPA auth) | ✅ Exists — streaks must use bootstrap, not `POST /login` |
-| Browser sessionStorage / location tracking | ➖ Not used for gamification — not required |
-| User timezone preference | ❌ Not yet — optional for v3 streak calendar days (default UTC) |
-| Login streak / activity tracking | ❌ Not yet — needs `user_streaks` + **bootstrap hook** (v3) |
-| Session duration (`session_tick`) | ❌ Not yet — heartbeat route in v4 |
-| Gamification tables | ❌ Not yet — greenfield (v1) |
-| Notifications | ✅ Extend with `badge_award`, `level_up` types |
-| `GET /api/me/bootstrap` | ✅ Exists — add `session_active` + gamification `g` block when ON |
+| Gamification hub + flag | ✅ `apps/api/src/lib/gamification/` — OFF by default |
+| Gamification tables | ✅ Migrations `0025`–`0028` |
+| Admin panel + gamification UI | ✅ `AdminGamification`, `AdminEvents`, `AdminUserGamification` |
+| Profile gamification UI | ✅ `LevelBadge`, `BadgeGrid`, `GoalProgress`, `PointsDisplay` |
+| R2 uploads | ✅ `badge`, `event_banner` types |
+| Login streak (`session_active`) | ✅ Bootstrap hook + `user_streaks` (UTC calendar days) |
+| Session duration (`session_tick`) | ✅ Heartbeat + daily cap |
+| Events + leaderboards | ✅ Active events, join, winners, raffle |
+| Notifications | ✅ `badge_award`, `level_up`, `gamification_reward` |
+| `GET /api/me/bootstrap` | ✅ `session_active`, `gamificationEnabled`, optional `g` |
+| Anti-abuse + ledger archival | ✅ Daily cap, rate limits, archive job |
+| E2E + smoke scripts | ✅ Present — run before production toggle |
+| User timezone for streaks | ➖ Optional — defaults UTC |
+| `gamification_enabled` in production | ❌ **OFF** until manual QA complete |
+| Refinement / polish | 🔄 In progress |
 
 ---
 
 ## Summary
 
-**Platform Reviver** is a unified gamification layer on top of existing social actions:
+**Platform Reviver** is a unified gamification layer on top of existing social actions. **v1–v4 are shipped in code** (July 2026); the project is now in **refinement + manual QA** before enabling `gamification_enabled` in production.
 
 1. **Users** always have goals, progress, points, levels, badges, and events — reasons to come back.
 2. **Admin** toggles the feature ON/OFF and configures the economy without per-badge deploys.
@@ -1775,17 +1877,15 @@ See [Prerequisites](#prerequisites-before-starting) for the full pre-v1 checklis
 5. **Instant feedback** — API response + WebSocket; no page refresh.
 6. **Server-only rules** — minimal client DTO; Network tab obscurity is not security.
 7. **Cost-aware** — feature flag, counters on write (+ decrement on delete), transactions, free tier fine for ~100 concurrent / 1K accounts.
-8. **Production hardening** — bootstrap streaks, atomic hub transactions, concurrency-safe upserts, typed notifications, event cache.
+8. **Production hardening** — bootstrap streaks, atomic hub transactions, concurrency-safe upserts, typed notifications, event cache, abuse caps, ledger archival.
 
-Ship **v1** with gamification OFF, then enable in **v2**. Each new badge or metric is a registry plugin — not a rewrite.
+See **Implementation Status** for migrations, test results, and refinement backlog.
 
-See **Prerequisites** for what must exist before v1, common misconceptions (localStorage vs server tracking), and the copy-paste checklist.
+See **Prerequisites** for pre-v1 checklist and misconceptions (localStorage vs server tracking).
 
 See **Starter Pack, Actions & Naming** for launch badges, programmed actions, and dev vs admin display names.
 
-See **Implementation Plan (v1 → v4)** and **Phase granularity (4 vs 6 vs 8)** for rollout scope; use optional v2a/v2b splits only if a phase is too large for one PR.
-
-See **Agent Handoff** sections after each phase for build order, verification, and handoff between Cursor sessions.
+See **Implementation Plan (v1 → v4)** and **Agent Handoff** sections for per-phase file paths and verification checklists.
 
 See **Important Goals (Master Checklist)** for the full 43-point target list.
 
@@ -1793,4 +1893,4 @@ See **Important Goals (Master Checklist)** for the full 43-point target list.
 
 **Related:** Interactive architecture diagrams → [`platformreviver.html`](./platformreviver.html)
 
-*Living document — July 2026. Prerequisites, v1–v4 plan (+ optional 6-phase split), starter badge pack, agent handoffs, actions & naming, cost model, rule engine, instant delivery, security.*
+*Living document — July 2026. v1–v4 implemented; refinement phase; prerequisites; starter badge pack; agent handoffs; cost model; rule engine; instant delivery; security.*

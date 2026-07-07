@@ -169,6 +169,34 @@
       "when": 1783155000000,
       "tag": "0024_hashtags_link_previews",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1783156000000,
+      "tag": "0025_gamification_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1783157000000,
+      "tag": "0026_gamification_v2",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1783158000000,
+      "tag": "0027_gamification_v3",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1783159000000,
+      "tag": "0028_gamification_v4",
+      "breakpoints": true
     }
   ]
 }

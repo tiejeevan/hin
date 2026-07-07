@@ -4,6 +4,7 @@ import * as schema from '@hin/db';
 import type { FollowListUser, FollowRequest, FollowStatus, Notification } from '@hin/types';
 import type { Env } from '../types';
 import { isBlocked, shouldDeliverNotification } from './blocks';
+import { processUserActionSafe } from './gamification/hub';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -317,6 +318,7 @@ export async function followUser(
     entityId: followerId,
     content: `@${followerUsername} started following you.`,
   });
+  await processUserActionSafe(db, env, targetId, 'user_followed', { followerId }, target.username);
   return { ok: true, result: { status: 'following' } };
 }
 
@@ -353,6 +355,11 @@ export async function unfollowUser(
       ),
     )
     .run();
+
+  const target = await getUserOrThrow(db, targetId);
+  if (target) {
+    await processUserActionSafe(db, undefined, targetId, 'user_unfollowed', { followerId }, target.username);
+  }
 
   return { ok: true };
 }
@@ -425,6 +432,7 @@ export async function approveFollowRequest(
   await upsertActiveFollow(db, requesterId, targetId);
 
   const requester = await getUserOrThrow(db, requesterId);
+  const targetUser = await getUserOrThrow(db, targetId);
   if (requester) {
     await createFollowNotification(db, env, {
       recipientId: requesterId,
@@ -441,6 +449,10 @@ export async function approveFollowRequest(
         targetUsername,
       },
     });
+  }
+
+  if (targetUser) {
+    await processUserActionSafe(db, env, targetId, 'user_followed', { followerId: requesterId }, targetUser.username);
   }
 
   return { ok: true };

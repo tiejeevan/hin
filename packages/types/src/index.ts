@@ -207,6 +207,9 @@ export interface MeBootstrap {
   userSettings: UserSettings;
   systemSettings: SystemSettings;
   counts: MeBootstrapCounts;
+  gamificationEnabled?: boolean;
+  /** Present when user has gamification data to display (read-only when flag is OFF). */
+  g?: GamificationPublic;
 }
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -253,6 +256,8 @@ export interface Comment {
   deletedAt?: string | null;
   likesCount: number;
   hasLiked?: boolean;
+  /** Gamification delta from this action (comment create). */
+  g?: GamificationActionBlock;
 }
 
 export interface Message {
@@ -285,9 +290,9 @@ export interface Notification {
   userId: number;
   senderId: number;
   senderUsername: string;
-  type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted';
+  type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted' | 'badge_award' | 'level_up';
   /** What entityId points at. Optional for older rows written before migration. */
-  entityType?: 'post' | 'message' | 'system' | 'user' | null;
+  entityType?: 'post' | 'message' | 'system' | 'user' | 'badge' | null;
   entityId: number; // postId for likes/comments/mentions, messageId for messages, system_broadcasts.id for system
   /** Set for comment / mention-in-comment notifications. Optional for older rows. */
   commentId?: number | null;
@@ -459,6 +464,9 @@ export function isNotificationEnabledForSettings(
       return settings.notifyDms;
     case 'system':
       return settings.notifySystem;
+    case 'badge_award':
+    case 'level_up':
+      return true;
     default:
       return true;
   }
@@ -541,3 +549,309 @@ export const UpdateSystemSettingsSchema = z.object({
     || data.maxMediaPerPost !== undefined,
   { message: 'At least one setting must be provided' },
 );
+
+// --- Platform Reviver (gamification) ---
+
+export type MetricType = 'instant' | 'cumulative' | 'streak' | 'duration';
+
+export type GamificationActionType =
+  | 'post_created'
+  | 'post_deleted'
+  | 'post_shared'
+  | 'post_unshared'
+  | 'comment_created'
+  | 'comment_deleted'
+  | 'user_followed'
+  | 'user_unfollowed'
+  | 'post_liked'
+  | 'post_unliked'
+  | 'like_given'
+  | 'like_removed'
+  | 'session_active'
+  | 'session_tick';
+
+/** Minimal client-facing gamification DTO — no rules or metric keys. */
+export interface GamificationPublic {
+  level: number;
+  totalPoints: number;
+  pointsToNextLevel: number | null;
+  badges: GamificationPublicBadge[];
+  goalsInProgress: GamificationPublicGoal[];
+}
+
+export interface GamificationPublicBadge {
+  id: number;
+  name: string;
+  imageUrl: string | null;
+  earnedAt: string;
+}
+
+export interface GamificationPublicGoal {
+  badgeId: number;
+  name: string;
+  description: string;
+  current: number;
+  target: number;
+}
+
+/** Server-only gamification state — never sent to the web client. */
+export interface GamificationInternal {
+  userId: number;
+  totalPoints: number;
+  level: number;
+  counters: Record<string, number>;
+  earnedBadgeIds: number[];
+}
+
+export interface GamificationSettings {
+  gamificationEnabled: boolean;
+}
+
+export const UpdateGamificationSettingsSchema = z.object({
+  gamificationEnabled: z.boolean(),
+});
+
+export interface MetricCatalogEntry {
+  key: string;
+  label: string;
+  description: string;
+  type: MetricType;
+  actions: GamificationActionType[];
+}
+
+export interface MetricCatalogResponse {
+  metrics: MetricCatalogEntry[];
+}
+
+export interface BadgeRuleDefinition {
+  badgeId: number;
+  metricKey: string;
+  operator: string;
+  threshold: number;
+}
+
+/** Result returned from processUserAction after a rewarded action. */
+export interface GamificationActionResult {
+  skipped: boolean;
+  pointsEarned: number;
+  totalPoints: number;
+  level: number;
+  levelUp: number | null;
+  badgesEarned: number[];
+  eventWins?: number[];
+}
+
+/** Minimal gamification block for action responses (share, post create). */
+export interface GamificationActionBlock {
+  pe: number;
+  pt: number;
+  lv: number;
+  be?: number[];
+}
+
+export interface AdminBadge {
+  id: number;
+  name: string;
+  description: string;
+  imageUrl: string | null;
+  isActive: boolean;
+  createdAt: string;
+  rule: BadgeRuleDefinition | null;
+}
+
+export interface PointRule {
+  actionType: GamificationActionType;
+  points: number;
+  isActive: boolean;
+}
+
+export interface LevelConfigEntry {
+  level: number;
+  minPoints: number;
+}
+
+export const CreateBadgeSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(100),
+  description: z.string().max(500).optional().default(''),
+  imageUrl: z.string().url().nullable().optional(),
+  metricKey: z.string().min(1, 'Metric is required'),
+  operator: z.enum(['>=', '>', '=', '==', '<=', '<']).optional().default('>='),
+  threshold: z.number().int().min(1, 'Threshold must be at least 1'),
+});
+
+export const UpdateBadgeSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().max(500).optional(),
+  imageUrl: z.string().url().nullable().optional(),
+  isActive: z.boolean().optional(),
+  metricKey: z.string().min(1).optional(),
+  operator: z.enum(['>=', '>', '=', '==', '<=', '<']).optional(),
+  threshold: z.number().int().min(1).optional(),
+});
+
+export const UpdatePointRulesSchema = z.object({
+  rules: z.array(z.object({
+    actionType: z.string().min(1),
+    points: z.number().int().min(0),
+    isActive: z.boolean().optional(),
+  })).min(1),
+});
+
+export const UpdateLevelConfigSchema = z.object({
+  levels: z.array(z.object({
+    level: z.number().int().min(1),
+    minPoints: z.number().int().min(0),
+  })).min(1),
+});
+
+// --- Events (v3) ---
+
+export type EventStatus = 'draft' | 'active' | 'ended';
+export type EventWinType = 'leaderboard' | 'first_to_n' | 'threshold' | 'raffle';
+export type EventPrizeType = 'badge' | 'points' | 'title';
+
+export interface EventRuleConfig {
+  topN?: number;
+  count?: number;
+  threshold?: number;
+  prizeType: EventPrizeType;
+  prizeRef?: string;
+}
+
+export interface PublicEvent {
+  id: number;
+  name: string;
+  description: string;
+  startsAt: string;
+  endsAt: string;
+  status: EventStatus;
+  bannerUrl: string | null;
+  requiresOptIn: boolean;
+  joined?: boolean;
+  myScore?: number;
+  rules: PublicEventRule[];
+}
+
+export interface PublicEventRule {
+  metricKey: string;
+  winType: EventWinType;
+}
+
+export interface EventLeaderboardEntry {
+  userId: number;
+  username: string;
+  score: number;
+  rank: number;
+}
+
+export interface EventLeaderboard {
+  eventId: number;
+  entries: EventLeaderboardEntry[];
+  myRank: number | null;
+  myScore: number | null;
+}
+
+export interface AdminEvent {
+  id: number;
+  name: string;
+  description: string;
+  startsAt: string;
+  endsAt: string;
+  status: EventStatus;
+  bannerUrl: string | null;
+  requiresOptIn: boolean;
+  createdAt: string;
+  rules: AdminEventRule[];
+}
+
+export interface AdminEventRule {
+  id?: number;
+  metricKey: string;
+  winType: EventWinType;
+  config: EventRuleConfig;
+}
+
+export const CreateEventSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().max(1000).optional().default(''),
+  startsAt: z.string().min(1),
+  endsAt: z.string().min(1),
+  status: z.enum(['draft', 'active', 'ended']).optional().default('draft'),
+  bannerUrl: z.string().url().nullable().optional(),
+  requiresOptIn: z.boolean().optional().default(true),
+  rules: z.array(z.object({
+    metricKey: z.string().min(1),
+    winType: z.enum(['leaderboard', 'first_to_n', 'threshold', 'raffle']),
+    config: z.object({
+      topN: z.number().int().min(1).optional(),
+      count: z.number().int().min(1).optional(),
+      threshold: z.number().int().min(1).optional(),
+      prizeType: z.enum(['badge', 'points', 'title']),
+      prizeRef: z.string().optional(),
+    }),
+  })).min(1),
+});
+
+export const UpdateEventSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().max(1000).optional(),
+  startsAt: z.string().min(1).optional(),
+  endsAt: z.string().min(1).optional(),
+  status: z.enum(['draft', 'active', 'ended']).optional(),
+  bannerUrl: z.string().url().nullable().optional(),
+  requiresOptIn: z.boolean().optional(),
+  rules: z.array(z.object({
+    metricKey: z.string().min(1),
+    winType: z.enum(['leaderboard', 'first_to_n', 'threshold', 'raffle']),
+    config: z.object({
+      topN: z.number().int().min(1).optional(),
+      count: z.number().int().min(1).optional(),
+      threshold: z.number().int().min(1).optional(),
+      prizeType: z.enum(['badge', 'points', 'title']),
+      prizeRef: z.string().optional(),
+    }),
+  })).optional(),
+});
+
+/** WebSocket payload for instant gamification feedback (secondary path). */
+export interface GamificationRewardPayload {
+  pe?: number;
+  pt: number;
+  lv: number;
+  be?: number[];
+  levelUp?: number | null;
+  eventWin?: { eventId: number; eventName: string };
+}
+
+/** Admin support view — counters use catalog labels, no rule leakage. */
+export interface AdminUserGamificationCounter {
+  label: string;
+  value: number;
+}
+
+export interface AdminUserGamificationBadge {
+  id: number;
+  name: string;
+  imageUrl: string | null;
+  earnedAt: string;
+}
+
+export interface AdminUserGamificationLedgerEntry {
+  actionType: string;
+  delta: number;
+  createdAt: string;
+}
+
+export interface AdminUserGamification {
+  userId: number;
+  username: string;
+  level: number;
+  totalPoints: number;
+  counters: AdminUserGamificationCounter[];
+  badges: AdminUserGamificationBadge[];
+  recentLedger: AdminUserGamificationLedgerEntry[];
+}
+
+export const AdminAwardBadgeSchema = z.object({
+  badgeId: z.number().int().min(1),
+});

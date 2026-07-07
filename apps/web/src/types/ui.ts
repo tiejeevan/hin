@@ -3,7 +3,7 @@ import { Comment, User as UserType } from '@hin/types';
 export interface Toast {
   id: string;
   content: string;
-  type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted';
+  type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted' | 'badge_award' | 'level_up';
   postId?: number;
   commentId?: number;
 }

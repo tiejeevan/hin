@@ -16,6 +16,8 @@ import reportsRoutes from './routes/reports';
 import settingsRoutes from './routes/settings';
 import meRoutes from './routes/me';
 import hashtagsRoutes from './routes/hashtags';
+import adminGamificationRoutes from './routes/admin-gamification';
+import eventsRoutes from './routes/events';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -44,6 +46,8 @@ app.route('/api/settings', settingsRoutes);
 app.route('/api/me', meRoutes);
 app.route('/api/hashtags', hashtagsRoutes);
 app.route('/api/admin', adminRoutes);
+app.route('/api/admin/gamification', adminGamificationRoutes);
+app.route('/api/events', eventsRoutes);
 
 // WebSocket entrypoint -> route to Durable Object
 app.get('/ws', async (c) => {

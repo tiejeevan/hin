@@ -535,6 +535,32 @@
     .status-item .value { font-weight: 600; }
     .status-item .value.yes { color: var(--success); }
     .status-item .value.no { color: #e07070; }
+    .status-item .value.partial { color: var(--warn); }
+
+    .rollout-banner {
+      background: linear-gradient(135deg, rgba(91, 159, 212, 0.12), rgba(52, 211, 153, 0.08));
+      border: 1px solid rgba(91, 159, 212, 0.35);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .rollout-banner h2 {
+      font-size: 1rem;
+      margin: 0 0 0.5rem;
+      color: var(--success);
+    }
+    .rollout-banner p { margin: 0.35rem 0; font-size: 0.85rem; color: var(--muted); }
+    .rollout-banner strong { color: var(--text); }
+
+    .phase-card.shipped {
+      border-left-width: 4px;
+      opacity: 1;
+    }
+    .phase-card.shipped .phase-tag::after {
+      content: ' · SHIPPED';
+      color: var(--success);
+      font-weight: 700;
+    }
   </style>
 </head>
 <body>
@@ -544,12 +570,12 @@
     <h1>Platform Reviver</h1>
     <p>
       High-level architecture for badges, points, levels, and goals.
-      Keep the platform alive — always something to do, earn, and work toward.
-      This page will be enriched in future iterations.
+      <strong style="color: var(--success);">v1–v4 implemented (July 2026)</strong> — refinement and manual QA before production toggle.
     </p>
   </header>
 
   <nav>
+    <a href="#status">Status</a>
     <a href="#loops">Engagement Loops</a>
     <a href="#vision">Vision</a>
     <a href="#ownership">Who Defines What</a>
@@ -571,6 +597,38 @@
   </nav>
 
   <main>
+
+    <!-- Implementation Status -->
+    <section id="status">
+      <div class="rollout-banner">
+        <h2>Implementation status — July 2026</h2>
+        <p><strong>v1 → v2 → v3 → v4:</strong> code-complete. Core flows work in local dev.</p>
+        <p><strong>Current phase:</strong> refinement + manual QA. <code>gamification_enabled</code> stays <strong>OFF</strong> in production until verified.</p>
+        <p><strong>Tests:</strong> 26 API unit tests passing · web build OK · E2E: <code>e2e/gamification.spec.ts</code></p>
+      </div>
+      <div class="card">
+        <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text);">Migrations</h3>
+        <table class="mini-table">
+          <thead><tr><th>File</th><th>Phase</th></tr></thead>
+          <tbody>
+            <tr><td><code>0025_gamification_foundation.sql</code></td><td>v1</td></tr>
+            <tr><td><code>0026_gamification_v2.sql</code></td><td>v2</td></tr>
+            <tr><td><code>0027_gamification_v3.sql</code></td><td>v3</td></tr>
+            <tr><td><code>0028_gamification_v4.sql</code></td><td>v4</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card" style="margin-top: 0.75rem;">
+        <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text);">Refinement backlog (one at a time)</h3>
+        <ul class="principles" style="gap: 0.35rem;">
+          <li style="padding: 0.45rem 0.7rem; font-size: 0.78rem;">UX polish — toasts, progress bars, admin forms</li>
+          <li style="padding: 0.45rem 0.7rem; font-size: 0.78rem;">Streak timezone (UTC today; per-user TZ optional)</li>
+          <li style="padding: 0.45rem 0.7rem; font-size: 0.78rem;"><code>post_unshared</code> — handler ready, no unshare route yet</li>
+          <li style="padding: 0.45rem 0.7rem; font-size: 0.78rem;">Load test ~100 concurrent users</li>
+          <li style="padding: 0.45rem 0.7rem; font-size: 0.78rem;">Production toggle decision after manual QA</li>
+        </ul>
+      </div>
+    </section>
 
     <!-- Engagement Loops -->
     <section id="loops">
@@ -840,16 +898,16 @@ flowchart TB
         </pre>
       </div>
       <div class="card" style="margin-top: 1rem;">
-        <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text);">Current HIN status</h3>
+        <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text);">Platform Reviver status</h3>
         <div class="status-grid">
-          <div class="status-item"><div class="label">users.id identity</div><div class="value yes">Ready</div></div>
-          <div class="status-item"><div class="label">Admin panel</div><div class="value yes">Ready</div></div>
-          <div class="status-item"><div class="label">R2 image upload</div><div class="value yes">Ready</div></div>
-          <div class="status-item"><div class="label">Shares · follows · comments</div><div class="value yes">Ready</div></div>
-          <div class="status-item"><div class="label">Gamification tables</div><div class="value no">Not yet</div></div>
-          <div class="status-item"><div class="label">Login streak tracking</div><div class="value no">Not yet</div></div>
-          <div class="status-item"><div class="label">Gamification hub</div><div class="value no">Not yet</div></div>
-          <div class="status-item"><div class="label">Badge notifications</div><div class="value yes">Infra ready</div></div>
+          <div class="status-item"><div class="label">Gamification hub</div><div class="value yes">Shipped</div></div>
+          <div class="status-item"><div class="label">Gamification tables</div><div class="value yes">0025–0028</div></div>
+          <div class="status-item"><div class="label">Login streak tracking</div><div class="value yes">Bootstrap</div></div>
+          <div class="status-item"><div class="label">Events + leaderboards</div><div class="value yes">Shipped</div></div>
+          <div class="status-item"><div class="label">Session heartbeat</div><div class="value yes">v4</div></div>
+          <div class="status-item"><div class="label">Badge notifications</div><div class="value yes">Live</div></div>
+          <div class="status-item"><div class="label">Admin + profile UI</div><div class="value yes">Shipped</div></div>
+          <div class="status-item"><div class="label">Production toggle</div><div class="value partial">QA pending</div></div>
         </div>
       </div>
     </section>
@@ -1025,10 +1083,10 @@ flowchart LR
       </div>
 
       <div class="workflow-note">
-        <strong>Agent workflow:</strong> Implement v1 → v2 → v3 → v4 <strong>sequentially</strong> (one phase per PR). After each phase, fill in that phase's <strong>Agent Handoff</strong> — what's done, what to verify, next steps. Do not start the next phase until verification passes.
+        <strong>Status (July 2026):</strong> v1–v4 <strong>shipped in code</strong>. Agent handoffs below are filled in. Next: <strong>manual QA</strong> in local/staging, then <strong>refinement</strong> one item at a time. Keep <code>gamification_enabled</code> OFF in production until QA passes.
       </div>
 
-      <div class="phase-card v1" style="margin-top: 0;">
+      <div class="phase-card v1 shipped" style="margin-top: 0;">
         <div class="phase-tag">v1 — Foundation</div>
         <h3>Hub off by default</h3>
         <p class="phase-desc">Pipeline skeleton. Zero user UI. Zero D1 cost when OFF.</p>
@@ -1046,12 +1104,13 @@ flowchart LR
         </ul>
         <div class="handoff">
           <div class="handoff-title">v1 Agent Handoff</div>
-          <p class="handoff-note">Agent: fill in when v1 is complete. Next agent reads this before starting v2.</p>
+          <p class="handoff-note">v1 complete.</p>
           <div class="handoff-block">
-            <h4>What's done <em>(agent fills in)</em></h4>
-            <pre class="handoff-template">Migration: packages/db/migrations/________.sql
+            <h4>What's done</h4>
+            <pre class="handoff-template">Migration: 0025_gamification_foundation.sql
 Hub: apps/api/src/lib/gamification/{hub,registry,evaluator,counters,settings}.ts
-Admin routes: /api/admin/gamification/...
+Admin: /api/admin/gamification/settings, /metrics
+Tests: hub.test.ts, evaluator.test.ts (9 tests)
 gamification_enabled default: false</pre>
           </div>
           <div class="handoff-block">
@@ -1074,7 +1133,7 @@ gamification_enabled default: false</pre>
         </div>
       </div>
 
-      <div class="phase-card v2">
+      <div class="phase-card v2 shipped">
         <div class="phase-tag">v2 — Core rewards</div>
         <h3>Points, levels, badges, admin CRUD</h3>
         <p class="phase-desc">Admin turns ON. Users earn on real actions. Badge images in R2.</p>
@@ -1094,13 +1153,14 @@ gamification_enabled default: false</pre>
         </ul>
         <div class="handoff">
           <div class="handoff-title">v2 Agent Handoff</div>
-          <p class="handoff-note">Agent: fill in when v2 is complete. Next agent reads this before starting v3.</p>
+          <p class="handoff-note">v2 complete.</p>
           <div class="handoff-block">
-            <h4>What's done <em>(agent fills in)</em></h4>
-            <pre class="handoff-template">Route hooks: posts, follows (+ decrements)
-Notification types: badge_award, level_up
-Frontend: AdminGamification, BadgeGrid, LevelBadge
-Bootstrap g block: yes / no</pre>
+            <h4>What's done</h4>
+            <pre class="handoff-template">Migration: 0026_gamification_v2.sql
+Hooks: posts (create/share/delete/like), follows
+Frontend: AdminGamification, LevelBadge, BadgeGrid, GoalProgress
+R2 badge upload · bootstrap g block · badge_award / level_up
+Starter: Getting Started, Rising Voice, Crowd Favorite</pre>
           </div>
           <div class="handoff-block">
             <h4>What to verify</h4>
@@ -1122,7 +1182,7 @@ Bootstrap g block: yes / no</pre>
         </div>
       </div>
 
-      <div class="phase-card v3">
+      <div class="phase-card v3 shipped">
         <div class="phase-tag">v3 — Engagement</div>
         <h3>Streaks, events, instant delivery</h3>
         <p class="phase-desc">Login streaks, time-boxed competitions, WebSocket toasts — no refresh.</p>
@@ -1141,13 +1201,15 @@ Bootstrap g block: yes / no</pre>
         </ul>
         <div class="handoff">
           <div class="handoff-title">v3 Agent Handoff</div>
-          <p class="handoff-note">Agent: fill in when v3 is complete. Next agent reads this before starting v4.</p>
+          <p class="handoff-note">v3 complete.</p>
           <div class="handoff-block">
-            <h4>What's done <em>(agent fills in)</em></h4>
-            <pre class="handoff-template">Streak: GET /api/me/bootstrap → session_active
+            <h4>What's done</h4>
+            <pre class="handoff-template">Migration: 0027_gamification_v3.sql
+Streak: GET /api/me/bootstrap → session_active (UTC)
 Comments: comment_created / comment_deleted
-Events cache: 5-min TTL + admin invalidation
-WS: gamification_reward toast handler</pre>
+Events: cache 5min, leaderboard, first_to_n, threshold
+Frontend: ActiveEventsBanner, EventLeaderboard, GamificationToast, AdminEvents
+WS: gamification_reward · Week Regular badge seeded</pre>
           </div>
           <div class="handoff-block">
             <h4>What to verify</h4>
@@ -1169,7 +1231,7 @@ WS: gamification_reward toast handler</pre>
         </div>
       </div>
 
-      <div class="phase-card v4">
+      <div class="phase-card v4 shipped">
         <div class="phase-tag">v4 — Scale &amp; polish</div>
         <h3>Duration, anti-abuse, operations</h3>
         <p class="phase-desc">Session time, farming prevention, admin user lookup, ledger archival.</p>
@@ -1188,28 +1250,34 @@ WS: gamification_reward toast handler</pre>
         </ul>
         <div class="handoff">
           <div class="handoff-title">v4 Agent Handoff</div>
-          <p class="handoff-note">Agent: fill in when v4 is complete. Core rollout done.</p>
+          <p class="handoff-note">v4 complete — core rollout done. Manual QA + refinement next.</p>
           <div class="handoff-block">
-            <h4>What's done <em>(agent fills in)</em></h4>
-            <pre class="handoff-template">Session tick: POST /api/me/session-tick
-Anti-abuse: daily cap, rate limits
-Ledger archival + admin user lookup
-E2E: e2e/________.spec.ts
-Load test: _____ users, _____ D1 writes/day</pre>
+            <h4>What's done</h4>
+            <pre class="handoff-template">Migration: 0028_gamification_v4.sql
+Session tick: POST /api/me/session-tick + useSessionTick
+Anti-abuse: daily cap 500, rate limits
+Admin: users/:id lookup, manual award/revoke
+Ledger archival · raffle win type · likes_given hooks
+E2E: e2e/gamification.spec.ts · Warming Up badge</pre>
           </div>
           <div class="handoff-block">
-            <h4>What to verify</h4>
+            <h4>What to verify (manual QA)</h4>
             <ul class="handoff-list">
-              <li>Session minutes + daily cap enforced</li>
-              <li>Farming blocked; admin manual award works</li>
-              <li>Ledger archival; E2E green; load test OK</li>
+              <li>Session minutes + daily cap</li>
+              <li>Anti-abuse under spam</li>
+              <li>Admin user lookup + manual award</li>
+              <li>Raffle event winner</li>
+              <li>Load test ~100 concurrent (optional)</li>
+              <li>Production toggle decision</li>
             </ul>
           </div>
           <div class="handoff-block">
-            <h4>Next steps → after v4</h4>
+            <h4>Next steps → refinement</h4>
             <ul class="handoff-list next">
-              <li>Monitor D1/Worker usage; enable in production when ready</li>
-              <li>New goals: registry entry + hook + admin badge (no hub rewrite)</li>
+              <li>Manual QA checklist in platform reviver.md</li>
+              <li>Polish UX one item at a time</li>
+              <li>Enable gamification in staging, then production</li>
+              <li>Monitor D1 writes — upgrade at ~70K+/day</li>
             </ul>
           </div>
         </div>
@@ -1218,13 +1286,13 @@ Load test: _____ users, _____ D1 writes/day</pre>
       <div class="card" style="margin-top: 0.5rem;">
         <table class="mini-table">
           <thead>
-            <tr><th>Phase</th><th>DB</th><th>Backend</th><th>Frontend</th><th>R2</th><th>DO</th></tr>
+            <tr><th>Phase</th><th>Status</th><th>DB</th><th>Backend</th><th>Frontend</th><th>R2</th><th>DO</th></tr>
           </thead>
           <tbody>
-            <tr><td><strong>v1</strong></td><td>Core tables</td><td>Hub OFF</td><td>—</td><td>—</td><td>—</td></tr>
-            <tr><td><strong>v2</strong></td><td>user_badges</td><td>4 metrics, admin</td><td>Profile + admin</td><td>Badges</td><td>Notifications</td></tr>
-            <tr><td><strong>v3</strong></td><td>Events, streaks</td><td>Events engine</td><td>Toasts, events</td><td>Banners</td><td>WS toasts</td></tr>
-            <tr><td><strong>v4</strong></td><td>Archival</td><td>Heartbeat, abuse</td><td>Support UI</td><td>Banners</td><td>Optimize</td></tr>
+            <tr><td><strong>v1</strong></td><td style="color: var(--success);">Shipped</td><td>Core tables</td><td>Hub OFF</td><td>—</td><td>—</td><td>—</td></tr>
+            <tr><td><strong>v2</strong></td><td style="color: var(--success);">Shipped</td><td>user_badges</td><td>Metrics, admin</td><td>Profile + admin</td><td>Badges</td><td>Notifications</td></tr>
+            <tr><td><strong>v3</strong></td><td style="color: var(--success);">Shipped</td><td>Events, streaks</td><td>Events engine</td><td>Toasts, events</td><td>Banners</td><td>WS toasts</td></tr>
+            <tr><td><strong>v4</strong></td><td style="color: var(--success);">Shipped</td><td>Archival</td><td>Heartbeat, abuse</td><td>Support UI</td><td>Banners</td><td>Reuse DO</td></tr>
           </tbody>
         </table>
       </div>
@@ -1478,9 +1546,9 @@ flowchart LR
 
   <footer>
     <p>
-      Platform Reviver · HIN gamification design reference ·
+      Platform Reviver · HIN gamification ·
       <a href="platform%20reviver.md">platform reviver.md</a> ·
-      Living document — March 2026 · starter pack · actions &amp; naming · agent handoffs · 43 goals · D1 · R2 · RealtimeDO
+      July 2026 · v1–v4 shipped · refinement phase · 26 API tests · D1 · R2 · RealtimeDO
     </p>
   </footer>
 

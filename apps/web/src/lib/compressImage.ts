@@ -1,11 +1,13 @@
 import imageCompression from 'browser-image-compression';
 
-export type ImageCompressKind = 'avatar' | 'cover' | 'post';
+export type ImageCompressKind = 'avatar' | 'cover' | 'post' | 'badge' | 'event_banner';
 
 const PRESETS: Record<ImageCompressKind, { maxWidthOrHeight: number; maxSizeMB: number; initialQuality: number }> = {
   avatar: { maxWidthOrHeight: 512, maxSizeMB: 0.2, initialQuality: 0.7 },
   cover: { maxWidthOrHeight: 1600, maxSizeMB: 0.4, initialQuality: 0.75 },
   post: { maxWidthOrHeight: 1920, maxSizeMB: 0.5, initialQuality: 0.75 },
+  badge: { maxWidthOrHeight: 256, maxSizeMB: 0.15, initialQuality: 0.8 },
+  event_banner: { maxWidthOrHeight: 1200, maxSizeMB: 0.5, initialQuality: 0.85 },
 };
 
 /**

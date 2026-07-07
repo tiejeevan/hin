@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, desc, and, count, sql, isNull, lt, inArray, notInArray, asc } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { Post, Comment, Notification, PostsPage, PostThreadPage, parseCreatePostBody, VotePollSchema, validatePostLimits } from '@hin/types';
+import { Post, Comment, Notification, PostsPage, PostThreadPage, parseCreatePostBody, VotePollSchema, validatePostLimits, type GamificationActionBlock, type GamificationActionResult, type PostVisibility } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { linkPostMedia, parseMediaUrls, serializeMediaUrls, validateOwnedPostMedia } from '../lib/media';
@@ -17,9 +17,22 @@ import { getOrCreateUserSettings, isNotificationEnabled } from '../lib/user-sett
 import { pinPost, unpinPost } from '../lib/post-pins';
 import { getSystemSettings } from '../lib/system-settings';
 import { validateThreadReply, countThreadReplies, assertCanViewThread, getThreadPostRows } from '../lib/post-threads';
-import type { PostVisibility } from '@hin/types';
+import { processUserActionSafe } from '../lib/gamification/hub';
 
 const posts = new Hono<{ Bindings: Env }>();
+
+function toGamificationBlock(result: GamificationActionResult): GamificationActionBlock | undefined {
+  if (result.skipped) return undefined;
+  const block: GamificationActionBlock = {
+    pe: result.pointsEarned,
+    pt: result.totalPoints,
+    lv: result.level,
+  };
+  if (result.badgesEarned.length > 0) {
+    block.be = result.badgesEarned;
+  }
+  return block;
+}
 
 const DEFAULT_FEED_LIMIT = 10;
 const MAX_FEED_LIMIT = 50;
@@ -508,7 +521,17 @@ posts.post('/', async (c) => {
     await broadcastEvent(c.env, { type: 'post_updated', payload: { post: responsePost } });
   }
 
-  return c.json(responsePost);
+  const gResult = await processUserActionSafe(
+    db,
+    c.env,
+    authUser.id,
+    'post_created',
+    { postId: inserted.id, mediaCount: mediaUrls.length },
+    authUser.username,
+  );
+  const g = toGamificationBlock(gResult);
+
+  return c.json(g ? { ...responsePost, g } : responsePost);
 });
 
 // Edit Post (Owner or Admin)
@@ -711,6 +734,30 @@ posts.post('/:id/like', async (c) => {
     }));
   } catch (e) {}
 
+  if (post.userId !== authUser.id) {
+    const author = await db.select({ username: schema.users.username })
+      .from(schema.users)
+      .where(eq(schema.users.id, post.userId))
+      .get();
+    await processUserActionSafe(
+      db,
+      c.env,
+      post.userId,
+      liked ? 'post_liked' : 'post_unliked',
+      { postId, likeCount: likesCount },
+      author?.username ?? 'Hin',
+    );
+  }
+
+  await processUserActionSafe(
+    db,
+    c.env,
+    authUser.id,
+    liked ? 'like_given' : 'like_removed',
+    { postId },
+    authUser.username,
+  );
+
   return c.json({ liked, likesCount });
 });
 
@@ -795,7 +842,17 @@ posts.post('/:id/share', async (c) => {
     .get();
   const sharesCount = sharesCountRes?.value || 0;
 
-  return c.json({ sharesCount, postId });
+  const gResult = await processUserActionSafe(
+    db,
+    c.env,
+    authUser.id,
+    'post_shared',
+    { postId },
+    authUser.username,
+  );
+  const g = toGamificationBlock(gResult);
+
+  return c.json(g ? { sharesCount, postId, g } : { sharesCount, postId });
 });
 
 // Get post comments
@@ -1142,7 +1199,17 @@ posts.post('/:id/comments', async (c) => {
     }));
   } catch (e) {}
 
-  return c.json(commentResponse);
+  const gResult = await processUserActionSafe(
+    db,
+    c.env,
+    authUser.id,
+    'comment_created',
+    { postId, commentId: inserted.id },
+    authUser.username,
+  );
+  const g = toGamificationBlock(gResult);
+
+  return c.json({ ...commentResponse, ...(g ? { g } : {}) });
 });
 
 // Vote on poll
@@ -1238,11 +1305,13 @@ posts.delete('/:id', async (c) => {
   const postId = parseInt(c.req.param('id'));
 
   const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
-  if (!post) return c.json({ error: 'Post not found' }, 404);
+  if (!post || post.deletedAt) return c.json({ error: 'Post not found' }, 404);
 
   if (authUser.role !== 'admin' && authUser.id !== post.userId) {
     return c.json({ error: 'Forbidden' }, 403);
   }
+
+  const mediaCount = parseMediaUrls(post.mediaUrls).length;
 
   await db.update(schema.posts)
     .set({ deletedAt: sql`CURRENT_TIMESTAMP` })
@@ -1258,6 +1327,20 @@ posts.delete('/:id', async (c) => {
       body: JSON.stringify({ type: 'post_deleted', payload: { postId } }),
     }));
   } catch (e) {}
+
+  const owner = await db.select({ username: schema.users.username })
+    .from(schema.users)
+    .where(eq(schema.users.id, post.userId))
+    .get();
+
+  await processUserActionSafe(
+    db,
+    c.env,
+    post.userId,
+    'post_deleted',
+    { postId, mediaCount },
+    owner?.username ?? 'Hin',
+  );
 
   return c.json({ success: true });
 });

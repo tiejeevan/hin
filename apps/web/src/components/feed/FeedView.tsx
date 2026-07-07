@@ -7,6 +7,7 @@ import type { CreatePostSubmitPayload } from './CreatePostForm';
 import { PostCard } from './PostCard';
 import { FeedModeSelector } from './FeedModeSelector';
 import { ExploreHashtags } from './ExploreHashtags';
+import { ActiveEventsBanner } from '../gamification/ActiveEventsBanner';
 
 interface FeedViewProps {
   posts: Post[];
@@ -67,6 +68,8 @@ interface FeedViewProps {
   threadReplyContent?: string;
   onThreadReplyContentChange?: (content: string) => void;
   postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
+  gamificationEnabled?: boolean;
+  onGamificationRefresh?: () => void;
 }
 
 export function FeedView({
@@ -128,6 +131,8 @@ export function FeedView({
   threadReplyContent,
   onThreadReplyContentChange,
   postLimits,
+  gamificationEnabled = false,
+  onGamificationRefresh,
 }: FeedViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const loadMoreRef = useRef(onLoadMore);
@@ -166,6 +171,10 @@ export function FeedView({
     <div ref={scrollRef} className="flex-grow overflow-y-auto p-4 md:p-6 relative">
       <div className="max-w-2xl mx-auto w-full space-y-4 pb-20 md:pb-4">
       <FeedModeSelector feedMode={feedMode} onFeedModeChange={onFeedModeChange} />
+
+      {gamificationEnabled && (
+        <ActiveEventsBanner token={token} onGamificationRefresh={onGamificationRefresh} />
+      )}
 
       {feedMode === 'explore' && onSelectHashtag && (
         <ExploreHashtags activeHashtag={activeHashtag} onSelectHashtag={onSelectHashtag} />

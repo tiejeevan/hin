@@ -1,5 +1,6 @@
 import { ArrowLeft, Lock } from 'lucide-react';
-import { FollowRequest, Post, Comment, User as UserType, UserSettings, SystemSettings } from '@hin/types';
+import { FollowRequest, Post, Comment, User as UserType, UserSettings, SystemSettings, type GamificationPublic } from '@hin/types';
+import { GoalProgress } from '../gamification/GoalProgress';
 import { CommentNode } from '../../types/ui';
 import { AuthForm } from '../auth/AuthForm';
 import { ProfileHeader } from './ProfileHeader';
@@ -97,6 +98,9 @@ interface ProfileViewProps {
   threadPosts?: import('@hin/types').Post[];
   postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
   onDeleteAccount?: (password: string) => Promise<{ success: boolean; error?: string }>;
+  profileGamification?: GamificationPublic | null;
+  showGamification?: boolean;
+  gamificationEnabled?: boolean;
 }
 
 export function ProfileView({
@@ -189,6 +193,9 @@ export function ProfileView({
   onThreadReplyContentChange,
   postLimits,
   onDeleteAccount,
+  profileGamification,
+  showGamification = false,
+  gamificationEnabled = false,
 }: ProfileViewProps) {
   const isOwnProfile = !!currentUser && profileUser?.id === currentUser.id;
   const canViewPosts = profileUser?.canViewPosts !== false;
@@ -241,7 +248,13 @@ export function ProfileView({
             onCopyPermalink={onCopyPermalink}
             onReport={onReport}
             onSignInRequired={handleSignInRequired}
+            gamification={profileGamification}
+            showGamification={showGamification}
           />
+
+          {isOwnProfile && showGamification && gamificationEnabled && profileGamification && profileGamification.goalsInProgress.length > 0 && !isEditing && !isSettingsOpen && (
+            <GoalProgress goals={profileGamification.goalsInProgress} />
+          )}
 
           {isOwnProfile && isSettingsOpen && !isEditing && token && (
             <ProfileSettingsPanel

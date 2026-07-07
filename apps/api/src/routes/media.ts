@@ -9,12 +9,14 @@ const media = new Hono<{ Bindings: Env }>();
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
-const UPLOAD_TYPES = ['avatar', 'cover', 'post'] as const;
+const UPLOAD_TYPES = ['avatar', 'cover', 'post', 'badge', 'event_banner'] as const;
 type UploadType = (typeof UPLOAD_TYPES)[number];
 
 function folderForType(type: UploadType, userId: number): string {
   if (type === 'avatar') return `avatars/${userId}`;
   if (type === 'cover') return `covers/${userId}`;
+  if (type === 'badge') return `badges/${userId}`;
+  if (type === 'event_banner') return `events/${userId}`;
   return `posts/${userId}`;
 }
 
@@ -108,6 +110,13 @@ media.post('/api/upload', async (c) => {
     return c.json({ error: 'Invalid upload type' }, 400);
   }
   const type = uploadType as UploadType;
+
+  if (type === 'badge' && authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+  if (type === 'event_banner' && authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
 
   if (!ALLOWED_TYPES.includes(file.type as (typeof ALLOWED_TYPES)[number])) {
     return c.json({ error: 'Invalid file type. Use JPEG, PNG, or WebP.' }, 400);

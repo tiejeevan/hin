@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Shield, MessageCircle, Pencil, UserPlus, UserCheck, Clock, Settings, MoreHorizontal, VolumeX, Volume2, Ban, UserX, Link2, Flag } from 'lucide-react';
-import { BlockStatus, FollowStatus, MuteStatus, User as UserType } from '@hin/types';
+import { BlockStatus, FollowStatus, MuteStatus, User as UserType, type GamificationPublic } from '@hin/types';
 import { UserAvatar } from './UserAvatar';
 import { ProfileEditForm } from './ProfileEditForm';
+import { LevelBadge } from '../gamification/LevelBadge';
+import { PointsDisplay } from '../gamification/PointsDisplay';
+import { BadgeGrid } from '../gamification/BadgeGrid';
 
 interface ProfileHeaderProps {
   user: UserType;
@@ -30,6 +33,8 @@ interface ProfileHeaderProps {
   onCopyPermalink?: () => void;
   onReport?: () => void;
   onSignInRequired?: () => void;
+  gamification?: GamificationPublic | null;
+  showGamification?: boolean;
 }
 
 function followButtonLabel(status: FollowStatus | undefined, isPrivate: boolean | undefined): string {
@@ -64,6 +69,8 @@ export function ProfileHeader({
   onCopyPermalink,
   onReport,
   onSignInRequired,
+  gamification,
+  showGamification = false,
 }: ProfileHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -301,6 +308,12 @@ export function ProfileHeader({
         <div className="mt-3 space-y-1 text-left">
           <h1 className="text-lg font-bold text-text-primary flex items-center gap-1.5 flex-wrap">
             {user.username}
+            {showGamification && gamification && (
+              <>
+                <LevelBadge level={gamification.level} />
+                <PointsDisplay totalPoints={gamification.totalPoints} compact />
+              </>
+            )}
             {user.role === 'admin' && <Shield className="h-4 w-4 text-amber-500" />}
             {followStatus === 'follows_you' && !isOwnProfile && canInteract && (
               <span className="text-[10px] font-semibold text-text-muted bg-bg-tertiary px-2 py-0.5 rounded-md">
@@ -333,6 +346,10 @@ export function ProfileHeader({
             {user.bio?.trim() || (isOwnProfile ? 'Add a bio to tell others about yourself.' : 'No bio yet.')}
           </p>
         </div>
+
+        {showGamification && gamification && gamification.badges.length > 0 && (
+          <BadgeGrid badges={gamification.badges} className="mt-4 text-left" />
+        )}
       </div>
     </div>
   );

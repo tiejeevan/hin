@@ -11,6 +11,9 @@ import { getOrCreateUserSettings } from '../lib/user-settings';
 import { getSystemSettings } from '../lib/system-settings';
 import { countUnreadNotifications } from '../lib/notifications';
 import { countUnreadMessages } from '../lib/messages';
+import { toGamificationPublic, toGamificationBlock } from '../lib/gamification/public';
+import { isGamificationEnabled } from '../lib/gamification/settings';
+import { processUserActionSafe } from '../lib/gamification/hub';
 
 const me = new Hono<{ Bindings: Env }>();
 
@@ -19,6 +22,19 @@ me.get('/bootstrap', async (c) => {
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
 
   const db = drizzle(c.env.DB, { schema });
+
+  const gamificationEnabled = await isGamificationEnabled(db);
+
+  if (gamificationEnabled) {
+    await processUserActionSafe(
+      db,
+      c.env,
+      authUser.id,
+      'session_active',
+      { source: 'bootstrap' },
+      authUser.username,
+    );
+  }
 
   const [
     followingIds,
@@ -29,6 +45,7 @@ me.get('/bootstrap', async (c) => {
     unreadNotifications,
     unreadMessages,
     pendingFollowRequests,
+    gamification,
   ] = await Promise.all([
     getFollowedUserIds(db, authUser.id),
     getBlockedUserIds(db, authUser.id),
@@ -38,7 +55,14 @@ me.get('/bootstrap', async (c) => {
     countUnreadNotifications(db, authUser.id),
     countUnreadMessages(db, authUser.id),
     countPendingFollowRequests(db, authUser.id),
+    toGamificationPublic(db, authUser.id, { includeGoals: true }),
   ]);
+
+  const hasGamificationData =
+    gamification.badges.length > 0
+    || gamification.totalPoints > 0
+    || gamification.level > 1
+    || gamification.goalsInProgress.length > 0;
 
   const payload: MeBootstrap = {
     followingIds,
@@ -51,9 +75,48 @@ me.get('/bootstrap', async (c) => {
       unreadMessages,
       pendingFollowRequests,
     },
+    gamificationEnabled,
+    ...(gamificationEnabled || hasGamificationData ? { g: gamification } : {}),
   };
 
   return c.json(payload);
+});
+
+me.get('/gamification', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const gamification = await toGamificationPublic(db, authUser.id);
+  return c.json(gamification);
+});
+
+me.post('/session-tick', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const enabled = await isGamificationEnabled(db);
+  if (!enabled) {
+    return c.json({ ok: true, skipped: true });
+  }
+
+  const body = await c.req.json().catch(() => ({}));
+  const minutes = typeof body?.minutes === 'number' && body.minutes > 0
+    ? Math.min(body.minutes, 5)
+    : undefined;
+
+  const gResult = await processUserActionSafe(
+    db,
+    c.env,
+    authUser.id,
+    'session_tick',
+    minutes !== undefined ? { minutes } : {},
+    authUser.username,
+  );
+
+  const g = toGamificationBlock(gResult);
+  return c.json(g ? { ok: true, g } : { ok: true });
 });
 
 export default me;

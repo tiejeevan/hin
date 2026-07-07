@@ -22,6 +22,8 @@ import {
   SystemSettings,
   DEFAULT_SYSTEM_SETTINGS,
   validatePostLimits,
+  type GamificationPublic,
+  type GamificationRewardPayload,
 } from '@hin/types';
 import { API_URL, WS_URL } from './config';
 import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode, FeedMode } from './types/ui';
@@ -42,6 +44,8 @@ import { ToastContainer } from './components/ui/ToastContainer';
 import { FloatingActionStack } from './components/ui/FloatingActionStack';
 import { FollowersModal } from './components/profile/FollowersModal';
 import { ReportModal } from './components/moderation/ReportModal';
+import { applyGamificationReward } from './components/gamification/GamificationToast';
+import { useSessionTick } from './hooks/useSessionTick';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('hin_token'));
@@ -134,7 +138,12 @@ export default function App() {
   const [isProfileEditing, setIsProfileEditing] = useState(false);
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
   const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
+  const [gamificationEnabled, setGamificationEnabled] = useState(false);
+  const [myGamification, setMyGamification] = useState<GamificationPublic | null>(null);
+  const [profileGamification, setProfileGamification] = useState<GamificationPublic | null>(null);
   const userSettingsRef = useRef<UserSettings | null>(null);
+
+  useSessionTick(token, gamificationEnabled);
 
   useEffect(() => {
     userSettingsRef.current = userSettings;
@@ -294,6 +303,46 @@ export default function App() {
     });
   };
 
+  const fetchMyGamification = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/me/gamification`, { headers: getHeaders() });
+      if (res.ok) {
+        const g: GamificationPublic = await res.json();
+        setMyGamification(g);
+        if (profileUserId === currentUser?.id) setProfileGamification(g);
+      }
+    } catch (e) {
+      console.error('Error fetching gamification:', e);
+    }
+  };
+
+  const fetchProfileGamification = async (userId: number) => {
+    if (!token) {
+      setProfileGamification(null);
+      return;
+    }
+    if (userId === currentUser?.id) {
+      await fetchMyGamification();
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/api/users/${userId}/gamification`, { headers: getHeaders() });
+      if (res.ok) {
+        setProfileGamification(await res.json());
+      } else {
+        setProfileGamification(null);
+      }
+    } catch {
+      setProfileGamification(null);
+    }
+  };
+
+  const shouldShowGamification = (g: GamificationPublic | null | undefined) => {
+    if (!g) return false;
+    return gamificationEnabled || g.badges.length > 0 || g.totalPoints > 0 || g.level > 1;
+  };
+
   const fetchBootstrap = async () => {
     if (!token) return;
     try {
@@ -307,6 +356,8 @@ export default function App() {
         setSystemSettings(data.systemSettings);
         setUnreadNotifsCount(data.counts.unreadNotifications);
         setUnreadMessagesCount(data.counts.unreadMessages);
+        setGamificationEnabled(!!data.gamificationEnabled);
+        setMyGamification(data.g ?? null);
       }
     } catch (e) {
       console.error('Error fetching bootstrap:', e);
@@ -404,6 +455,7 @@ export default function App() {
     }
     const user = await fetchProfile(userId);
     fetchProfilePosts(userId);
+    void fetchProfileGamification(userId);
     if (userId === currentUser?.id) fetchFollowRequests();
     if (!opts?.skipUrlSync && !opts?.username && user?.username) {
       syncUrl({ view: 'profile', username: user.username }, opts?.replace);
@@ -442,6 +494,7 @@ export default function App() {
         setProfileLoading(false);
         setProfileError(null);
         fetchProfilePosts(user.id);
+        void fetchProfileGamification(user.id);
         if (user.id === currentUser?.id) fetchFollowRequests();
       } else {
         setProfileUserId(null);
@@ -974,6 +1027,12 @@ export default function App() {
                 showToast(notif.type)
               ) {
                 addToast(notif.content, notif.type, undefined, { skipPrefCheck: true });
+              } else if (notif.type === 'badge_award' && showToast('badge_award')) {
+                addToast(notif.content, 'badge_award', undefined, { skipPrefCheck: true });
+                void fetchMyGamification();
+              } else if (notif.type === 'level_up' && showToast('level_up')) {
+                addToast(notif.content, 'level_up', undefined, { skipPrefCheck: true });
+                void fetchMyGamification();
               }
               if (notif.type === 'follow_request' && notif.userId === currentUser!.id) {
                 fetchFollowRequests();
@@ -1010,6 +1069,13 @@ export default function App() {
               if (!settings || shouldShowNotificationToast(settings, 'system')) {
                 addToast(message.payload.content, 'system', undefined, { skipPrefCheck: true });
               }
+              break;
+            }
+            case 'gamification_reward': {
+              applyGamificationReward(message.payload as GamificationRewardPayload, {
+                addToast,
+                onRefresh: () => { void fetchMyGamification(); },
+              });
               break;
             }
             case 'post_created': {
@@ -1282,6 +1348,12 @@ export default function App() {
     setShowNewPostForm(false);
     setNewlyCreatedPostId(newPost.id);
     setTimeout(() => setNewlyCreatedPostId(null), 3000);
+    if (newPost.g) {
+      void fetchMyGamification();
+      if (newPost.g.pe > 0) {
+        addToast(`+${newPost.g.pe} points earned!`, 'badge_award', undefined, { skipPrefCheck: true });
+      }
+    }
   };
 
   const updatePostInState = (updated: import('@hin/types').Post) => {
@@ -1604,6 +1676,15 @@ export default function App() {
         }
         setNewCommentText(prev => ({ ...prev, [postId]: '' }));
         setReplyingTo(prev => ({ ...prev, [postId]: null }));
+        if (newComment.g) {
+          void fetchMyGamification();
+          if (newComment.g.pe > 0) {
+            addToast(`+${newComment.g.pe} points earned!`, 'badge_award', undefined, { skipPrefCheck: true });
+          }
+          if (newComment.g.be && newComment.g.be.length > 0) {
+            addToast('Badge earned!', 'badge_award', undefined, { skipPrefCheck: true });
+          }
+        }
       }
     } catch (e) {
       console.error(e);
@@ -1741,6 +1822,10 @@ export default function App() {
     handleMarkNotifRead(n.id);
     setShowNotifications(false);
     if (n.type === 'system') return;
+    if (n.type === 'badge_award' || n.type === 'level_up') {
+      openProfile(currentUser!.id);
+      return;
+    }
     if (n.type === 'message') {
       try {
         const res = await fetch(`${API_URL}/api/users/${n.senderId}`, { headers: getHeaders() });
@@ -2185,6 +2270,8 @@ export default function App() {
             onMarkAllNotificationsRead={handleMarkAllNotifsRead}
             onOpenProfile={openProfile}
             onLogout={handleLogout}
+            gamification={myGamification}
+            showGamification={shouldShowGamification(myGamification)}
           />
         ) : undefined
       }
@@ -2409,6 +2496,9 @@ export default function App() {
             onThreadReplyContentChange={setThreadReplyContent}
             onDeleteAccount={handleDeleteAccount}
             postLimits={postLimits}
+            profileGamification={profileGamification}
+            showGamification={shouldShowGamification(profileGamification)}
+            gamificationEnabled={gamificationEnabled}
           />
         ) : currentUser && activeTab === 'feed' ? (
           <FeedView
@@ -2479,6 +2569,8 @@ export default function App() {
             threadReplyContent={threadReplyContent}
             onThreadReplyContentChange={setThreadReplyContent}
             postLimits={postLimits}
+            gamificationEnabled={gamificationEnabled}
+            onGamificationRefresh={() => { void fetchMyGamification(); }}
           />
         ) : currentUser && activeTab === 'admin' ? (
           <AdminDashboard
