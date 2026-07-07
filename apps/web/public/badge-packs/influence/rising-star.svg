@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="starTail" x1="0%" y1="100%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#F27121" stop-opacity="0.1" />
+        <stop offset="100%" stop-color="#E94057" />
+      </linearGradient>
+    </defs>
+    <!-- Shooting tail -->
+    <path d="M8 52L24 38L32 46L8 52Z" fill="url(#starTail)" />
+    <path d="M42 12L45 22L55 22L47 28L50 38L42 32L34 38L37 28L29 22L39 22Z" fill="#F1C40F" stroke="#D35400" stroke-width="1.5" />
+    <circle cx="42" cy="22" r="14" stroke="#FFF" stroke-width="1" stroke-dasharray="4 4" opacity="0.3" />
+  
+</svg>

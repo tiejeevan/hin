@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="brainNeon" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#EC4899" />
+        <stop offset="100%" stop-color="#8B5CF6" />
+      </linearGradient>
+    </defs>
+    <path d="M26 24C20 24 18 28 18 32C18 36 22 38 26 38C26 42 30 46 36 46C42 46 44 42 44 38C48 38 52 36 52 32C52 28 50 24 44 24C44 20 40 16 36 16C32 16 26 20 26 24Z" fill="none" stroke="url(#brainNeon)" stroke-width="3" stroke-linecap="round" />
+    <path d="M32 18V44" stroke="url(#brainNeon)" stroke-width="2" stroke-dasharray="3 3" />
+  
+</svg>

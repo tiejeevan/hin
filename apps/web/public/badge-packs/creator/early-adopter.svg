@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="circuitGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#10B981" />
+        <stop offset="100%" stop-color="#3B82F6" />
+      </linearGradient>
+    </defs>
+    <!-- Plant growing from digital plate -->
+    <rect x="16" y="48" width="32" height="6" fill="#374151" rx="1" />
+    <path d="M32 48V20" stroke="url(#circuitGrad)" stroke-width="3" stroke-linecap="round" />
+    <path d="M32 32C32 32 22 26 22 20C22 26 32 32 32 32Z" fill="url(#circuitGrad)" />
+    <path d="M32 26C32 26 42 20 42 14C42 20 32 26 32 26Z" fill="url(#circuitGrad)" />
+  
+</svg>

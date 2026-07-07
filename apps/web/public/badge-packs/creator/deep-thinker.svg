@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="thinkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#a1c4fd" />
+        <stop offset="100%" stop-color="#c2e9fb" />
+      </linearGradient>
+    </defs>
+    <path d="M20 54C20 42 24 38 28 32C24 32 20 28 20 22C20 12 28 6 38 8C46 10 50 18 48 26C46 34 42 38 42 54H20Z" fill="none" stroke="#2C3E50" stroke-width="3" />
+    <!-- Brain node network -->
+    <circle cx="34" cy="20" r="3.5" fill="url(#thinkGrad)" stroke="#2C3E50" stroke-width="1.5" />
+    <circle cx="44" cy="22" r="3.5" fill="url(#thinkGrad)" stroke="#2C3E50" stroke-width="1.5" />
+    <circle cx="38" cy="30" r="3.5" fill="url(#thinkGrad)" stroke="#2C3E50" stroke-width="1.5" />
+    <line x1="34" y1="20" x2="44" y2="22" stroke="#2C3E50" stroke-width="1.5" />
+    <line x1="44" y1="22" x2="38" y2="30" stroke="#2C3E50" stroke-width="1.5" />
+    <line x1="34" y1="20" x2="38" y2="30" stroke="#2C3E50" stroke-width="1.5" />
+  
+</svg>

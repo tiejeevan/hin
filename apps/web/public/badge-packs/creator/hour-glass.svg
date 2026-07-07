@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="glassGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#FFF" />
+        <stop offset="100%" stop-color="#E2E8F0" />
+      </linearGradient>
+    </defs>
+    <path d="M16 10H48V16C48 24 38 28 38 28C38 28 48 32 48 40V46H16V40C16 32 26 28 26 28C26 28 16 24 16 16V10Z" fill="none" stroke="#475569" stroke-width="3.5" stroke-linejoin="round" />
+    <polygon points="20,14 44,14 32,26" fill="#F59E0B" />
+    <circle cx="32" cy="42" r="4" fill="#F59E0B" />
+  
+</svg>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="neoMega" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#EC4899" />
+        <stop offset="100%" stop-color="#3B82F6" />
+      </linearGradient>
+    </defs>
+    <path d="M40 18L18 26H10V38H18L40 46V18Z" fill="url(#neoMega)" stroke="#1E3A8A" stroke-width="2" />
+    <path d="M40 24C44 24 48 28 48 32C48 36 44 40 40 40" fill="none" stroke="#FFF" stroke-width="3" stroke-linecap="round" />
+    <rect x="14" y="38" width="5" height="12" fill="#1E3A8A" rx="2" />
+  
+</svg>

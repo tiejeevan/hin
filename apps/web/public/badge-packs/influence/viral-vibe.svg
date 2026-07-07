@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="viralGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#11998E" />
+        <stop offset="100%" stop-color="#38EF7D" />
+      </linearGradient>
+    </defs>
+    <path d="M12 32C12 21 21 12 32 12C43 12 52 21 52 32C52 43 43 52 32 52" stroke="url(#viralGrad)" stroke-width="3" stroke-linecap="round" />
+    <path d="M20 32C20 25.4 25.4 20 32 20C38.6 20 44 25.4 44 32" stroke="url(#viralGrad)" stroke-width="2" stroke-linecap="round" />
+    <circle cx="32" cy="32" r="5" fill="#FFF" />
+    <!-- Outer viral arrows -->
+    <path d="M52 26V32H46" stroke="url(#viralGrad)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+  
+</svg>

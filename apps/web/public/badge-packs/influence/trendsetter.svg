@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="trendGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#FF5E62" />
+        <stop offset="100%" stop-color="#FF9966" />
+      </linearGradient>
+    </defs>
+    <!-- Stylish glasses -->
+    <path d="M12 24H28C29.5 24 30 25 30 26L28 34C27 38 21 38 18 38C14 38 10 35 10 31V26C10 25 10.5 24 12 24Z" fill="url(#trendGrad)" />
+    <path d="M52 24H36C34.5 24 34 25 34 26L36 34C37 38 43 38 46 38C50 38 54 35 54 31V26C54 25 53.5 24 52 24Z" fill="url(#trendGrad)" />
+    <rect x="28" y="26" width="8" height="4" fill="#FF5E62" />
+    <!-- Sparkles -->
+    <path d="M48 10L50 14L54 16L50 18L48 22L46 18L42 16L46 14Z" fill="#FFF" />
+    <path d="M12 12L13 14L15 15L13 16L12 18L11 16L9 15L11 14Z" fill="#FFF" />
+  
+</svg>

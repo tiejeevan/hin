@@ -611,6 +611,16 @@ export const UpdateGamificationSettingsSchema = z.object({
   gamificationEnabled: z.boolean(),
 });
 
+/** Requires the admin to type the literal phrase "RESET" to confirm a destructive, irreversible reset. */
+export const ResetGamificationProgressSchema = z.object({
+  confirm: z.literal('RESET'),
+});
+
+export interface ResetGamificationProgressResult {
+  success: true;
+  usersAffected: number;
+}
+
 export interface MetricCatalogEntry {
   key: string;
   label: string;
@@ -772,8 +782,8 @@ export interface AdminEventRule {
 }
 
 export const CreateEventSchema = z.object({
-  name: z.string().min(1).max(100),
-  description: z.string().max(1000).optional().default(''),
+  name: z.string().min(1, 'Name is required').max(100),
+  description: z.string().min(1, 'Description is required').max(1000),
   startsAt: z.string().min(1),
   endsAt: z.string().min(1),
   status: z.enum(['draft', 'active', 'ended']).optional().default('draft'),
@@ -793,8 +803,8 @@ export const CreateEventSchema = z.object({
 });
 
 export const UpdateEventSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  description: z.string().max(1000).optional(),
+  name: z.string().min(1, 'Name is required').max(100).optional(),
+  description: z.string().min(1, 'Description is required').max(1000).optional(),
   startsAt: z.string().min(1).optional(),
   endsAt: z.string().min(1).optional(),
   status: z.enum(['draft', 'active', 'ended']).optional(),

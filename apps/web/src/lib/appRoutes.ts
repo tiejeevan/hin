@@ -1,7 +1,10 @@
+export type AdminSection = 'dashboard' | 'platform-reviver';
+
 export type AppRoute =
   | { view: 'home' }
   | { view: 'post'; postId: number; commentId?: number }
-  | { view: 'profile'; username: string };
+  | { view: 'profile'; username: string }
+  | { view: 'admin'; section: AdminSection };
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,30}$/;
 
@@ -29,7 +32,18 @@ export function parseLocation(pathname: string, hash: string): AppRoute {
     }
   }
 
+  if (/^\/admin\/platform-reviver\/?$/.test(pathname)) {
+    return { view: 'admin', section: 'platform-reviver' };
+  }
+  if (/^\/admin\/?$/.test(pathname)) {
+    return { view: 'admin', section: 'dashboard' };
+  }
+
   return { view: 'home' };
+}
+
+export function adminPath(section: AdminSection): string {
+  return section === 'platform-reviver' ? '/admin/platform-reviver' : '/admin';
 }
 
 export function postPath(postId: number, commentId?: number): string {
@@ -47,6 +61,9 @@ export function routeToPath(route: AppRoute): string {
   }
   if (route.view === 'profile') {
     return profilePath(route.username);
+  }
+  if (route.view === 'admin') {
+    return adminPath(route.section);
   }
   return '/';
 }

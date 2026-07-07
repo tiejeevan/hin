@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="spotLight" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#FFFF80" stop-opacity="0.8" />
+        <stop offset="100%" stop-color="#FFFF80" stop-opacity="0" />
+      </linearGradient>
+    </defs>
+    <path d="M26 6H38L42 12H22L26 6Z" fill="#7F8C8D" />
+    <!-- Light cone -->
+    <path d="M24 12H40L54 58H10L24 12Z" fill="url(#spotLight)" />
+    <circle cx="32" cy="36" r="8" fill="#FFF" />
+    <text x="32" y="39.5" font-family="system-ui, sans-serif" font-size="10" font-weight="bold" fill="#D35400" text-anchor="middle">★</text>
+  
+</svg>

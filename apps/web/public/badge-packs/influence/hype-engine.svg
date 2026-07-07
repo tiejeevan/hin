@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="hypeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#FF3E96" />
+        <stop offset="100%" stop-color="#FF8C00" />
+      </linearGradient>
+    </defs>
+    <circle cx="32" cy="32" r="24" stroke="url(#hypeGrad)" stroke-width="2.5" stroke-dasharray="8 6" />
+    <path d="M28 20L36 32L28 44L44 32L28 20Z" fill="url(#hypeGrad)" />
+    <path d="M20 26L26 32L20 38" stroke="#FFF" stroke-width="3" stroke-linecap="round" />
+  
+</svg>

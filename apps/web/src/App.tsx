@@ -29,7 +29,7 @@ import { API_URL, WS_URL } from './config';
 import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode, FeedMode } from './types/ui';
 import type { CreatePostSubmitPayload } from './components/feed/CreatePostForm';
 import { mergePollFromBroadcast } from './utils/pollVisibility';
-import { parseLocation, syncUrl, postPermalinkUrl, profilePermalinkUrl } from './lib/appRoutes';
+import { parseLocation, syncUrl, postPermalinkUrl, profilePermalinkUrl, type AdminSection } from './lib/appRoutes';
 import { AppShell } from './components/layout/AppShell';
 import { AppHeader } from './components/layout/AppHeader';
 import { GuestHeader } from './components/layout/GuestHeader';
@@ -76,6 +76,7 @@ export default function App() {
   // Removed usersRef
   const feedLoadingRef = useRef(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('feed');
+  const [adminSection, setAdminSection] = useState<AdminSection>('dashboard');
 
   const FEED_PAGE_SIZE = 10;
 
@@ -322,14 +323,16 @@ export default function App() {
       setProfileGamification(null);
       return;
     }
-    if (userId === currentUser?.id) {
-      await fetchMyGamification();
-      return;
-    }
+    const isSelf = userId === currentUser?.id;
+    const url = isSelf
+      ? `${API_URL}/api/me/gamification`
+      : `${API_URL}/api/users/${userId}/gamification`;
     try {
-      const res = await fetch(`${API_URL}/api/users/${userId}/gamification`, { headers: getHeaders() });
+      const res = await fetch(url, { headers: getHeaders() });
       if (res.ok) {
-        setProfileGamification(await res.json());
+        const g: GamificationPublic = await res.json();
+        setProfileGamification(g);
+        if (isSelf) setMyGamification(g);
       } else {
         setProfileGamification(null);
       }
@@ -529,11 +532,18 @@ export default function App() {
     addToast('Profile updated successfully', 'system', undefined, { skipPrefCheck: true });
   };
 
-  const openAdmin = () => {
+  const openAdmin = (
+    section: AdminSection = 'dashboard',
+    opts?: { skipUrlSync?: boolean; replace?: boolean },
+  ) => {
     setActiveTab('admin');
+    setAdminSection(section);
     setProfileUserId(null);
     setIsProfileEditing(false);
     setShowNotifications(false);
+    if (!opts?.skipUrlSync) {
+      syncUrl({ view: 'admin', section }, opts?.replace);
+    }
   };
 
   // Removed fetchUsers
@@ -2075,6 +2085,12 @@ export default function App() {
       openPost(route.postId, { commentId: route.commentId, replace: true, skipUrlSync: true });
     } else if (route.view === 'profile') {
       openProfileByUsername(route.username, { replace: true, skipUrlSync: true });
+    } else if (route.view === 'admin') {
+      if (currentUser?.role === 'admin') {
+        openAdmin(route.section, { replace: true, skipUrlSync: true });
+      } else {
+        syncUrl({ view: 'home' }, true);
+      }
     }
 
     const onPopState = () => {
@@ -2083,6 +2099,8 @@ export default function App() {
         openPost(r.postId, { commentId: r.commentId, skipUrlSync: true });
       } else if (r.view === 'profile') {
         openProfileByUsername(r.username, { skipUrlSync: true });
+      } else if (r.view === 'admin' && currentUser?.role === 'admin') {
+        openAdmin(r.section, { skipUrlSync: true });
       } else {
         goHome({ skipUrlSync: true });
       }
@@ -2254,7 +2272,7 @@ export default function App() {
             notifications={notifications}
             isAdminTab={activeTab === 'admin'}
             onGoHome={goHome}
-            onOpenAdmin={currentUser?.role === 'admin' ? openAdmin : undefined}
+            onOpenAdmin={currentUser?.role === 'admin' ? () => openAdmin('dashboard') : undefined}
             onToggleNotifications={() => {
               setShowNotifications(prev => {
                 const next = !prev;
@@ -2574,6 +2592,8 @@ export default function App() {
           />
         ) : currentUser && activeTab === 'admin' ? (
           <AdminDashboard
+            section={adminSection}
+            onNavigateSection={(section) => openAdmin(section)}
             adminData={adminData}
             broadcastHistory={broadcastHistory}
             adminReports={adminReports}

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and, isNull, asc } from 'drizzle-orm';
+import { eq, and, isNull, asc, sql } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import {
   UpdateGamificationSettingsSchema,
@@ -11,6 +11,7 @@ import {
   CreateEventSchema,
   UpdateEventSchema,
   AdminAwardBadgeSchema,
+  ResetGamificationProgressSchema,
   type AdminBadge,
   type AdminEvent,
   type AdminEventRule,
@@ -478,6 +479,26 @@ adminGamification.patch('/events/:id', async (c) => {
   return c.json(loaded);
 });
 
+adminGamification.delete('/events/:id', async (c) => {
+  const auth = await requireAdmin(c);
+  if ('error' in auth) return auth.error;
+
+  const eventId = parseInt(c.req.param('id'), 10);
+  if (isNaN(eventId)) return c.json({ error: 'Invalid event id' }, 400);
+
+  const db = drizzle(c.env.DB, { schema });
+  const existing = await db.select().from(schema.events).where(eq(schema.events.id, eventId)).get();
+  if (!existing) return c.json({ error: 'Event not found' }, 404);
+
+  await db.delete(schema.eventWins).where(eq(schema.eventWins.eventId, eventId)).run();
+  await db.delete(schema.eventParticipants).where(eq(schema.eventParticipants.eventId, eventId)).run();
+  await db.delete(schema.eventRules).where(eq(schema.eventRules.eventId, eventId)).run();
+  await db.delete(schema.events).where(eq(schema.events.id, eventId)).run();
+
+  invalidateActiveEventsCache();
+  return c.json({ success: true });
+});
+
 adminGamification.get('/users/:id', async (c) => {
   const auth = await requireAdmin(c);
   if ('error' in auth) return auth.error;
@@ -538,6 +559,43 @@ adminGamification.post('/maintenance/archive-ledger', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const archived = await archiveOldLedgerRows(db);
   return c.json({ archived });
+});
+
+/**
+ * Destructive, irreversible "fresh start" reset: wipes every user's points, level,
+ * earned badges, points ledger, streaks, and event participation/wins. The admin's
+ * configured badges, point rules, level thresholds, and events are left untouched.
+ */
+adminGamification.post('/maintenance/reset-progress', async (c) => {
+  const auth = await requireAdmin(c);
+  if ('error' in auth) return auth.error;
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = ResetGamificationProgressSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Type RESET to confirm this action' }, 400);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+
+  const affectedRow = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(schema.userGamification)
+    .get();
+  const usersAffected = affectedRow?.count ?? 0;
+
+  await db.delete(schema.pointsLedger).run();
+  await db.delete(schema.pointsLedgerArchive).run();
+  await db.delete(schema.userBadges).run();
+  await db.delete(schema.userStatCounters).run();
+  await db.delete(schema.userStreaks).run();
+  await db.delete(schema.eventParticipants).run();
+  await db.delete(schema.eventWins).run();
+  await db.delete(schema.userGamification).run();
+
+  invalidateActiveEventsCache();
+
+  return c.json({ success: true, usersAffected });
 });
 
 export default adminGamification;

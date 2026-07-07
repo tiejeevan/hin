@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="goldFeath" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#FFE066" />
+        <stop offset="100%" stop-color="#D35400" />
+      </linearGradient>
+    </defs>
+    <path d="M12 52L22 46C28 42 34 26 48 10C36 18 22 28 18 36L12 52Z" fill="url(#goldFeath)" stroke="#9C640C" stroke-width="1.5" />
+    <line x1="12" y1="52" x2="40" y2="20" stroke="#9C640C" stroke-width="2" />
+  
+</svg>

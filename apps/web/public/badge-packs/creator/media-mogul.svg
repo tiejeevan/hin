@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <circle cx="32" cy="32" r="26" fill="#2C3E50" stroke="#1A252F" stroke-width="2.5" />
+    <circle cx="32" cy="32" r="16" fill="#FFF" />
+    <circle cx="32" cy="32" r="10" fill="#2980B9" />
+    <circle cx="36" cy="28" r="3" fill="#FFF" opacity="0.6" />
+    <!-- Film strips lines -->
+    <line x1="12" y1="32" x2="52" y2="32" stroke="#BDC3C7" stroke-width="1.5" stroke-dasharray="4 4" />
+  
+</svg>

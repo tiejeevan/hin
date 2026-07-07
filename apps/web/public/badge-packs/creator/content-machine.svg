@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="machineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#43C6AC" />
+        <stop offset="100%" stop-color="#191654" />
+      </linearGradient>
+    </defs>
+    <rect x="14" y="10" width="36" height="44" rx="4" fill="url(#machineGrad)" stroke="#191654" stroke-width="2" />
+    <rect x="20" y="16" width="24" height="20" fill="#FFF" rx="2" />
+    <!-- Pencil -->
+    <path d="M22 28L32 18L36 22L26 32L22 28Z" fill="#F1C40F" />
+    <!-- Gears -->
+    <circle cx="32" cy="44" r="5" fill="none" stroke="#FFF" stroke-width="2.5" stroke-dasharray="4 2" />
+  
+</svg>

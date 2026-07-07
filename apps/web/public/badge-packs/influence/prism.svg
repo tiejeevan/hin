@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <polygon points="32,8 52,48 12,48" fill="none" stroke="#BDC3C7" stroke-width="3" />
+    <!-- Refracting beam -->
+    <line x1="4" y1="36" x2="22" y2="28" stroke="#FFF" stroke-width="3" />
+    <!-- Rainbow output -->
+    <path d="M40 28L58 20" stroke="#E74C3C" stroke-width="2.5" />
+    <path d="M41 30L58 26" stroke="#F1C40F" stroke-width="2.5" />
+    <path d="M42 32L58 32" stroke="#2ECC71" stroke-width="2.5" />
+    <path d="M41 34L58 38" stroke="#3498DB" stroke-width="2.5" />
+    <path d="M40 36L58 44" stroke="#9B59B6" stroke-width="2.5" />
+  
+</svg>

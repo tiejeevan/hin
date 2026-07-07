@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { History, Megaphone, Shield, Users, Flag, Settings, Award } from 'lucide-react';
+import { History, Megaphone, Shield, Users, Flag, Settings, Award, LayoutDashboard } from 'lucide-react';
 import { BroadcastDelivery, ContentReport, ReviewReportAction, SystemBroadcast as SystemBroadcastRecord, User as UserType } from '@hin/types';
+import type { AdminSection } from '../../lib/appRoutes';
 import { AdminData } from '../../types/ui';
 import { AdminCollapsibleSection } from './AdminCollapsibleSection';
 import { BroadcastAuditLog } from './BroadcastAuditLog';
@@ -12,6 +13,8 @@ import { AdminGamification } from './AdminGamification';
 import { AdminEvents } from './AdminEvents';
 
 interface AdminDashboardProps {
+  section: AdminSection;
+  onNavigateSection: (section: AdminSection) => void;
   adminData: AdminData | null;
   broadcastHistory: SystemBroadcastRecord[] | null;
   adminReports: ContentReport[] | null;
@@ -35,6 +38,8 @@ interface AdminDashboardProps {
 }
 
 export function AdminDashboard({
+  section,
+  onNavigateSection,
   adminData,
   broadcastHistory,
   adminReports,
@@ -57,7 +62,6 @@ export function AdminDashboard({
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [reportsOpen, setReportsOpen] = useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = useState(false);
-  const [gamificationOpen, setGamificationOpen] = useState(false);
   const [eventsOpen, setEventsOpen] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
   const [accountsLoading, setAccountsLoading] = useState(false);
@@ -127,11 +131,60 @@ export function AdminDashboard({
         <div className="text-left">
           <h2 className="text-lg font-bold text-text-primary">Admin Dashboard</h2>
           <p className="text-xs text-text-muted">
-            Expand a section to load its data. Nothing is fetched until you open it.
+            {section === 'platform-reviver'
+              ? 'Gamification toggle, badges, point rules, and level thresholds.'
+              : 'Expand a section to load its data. Nothing is fetched until you open it.'}
           </p>
         </div>
       </div>
 
+      <div className="flex items-center gap-1 border-b border-border-custom">
+        <button
+          type="button"
+          onClick={() => onNavigateSection('dashboard')}
+          aria-current={section === 'dashboard'}
+          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors cursor-pointer ${
+            section === 'dashboard'
+              ? 'border-indigo-500 text-text-primary'
+              : 'border-transparent text-text-muted hover:text-text-secondary'
+          }`}
+        >
+          <LayoutDashboard className="h-4 w-4" />
+          Dashboard
+        </button>
+        <button
+          type="button"
+          onClick={() => onNavigateSection('platform-reviver')}
+          aria-current={section === 'platform-reviver'}
+          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors cursor-pointer ${
+            section === 'platform-reviver'
+              ? 'border-amber-500 text-text-primary'
+              : 'border-transparent text-text-muted hover:text-text-secondary'
+          }`}
+        >
+          <Award className="h-4 w-4" />
+          Platform Reviver
+        </button>
+      </div>
+
+      {section === 'platform-reviver' ? (
+        <div className="space-y-4">
+          <div className="bg-bg-secondary border border-border-custom rounded-2xl overflow-hidden shadow-sm">
+            <AdminGamification token={token} />
+          </div>
+          <AdminCollapsibleSection
+            title="Gamification Events"
+            description="Time-boxed events, leaderboards, and win rules."
+            icon={<Award className="h-5 w-5" />}
+            iconClassName="bg-orange-500/15 border-orange-500/25 text-orange-400"
+            open={eventsOpen}
+            onToggle={() => setEventsOpen(prev => !prev)}
+          >
+            <AdminEvents token={token} />
+          </AdminCollapsibleSection>
+        </div>
+      ) : (
+      <>
       <AdminCollapsibleSection
         title="Content Reports"
         description="Review user-submitted reports and take moderation action."
@@ -175,28 +228,6 @@ export function AdminDashboard({
       </AdminCollapsibleSection>
 
       <AdminCollapsibleSection
-        title="Platform Reviver"
-        description="Gamification toggle, badges, point rules, and level thresholds."
-        icon={<Award className="h-5 w-5" />}
-        iconClassName="bg-amber-500/15 border-amber-500/25 text-amber-400"
-        open={gamificationOpen}
-        onToggle={() => setGamificationOpen(prev => !prev)}
-      >
-        <AdminGamification token={token} />
-      </AdminCollapsibleSection>
-
-      <AdminCollapsibleSection
-        title="Gamification Events"
-        description="Time-boxed events, leaderboards, and win rules."
-        icon={<Award className="h-5 w-5" />}
-        iconClassName="bg-orange-500/15 border-orange-500/25 text-orange-400"
-        open={eventsOpen}
-        onToggle={() => setEventsOpen(prev => !prev)}
-      >
-        <AdminEvents token={token} />
-      </AdminCollapsibleSection>
-
-      <AdminCollapsibleSection
         title="Platform Settings"
         description="Configure platform-wide limits for users and posts."
         icon={<Settings className="h-5 w-5" />}
@@ -229,6 +260,8 @@ export function AdminDashboard({
           <div className="p-6 text-center text-xs text-text-muted">Unable to load accounts.</div>
         )}
       </AdminCollapsibleSection>
+      </>
+      )}
     </div>
   );
 }

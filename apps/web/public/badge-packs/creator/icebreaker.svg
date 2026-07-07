@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="iceGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#E0F7FA" />
+        <stop offset="100%" stop-color="#80DEEA" />
+      </linearGradient>
+    </defs>
+    <rect x="14" y="14" width="36" height="36" rx="6" fill="url(#iceGrad)" stroke="#00ACC1" stroke-width="2.5" />
+    <!-- Crack paths -->
+    <path d="M32 14V32L20 40M32 32L44 42" stroke="#00ACC1" stroke-width="3" stroke-linecap="round" />
+    <!-- Inner speech bubble icon -->
+    <circle cx="32" cy="24" r="4.5" fill="#FFF" />
+  
+</svg>

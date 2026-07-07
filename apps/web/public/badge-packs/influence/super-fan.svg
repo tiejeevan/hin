@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+
+    <defs>
+      <linearGradient id="fanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#F472B6" />
+        <stop offset="100%" stop-color="#E11D48" />
+      </linearGradient>
+    </defs>
+    <path d="M32 54C32 54 8 36 8 22C8 12 16 6 24 10C28 12 32 18 32 18C32 18 36 12 40 10C48 6 56 12 56 22C56 36 32 54 32 54Z" fill="url(#fanGrad)" />
+    <!-- Nested star -->
+    <path d="M32 16L35 22L42 22L37 26L39 32L32 28L25 32L27 26L22 22L29 22Z" fill="#FFF" />
+  
+</svg>

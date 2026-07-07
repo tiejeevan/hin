@@ -15,27 +15,25 @@ export function BadgeGrid({ badges, className = '' }: BadgeGridProps) {
         <Award className="h-3.5 w-3.5" />
         Badges
       </h2>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {badges.map(badge => (
           <div
             key={badge.id}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-border-custom bg-bg-tertiary/60"
-            title={`Earned ${new Date(badge.earnedAt).toLocaleDateString()}`}
+            className="rounded-lg border border-border-custom bg-bg-tertiary/60 p-1 hover:bg-bg-tertiary transition-colors"
+            title={badge.name}
+            aria-label={badge.name}
           >
             {badge.imageUrl ? (
               <img
                 src={badge.imageUrl}
                 alt=""
-                className="h-8 w-8 rounded-lg object-cover shrink-0"
+                className="h-8 w-8 rounded-md object-cover shrink-0"
               />
             ) : (
-              <div className="h-8 w-8 rounded-lg bg-amber-500/15 border border-amber-500/25 flex items-center justify-center shrink-0">
+              <div className="h-8 w-8 rounded-md bg-amber-500/15 border border-amber-500/25 flex items-center justify-center shrink-0">
                 <Award className="h-4 w-4 text-amber-400" />
               </div>
             )}
-            <span className="text-[11px] font-medium text-text-primary max-w-[120px] truncate">
-              {badge.name}
-            </span>
           </div>
         ))}
       </div>
