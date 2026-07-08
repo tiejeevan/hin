@@ -15,6 +15,9 @@ export function ProfileEditForm({ user, token, onSave, onCancel }: ProfileEditFo
   const [bio, setBio] = useState(user.bio || '');
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl || '');
   const [coverUrl, setCoverUrl] = useState(user.coverUrl || '');
+  const [firstName, setFirstName] = useState(user.firstName || '');
+  const [lastName, setLastName] = useState(user.lastName || '');
+  const [dateOfBirth, setDateOfBirth] = useState(user.dateOfBirth || '');
   const [avatarImages, setAvatarImages] = useState<PickedImage[]>(
     user.avatarUrl
       ? [{ previewUrl: user.avatarUrl, remoteUrl: user.avatarUrl, file: new File([], 'avatar') }]
@@ -87,6 +90,9 @@ export function ProfileEditForm({ user, token, onSave, onCancel }: ProfileEditFo
           bio: bio.trim() || null,
           avatarUrl: avatarUrl || null,
           coverUrl: coverUrl || null,
+          firstName: firstName.trim() || null,
+          lastName: lastName.trim() || null,
+          dateOfBirth: dateOfBirth || null,
         }),
       });
 
@@ -137,6 +143,45 @@ export function ProfileEditForm({ user, token, onSave, onCancel }: ProfileEditFo
         />
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <label htmlFor="first-name-input" className="text-xs text-text-muted font-medium">First Name</label>
+          <input
+            id="first-name-input"
+            type="text"
+            maxLength={100}
+            value={firstName}
+            onChange={e => setFirstName(e.target.value)}
+            placeholder="First name"
+            className="w-full bg-bg-primary border border-border-custom rounded-xl p-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="last-name-input" className="text-xs text-text-muted font-medium">Last Name</label>
+          <input
+            id="last-name-input"
+            type="text"
+            maxLength={100}
+            value={lastName}
+            onChange={e => setLastName(e.target.value)}
+            placeholder="Last name"
+            className="w-full bg-bg-primary border border-border-custom rounded-xl p-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="birthday-input" className="text-xs text-text-muted font-medium">Birthday</label>
+        <input
+          id="birthday-input"
+          type="date"
+          value={dateOfBirth}
+          onChange={e => setDateOfBirth(e.target.value)}
+          className="w-full bg-bg-primary border border-border-custom rounded-xl p-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+        />
+      </div>
+
       <div className="space-y-2">
         <label className="text-xs text-text-muted font-medium">Bio</label>
         <textarea
@@ -161,6 +206,7 @@ export function ProfileEditForm({ user, token, onSave, onCancel }: ProfileEditFo
           Cancel
         </button>
         <button
+          id="save-profile-btn"
           onClick={handleSave}
           disabled={isSaving || uploading !== null}
           className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold px-4 py-1.5 rounded-xl transition-all shadow-md cursor-pointer min-h-[44px]"

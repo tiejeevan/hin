@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Bell, MessageSquare, Plus, Sparkles } from 'lucide-react';
+import { Bell, MessageSquare, Plus, Sparkles, User, Calendar } from 'lucide-react';
 
 export interface WalkthroughStep {
   id: string;
   targetSelector: string;
   title: string;
   description: string;
-  icon: 'post' | 'messages' | 'notifications';
+  icon: 'post' | 'messages' | 'notifications' | 'user' | 'calendar';
   padding?: number;
   borderRadius?: number;
 }
@@ -15,6 +15,8 @@ const STEP_ICONS = {
   post: Plus,
   messages: MessageSquare,
   notifications: Bell,
+  user: User,
+  calendar: Calendar,
 } as const;
 
 const TOOLTIP_MAX_WIDTH = 248;
@@ -33,6 +35,7 @@ interface IntroWalkthroughProps {
   stepIndex: number;
   onNext: () => void;
   onComplete: () => void;
+  completionMessage?: string;
 }
 
 function measureTarget(selector: string, padding: number): Rect | null {
@@ -122,6 +125,7 @@ export function IntroWalkthrough({
   stepIndex,
   onNext,
   onComplete,
+  completionMessage,
 }: IntroWalkthroughProps) {
   const step = steps[stepIndex];
   const isLastStep = stepIndex === steps.length - 1;
@@ -271,7 +275,7 @@ export function IntroWalkthrough({
             {isLastStep && (
               <div className="mt-2 flex items-center gap-1.5 rounded-lg bg-indigo-500/10 px-2.5 py-1.5 text-[11px] text-indigo-300">
                 <Sparkles className="h-3 w-3 shrink-0" />
-                <span>You're all set — welcome to Hin.</span>
+                <span>{completionMessage || "You're all set — welcome to Hin."}</span>
               </div>
             )}
 

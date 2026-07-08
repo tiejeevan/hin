@@ -10,8 +10,16 @@ import { toPublicUser, seedAdminUser } from '../lib/users';
 import { writeAuditLog } from '../lib/audit';
 import { verifyGoogleIdToken, deriveUsernameFromGoogle } from '../lib/google-auth';
 import { requireTurnstile } from '../lib/turnstile';
+import { getSystemSettings } from '../lib/system-settings';
 
 const auth = new Hono<{ Bindings: Env }>();
+
+auth.get('/turnstile-config', async (c) => {
+  const db = drizzle(c.env.DB, { schema });
+  const settings = await getSystemSettings(db);
+  const turnstileEnabled = settings.turnstileEnabled && !!c.env.TURNSTILE_SECRET_KEY;
+  return c.json({ turnstileEnabled });
+});
 
 async function uniqueUsername(
   db: ReturnType<typeof drizzle<typeof schema>>,

@@ -12,6 +12,11 @@ function parseIntSetting(raw: string | null, fallback: number): number {
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
+function parseBooleanSetting(raw: string | null, fallback: boolean): boolean {
+  if (raw === null) return fallback;
+  return raw === 'true' || raw === '1';
+}
+
 /** Registry of platform settings stored in system_settings (key-value). */
 const SETTING_REGISTRY = {
   maxPinnedPostsPerUser: {
@@ -29,10 +34,23 @@ const SETTING_REGISTRY = {
     defaultValue: DEFAULT_SYSTEM_SETTINGS.maxMediaPerPost,
     parse: (raw: string | null) => parseIntSetting(raw, DEFAULT_SYSTEM_SETTINGS.maxMediaPerPost),
   },
+  turnstileEnabled: {
+    key: 'turnstile_enabled',
+    defaultValue: DEFAULT_SYSTEM_SETTINGS.turnstileEnabled,
+    parse: (raw: string | null) => parseBooleanSetting(raw, DEFAULT_SYSTEM_SETTINGS.turnstileEnabled),
+  },
 } as const satisfies Record<
   keyof SystemSettings,
-  { key: string; defaultValue: number; parse: (raw: string | null) => number }
+  { key: string; defaultValue: number | boolean; parse: (raw: string | null) => number | boolean }
 >;
+
+let cachedSystemSettings: { value: SystemSettings; epoch: string; fetchedAt: number } | null = null;
+const SYSTEM_SETTINGS_EPOCH_KEY = 'system_settings_epoch';
+const FLAG_CACHE_TTL_MS = 5_000;
+
+export function invalidateSystemSettingsCache(): void {
+  cachedSystemSettings = null;
+}
 
 export async function getSystemSetting(db: Db, key: string): Promise<string | null> {
   const row = await db
@@ -43,13 +61,14 @@ export async function getSystemSetting(db: Db, key: string): Promise<string | nu
   return row?.value ?? null;
 }
 
-async function getSettingValue<K extends keyof SystemSettings>(db: Db, name: K): Promise<number> {
+async function getSettingValue<K extends keyof SystemSettings>(db: Db, name: K): Promise<SystemSettings[K]> {
   const def = SETTING_REGISTRY[name];
   const raw = await getSystemSetting(db, def.key);
-  return def.parse(raw);
+  return def.parse(raw) as SystemSettings[K];
 }
 
-async function upsertSetting(db: Db, key: string, value: number): Promise<void> {
+async function upsertSetting(db: Db, key: string, value: number | boolean | string): Promise<void> {
+  const valueStr = String(value);
   const existing = await db
     .select()
     .from(schema.systemSettings)
@@ -60,7 +79,7 @@ async function upsertSetting(db: Db, key: string, value: number): Promise<void> 
     await db
       .update(schema.systemSettings)
       .set({
-        value: String(value),
+        value: valueStr,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.systemSettings.key, key))
@@ -68,31 +87,44 @@ async function upsertSetting(db: Db, key: string, value: number): Promise<void> 
   } else {
     await db
       .insert(schema.systemSettings)
-      .values({ key, value: String(value) })
+      .values({ key, value: valueStr })
       .run();
   }
 }
 
 export async function getMaxPinnedPosts(db: Db): Promise<number> {
-  return getSettingValue(db, 'maxPinnedPostsPerUser');
+  return (await getSystemSettings(db)).maxPinnedPostsPerUser;
 }
 
 export async function getMaxPostLength(db: Db): Promise<number> {
-  return getSettingValue(db, 'maxPostLength');
+  return (await getSystemSettings(db)).maxPostLength;
 }
 
 export async function getMaxMediaPerPost(db: Db): Promise<number> {
-  return getSettingValue(db, 'maxMediaPerPost');
+  return (await getSystemSettings(db)).maxMediaPerPost;
 }
 
 export async function getSystemSettings(db: Db): Promise<SystemSettings> {
+  const now = Date.now();
+  const epoch = (await getSystemSetting(db, SYSTEM_SETTINGS_EPOCH_KEY)) ?? '0';
+
+  if (
+    cachedSystemSettings
+    && cachedSystemSettings.epoch === epoch
+    && now - cachedSystemSettings.fetchedAt < FLAG_CACHE_TTL_MS
+  ) {
+    return cachedSystemSettings.value;
+  }
+
   const entries = await Promise.all(
     (Object.keys(SETTING_REGISTRY) as (keyof SystemSettings)[]).map(async (name) => {
       const value = await getSettingValue(db, name);
       return [name, value] as const;
     }),
   );
-  return Object.fromEntries(entries) as SystemSettings;
+  const value = Object.fromEntries(entries) as SystemSettings;
+  cachedSystemSettings = { value, epoch, fetchedAt: now };
+  return value;
 }
 
 export async function updateSystemSettings(
@@ -105,5 +137,10 @@ export async function updateSystemSettings(
     await upsertSetting(db, SETTING_REGISTRY[name].key, value);
   }
 
+  // Bump epoch so every worker isolate invalidates its cache on next read.
+  await upsertSetting(db, SYSTEM_SETTINGS_EPOCH_KEY, String(Date.now()));
+
+  invalidateSystemSettingsCache();
   return getSystemSettings(db);
 }
+

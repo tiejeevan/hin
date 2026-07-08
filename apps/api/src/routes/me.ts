@@ -20,6 +20,7 @@ import {
   completeIntroWalkthrough,
   isIntroWalkthroughCompleted,
 } from '../lib/intro-walkthrough';
+import { toPublicUser } from '../lib/users';
 
 const me = new Hono<{ Bindings: Env }>();
 
@@ -138,6 +139,19 @@ me.post('/intro-walkthrough/complete', async (c) => {
   await completeIntroWalkthrough(db, authUser.id);
 
   return c.json({ ok: true, introWalkthroughCompleted: true });
+});
+
+me.post('/bio-walkthrough/complete', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const [updated] = await db.update(schema.users)
+    .set({ profileCompletedAt: new Date().toISOString() })
+    .where(eq(schema.users.id, authUser.id))
+    .returning();
+
+  return c.json({ ok: true, user: toPublicUser(updated) });
 });
 
 me.post('/session-tick', async (c) => {

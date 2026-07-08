@@ -232,6 +232,20 @@
       "when": 1783163000000,
       "tag": "0033_add_google_id",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1783164000000,
+      "tag": "0034_intro_walkthrough",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1783165000000,
+      "tag": "0035_user_profile_fields",
+      "breakpoints": true
     }
   ]
 }

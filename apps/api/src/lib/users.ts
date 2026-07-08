@@ -26,6 +26,10 @@ export function toPublicUser(
     createdAt: string;
     deletedAt?: string | null;
     country?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    dateOfBirth?: string | null;
+    profileCompletedAt?: string | null;
   },
   extras?: {
     postCount?: number | null;
@@ -49,6 +53,10 @@ export function toPublicUser(
     createdAt: user.createdAt,
     deletedAt: user.deletedAt ?? null,
     country: user.country ?? null,
+    firstName: user.firstName ?? null,
+    lastName: user.lastName ?? null,
+    dateOfBirth: user.dateOfBirth ?? null,
+    profileCompletedAt: user.profileCompletedAt ?? null,
     ...(extras?.postCount !== undefined ? { postCount: extras.postCount } : {}),
     ...(extras?.followerCount !== undefined ? { followerCount: extras.followerCount } : {}),
     ...(extras?.followingCount !== undefined ? { followingCount: extras.followingCount } : {}),
@@ -70,6 +78,10 @@ export const USER_PUBLIC_FIELDS = {
   isPrivate: schema.users.isPrivate,
   createdAt: schema.users.createdAt,
   country: schema.users.country,
+  firstName: schema.users.firstName,
+  lastName: schema.users.lastName,
+  dateOfBirth: schema.users.dateOfBirth,
+  profileCompletedAt: schema.users.profileCompletedAt,
 };
 
 type UserRow = {
@@ -82,6 +94,10 @@ type UserRow = {
   isPrivate?: number | boolean | null;
   createdAt: string;
   country?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  dateOfBirth?: string | null;
+  profileCompletedAt?: string | null;
 };
 
 export async function buildProfileResponse(

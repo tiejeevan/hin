@@ -28,6 +28,10 @@ export interface User {
   blockStatus?: BlockStatus;
   muteStatus?: MuteStatus;
   equippedBadges?: EquippedBadgePublic[];
+  firstName?: string | null;
+  lastName?: string | null;
+  dateOfBirth?: string | null;
+  profileCompletedAt?: string | null;
 }
 
 export interface FollowRequest {
@@ -203,6 +207,7 @@ export interface SystemSettings {
   maxPinnedPostsPerUser: number;
   maxPostLength: number;
   maxMediaPerPost: number;
+  turnstileEnabled: boolean;
 }
 
 export interface MeBootstrapCounts {
@@ -229,6 +234,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   maxPinnedPostsPerUser: 1,
   maxPostLength: 1000,
   maxMediaPerPost: 5,
+  turnstileEnabled: false,
 };
 
 export function validatePostLimits(
@@ -578,10 +584,12 @@ export const UpdateSystemSettingsSchema = z.object({
   maxPinnedPostsPerUser: z.number().int().min(SYSTEM_SETTING_BOUNDS.maxPinnedPostsPerUser.min).max(SYSTEM_SETTING_BOUNDS.maxPinnedPostsPerUser.max).optional(),
   maxPostLength: z.number().int().min(SYSTEM_SETTING_BOUNDS.maxPostLength.min).max(SYSTEM_SETTING_BOUNDS.maxPostLength.max).optional(),
   maxMediaPerPost: z.number().int().min(SYSTEM_SETTING_BOUNDS.maxMediaPerPost.min).max(SYSTEM_SETTING_BOUNDS.maxMediaPerPost.max).optional(),
+  turnstileEnabled: z.boolean().optional(),
 }).refine(
   data => data.maxPinnedPostsPerUser !== undefined
     || data.maxPostLength !== undefined
-    || data.maxMediaPerPost !== undefined,
+    || data.maxMediaPerPost !== undefined
+    || data.turnstileEnabled !== undefined,
   { message: 'At least one setting must be provided' },
 );
 

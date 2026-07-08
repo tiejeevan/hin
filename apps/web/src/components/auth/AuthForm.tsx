@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Lock, ChevronRight } from 'lucide-react';
-import { GOOGLE_CLIENT_ID, TURNSTILE_SITE_KEY } from '../../config';
+import { GOOGLE_CLIENT_ID, TURNSTILE_SITE_KEY, API_URL } from '../../config';
 import { GoogleSignInButton } from './GoogleSignInButton';
 import { TurnstileWidget, type TurnstileWidgetHandle } from './TurnstileWidget';
 
@@ -30,7 +30,28 @@ export function AuthForm({
   onGoogleCredential,
 }: AuthFormProps) {
   const showGoogleSignIn = !!GOOGLE_CLIENT_ID && !!onGoogleCredential;
-  const turnstileRequired = !!TURNSTILE_SITE_KEY;
+  const [turnstileEnabledSetting, setTurnstileEnabledSetting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/auth/turnstile-config`);
+        if (!res.ok) throw new Error();
+        const data = await res.json() as { turnstileEnabled: boolean };
+        if (!cancelled) {
+          setTurnstileEnabledSetting(data.turnstileEnabled);
+        }
+      } catch (e) {
+        // Fallback to disabled
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const turnstileRequired = !!TURNSTILE_SITE_KEY && turnstileEnabledSetting;
   const turnstileRef = useRef<TurnstileWidgetHandle>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileError, setTurnstileError] = useState<string | null>(null);

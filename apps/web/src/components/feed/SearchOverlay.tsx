@@ -408,7 +408,6 @@ export function SearchOverlay({
                           <div
                             key={user.id}
                             onClick={() => {
-                              onClose();
                               onViewProfile(user.username);
                             }}
                             className="flex items-center gap-3 p-4 hover:bg-bg-tertiary/40 cursor-pointer transition-colors"
@@ -442,7 +441,6 @@ export function SearchOverlay({
                             key={tag.tag}
                             type="button"
                             onClick={() => {
-                              onClose();
                               onViewHashtag(tag.tag);
                             }}
                             className="px-4 py-2.5 rounded-2xl bg-bg-secondary border border-border-custom text-xs md:text-sm font-semibold text-text-secondary hover:text-indigo-400 hover:border-indigo-400/40 hover:bg-indigo-500/5 transition-all cursor-pointer flex items-center gap-1.5"
@@ -525,7 +523,6 @@ export function SearchOverlay({
                         <div
                           key={user.id}
                           onClick={() => {
-                            onClose();
                             onViewProfile(user.username);
                           }}
                           className="flex items-center gap-3 p-4 hover:bg-bg-tertiary/40 cursor-pointer transition-colors"
@@ -563,7 +560,6 @@ export function SearchOverlay({
                           key={tag.tag}
                           type="button"
                           onClick={() => {
-                            onClose();
                             onViewHashtag(tag.tag);
                           }}
                           className="px-4 py-2.5 rounded-2xl bg-bg-secondary border border-border-custom text-xs md:text-sm font-semibold text-text-secondary hover:text-indigo-400 hover:border-indigo-400/40 hover:bg-indigo-500/5 transition-all cursor-pointer flex items-center gap-1.5"

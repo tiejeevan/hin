@@ -50,11 +50,56 @@ import { ReportModal } from './components/moderation/ReportModal';
 import { applyGamificationReward } from './components/gamification/GamificationToast';
 import { useSessionTick } from './hooks/useSessionTick';
 import { useIntroWalkthrough } from './hooks/useIntroWalkthrough';
+import { useBioWalkthrough } from './hooks/useBioWalkthrough';
 import {
   IntroWalkthrough,
   INTRO_WALKTHROUGH_STEPS,
+  type WalkthroughStep,
 } from './components/walkthrough/IntroWalkthrough';
 import { SearchOverlay } from './components/feed/SearchOverlay';
+
+const BIO_WALKTHROUGH_STEPS: WalkthroughStep[] = [
+  {
+    id: 'edit-profile-btn',
+    targetSelector: '#edit-profile-btn',
+    title: 'Update your profile',
+    description: "Let's fill in your details so other users can know you better.",
+    icon: 'user',
+    padding: 4,
+  },
+  {
+    id: 'first-name-input',
+    targetSelector: '#first-name-input',
+    title: 'First Name',
+    description: 'Please enter your first name.',
+    icon: 'user',
+    padding: 4,
+  },
+  {
+    id: 'last-name-input',
+    targetSelector: '#last-name-input',
+    title: 'Last Name',
+    description: 'Please enter your last name.',
+    icon: 'user',
+    padding: 4,
+  },
+  {
+    id: 'birthday-input',
+    targetSelector: '#birthday-input',
+    title: 'Birthday',
+    description: 'Please select your date of birth.',
+    icon: 'calendar',
+    padding: 4,
+  },
+  {
+    id: 'save-profile-btn',
+    targetSelector: '#save-profile-btn',
+    title: 'Save Details',
+    description: 'Save your profile to complete this update.',
+    icon: 'user',
+    padding: 4,
+  },
+];
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('hin_token'));
@@ -2429,11 +2474,31 @@ export default function App() {
     onStepChange: handleWalkthroughStepChange,
   });
 
+  const bioWalkthrough = useBioWalkthrough({
+    enabled:
+      !!currentUser &&
+      activeTab === 'profile' &&
+      profileUser?.id === currentUser.id &&
+      !profileLoading &&
+      !currentUser.profileCompletedAt &&
+      !showAuthOnly &&
+      !walkthrough.isActive,
+    token,
+    isProfileEditing,
+    setIsProfileEditing,
+    getHeaders,
+    onUserUpdate: (updatedUser) => {
+      setCurrentUser(updatedUser);
+      localStorage.setItem('hin_user', JSON.stringify(updatedUser));
+      setProfileUser(prev => (prev?.id === updatedUser.id ? { ...prev, ...updatedUser } : prev));
+    },
+  });
+
   useEffect(() => {
-    if (walkthrough.isActive) {
+    if (walkthrough.isActive || bioWalkthrough.isActive) {
       handleWalkthroughStepChange();
     }
-  }, [walkthrough.isActive, handleWalkthroughStepChange]);
+  }, [walkthrough.isActive, bioWalkthrough.isActive, handleWalkthroughStepChange]);
 
   return (
     <AppShell
@@ -2447,6 +2512,16 @@ export default function App() {
               setIntroWalkthroughCompleted(true);
               walkthrough.complete();
             }}
+          />
+        ) : bioWalkthrough.isActive ? (
+          <IntroWalkthrough
+            steps={BIO_WALKTHROUGH_STEPS}
+            stepIndex={bioWalkthrough.stepIndex}
+            onNext={bioWalkthrough.next}
+            onComplete={() => {
+              bioWalkthrough.complete();
+            }}
+            completionMessage="Your profile details have been updated!"
           />
         ) : isSearchOpen ? (
           <SearchOverlay

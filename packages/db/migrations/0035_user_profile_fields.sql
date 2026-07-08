@@ -1,0 +1,14 @@
+ALTER TABLE `users` ADD `first_name` text;
+ALTER TABLE `users` ADD `last_name` text;
+ALTER TABLE `users` ADD `display_name` text;
+ALTER TABLE `users` ADD `email` text;
+ALTER TABLE `users` ADD `email_verified_at` text;
+ALTER TABLE `users` ADD `date_of_birth` text;
+ALTER TABLE `users` ADD `phone` text;
+ALTER TABLE `users` ADD `pronouns` text;
+ALTER TABLE `users` ADD `website` text;
+ALTER TABLE `users` ADD `location` text;
+ALTER TABLE `users` ADD `locale` text;
+ALTER TABLE `users` ADD `name_updated_at` text;
+ALTER TABLE `users` ADD `profile_completed_at` text;
+CREATE UNIQUE INDEX `users_email_idx` ON `users` (`email`);

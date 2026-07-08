@@ -42,11 +42,18 @@ users.patch('/me', async (c) => {
     bio?: string | null;
     avatarUrl?: string | null;
     coverUrl?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    dateOfBirth?: string | null;
   }>();
   const updates: Partial<{
     bio: string | null;
     avatarUrl: string | null;
     coverUrl: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    dateOfBirth: string | null;
+    profileCompletedAt: string | null;
   }> = {};
 
   if (body.bio !== undefined) {
@@ -57,6 +64,31 @@ users.patch('/me', async (c) => {
   }
   if (body.avatarUrl !== undefined) updates.avatarUrl = body.avatarUrl;
   if (body.coverUrl !== undefined) updates.coverUrl = body.coverUrl;
+
+  if (body.firstName !== undefined) {
+    updates.firstName = body.firstName === null ? null : body.firstName.trim();
+  }
+  if (body.lastName !== undefined) {
+    updates.lastName = body.lastName === null ? null : body.lastName.trim();
+  }
+  if (body.dateOfBirth !== undefined) {
+    const dob = body.dateOfBirth === null ? null : body.dateOfBirth.trim();
+    if (dob !== null && dob !== '') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+        return c.json({ error: 'Birthday must be in YYYY-MM-DD format' }, 400);
+      }
+    }
+    updates.dateOfBirth = dob || null;
+  }
+
+  // Auto-complete profile walkthrough status if fields are now complete
+  const currentFirstName = updates.firstName !== undefined ? updates.firstName : authUser.firstName;
+  const currentLastName = updates.lastName !== undefined ? updates.lastName : authUser.lastName;
+  const currentDateOfBirth = updates.dateOfBirth !== undefined ? updates.dateOfBirth : authUser.dateOfBirth;
+
+  if (currentFirstName && currentLastName && currentDateOfBirth && !authUser.profileCompletedAt) {
+    updates.profileCompletedAt = new Date().toISOString();
+  }
 
   if (Object.keys(updates).length === 0) {
     return c.json({ error: 'No valid fields to update' }, 400);

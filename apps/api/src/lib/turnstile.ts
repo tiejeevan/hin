@@ -1,6 +1,9 @@
 import type { Context } from 'hono';
 import type { Env } from '../types';
 import type { AuditEventType } from '@hin/types';
+import { drizzle } from 'drizzle-orm/d1';
+import * as schema from '@hin/db';
+import { getSystemSettings } from './system-settings';
 import { writeAuditLog } from './audit';
 
 export async function verifyTurnstileToken(
@@ -22,8 +25,8 @@ export async function verifyTurnstileToken(
 /**
  * Verifies a Turnstile token for an auth route, writing an audit log on failure.
  * Returns a Response to send immediately, or null to continue the handler.
- * No-ops (returns null) when TURNSTILE_SECRET_KEY is not configured, so auth
- * keeps working in environments without Turnstile set up.
+ * No-ops (returns null) when TURNSTILE_SECRET_KEY is not configured, or if the
+ * setting turnstileEnabled is false, so auth keeps working without Turnstile setup.
  */
 export async function requireTurnstile(
   c: Context<{ Bindings: Env }>,
@@ -32,6 +35,12 @@ export async function requireTurnstile(
 ): Promise<Response | null> {
   const secret = c.env.TURNSTILE_SECRET_KEY;
   if (!secret) return null;
+
+  const db = drizzle(c.env.DB, { schema });
+  const settings = await getSystemSettings(db);
+  if (!settings.turnstileEnabled) {
+    return null;
+  }
 
   if (!token) {
     return c.json({ error: 'Verification required' }, 400);

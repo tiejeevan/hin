@@ -17,10 +17,29 @@ export const users = sqliteTable('users', {
   deletionSource: text('deletion_source'),
   country: text('country'),
   googleId: text('google_id'),
+  firstName: text('first_name'),
+  lastName: text('last_name'),
+  displayName: text('display_name'),
+  email: text('email'),
+  /** ISO-8601 timestamp when the email was verified; null = unverified/unknown. */
+  emailVerifiedAt: text('email_verified_at'),
+  /** ISO date (YYYY-MM-DD). */
+  dateOfBirth: text('date_of_birth'),
+  phone: text('phone'),
+  pronouns: text('pronouns'),
+  website: text('website'),
+  location: text('location'),
+  /** BCP-47 locale, e.g. 'en-US'. */
+  locale: text('locale'),
+  /** When first/last/display name was last changed. */
+  nameUpdatedAt: text('name_updated_at'),
+  /** When the user finished filling out their profile (onboarding). */
+  profileCompletedAt: text('profile_completed_at'),
 }, (table) => ({
   deletedAtIdx: index('users_deleted_at_idx').on(table.deletedAt),
   isPrivateIdx: index('users_is_private_idx').on(table.isPrivate),
   googleIdIdx: uniqueIndex('users_google_id_idx').on(table.googleId),
+  emailIdx: uniqueIndex('users_email_idx').on(table.email),
 }));
 
 /** One row per user once they finish the first-run intro walkthrough. */
