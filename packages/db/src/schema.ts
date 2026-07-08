@@ -16,9 +16,11 @@ export const users = sqliteTable('users', {
   /** 'self' | 'admin' when deleted_at is set */
   deletionSource: text('deletion_source'),
   country: text('country'),
+  googleId: text('google_id'),
 }, (table) => ({
   deletedAtIdx: index('users_deleted_at_idx').on(table.deletedAt),
   isPrivateIdx: index('users_is_private_idx').on(table.isPrivate),
+  googleIdIdx: uniqueIndex('users_google_id_idx').on(table.googleId),
 }));
 
 export const userSettings = sqliteTable('user_settings', {

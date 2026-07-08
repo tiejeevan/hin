@@ -1,4 +1,6 @@
 import { Lock, ChevronRight } from 'lucide-react';
+import { GOOGLE_CLIENT_ID } from '../../config';
+import { GoogleSignInButton } from './GoogleSignInButton';
 
 interface AuthFormProps {
   isRegisterMode: boolean;
@@ -10,6 +12,7 @@ interface AuthFormProps {
   onUsernameChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onToggleMode: () => void;
+  onGoogleCredential?: (credential: string) => void;
 }
 
 export function AuthForm({
@@ -22,7 +25,9 @@ export function AuthForm({
   onUsernameChange,
   onPasswordChange,
   onToggleMode,
+  onGoogleCredential,
 }: AuthFormProps) {
+  const showGoogleSignIn = !!GOOGLE_CLIENT_ID && !!onGoogleCredential;
   return (
     <div className="flex-grow flex flex-col items-center justify-center p-4 bg-radial from-indigo-900/10 via-transparent to-transparent">
       <div className="max-w-md w-full bg-bg-secondary border border-border-custom rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
@@ -41,6 +46,20 @@ export function AuthForm({
               : 'Sign in to access secure real-time messaging'}
           </p>
         </div>
+
+        {showGoogleSignIn && (
+          <div className="mb-5 space-y-4">
+            <GoogleSignInButton
+              onCredential={onGoogleCredential}
+              disabled={isAuthLoading}
+            />
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-border-custom" />
+              <span className="text-[11px] font-medium text-text-muted">or continue with email</span>
+              <div className="h-px flex-1 bg-border-custom" />
+            </div>
+          </div>
+        )}
 
         {authError && (
           <div className="mb-4 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs px-3.5 py-2.5 rounded-xl text-left">

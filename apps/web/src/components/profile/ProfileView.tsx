@@ -43,6 +43,7 @@ interface ProfileViewProps {
   onUsernameChange?: (value: string) => void;
   onPasswordChange?: (value: string) => void;
   onToggleAuthMode?: () => void;
+  onGoogleCredential?: (credential: string) => void;
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onProfileSaved: (updated: UserType) => void;
@@ -140,6 +141,7 @@ export function ProfileView({
   onUsernameChange,
   onPasswordChange,
   onToggleAuthMode,
+  onGoogleCredential,
   onStartEdit,
   onCancelEdit,
   onProfileSaved,
@@ -371,6 +373,7 @@ export function ProfileView({
               onUsernameChange={onUsernameChange}
               onPasswordChange={onPasswordChange}
               onToggleMode={onToggleAuthMode}
+              onGoogleCredential={onGoogleCredential}
             />
           </div>
         </div>

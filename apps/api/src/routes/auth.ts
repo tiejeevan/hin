@@ -8,8 +8,35 @@ import type { Env } from '../types';
 import { JWT_SECRET } from '../lib/auth';
 import { toPublicUser, seedAdminUser } from '../lib/users';
 import { writeAuditLog } from '../lib/audit';
+import { verifyGoogleIdToken, deriveUsernameFromGoogle } from '../lib/google-auth';
 
 const auth = new Hono<{ Bindings: Env }>();
+
+async function uniqueUsername(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  base: string,
+): Promise<string> {
+  let candidate = base;
+  let suffix = 0;
+  while (true) {
+    const existing = await db.select({ id: schema.users.id })
+      .from(schema.users)
+      .where(eq(schema.users.username, candidate))
+      .get();
+    if (!existing) return candidate;
+    suffix += 1;
+    candidate = `${base}${suffix}`.slice(0, 40);
+  }
+}
+
+async function issueAuthToken(user: { id: number; username: string; role: string }) {
+  return sign({
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24,
+  }, JWT_SECRET, 'HS256');
+}
 
 // Register
 auth.post('/register', async (c) => {
@@ -63,12 +90,7 @@ auth.post('/register', async (c) => {
   await db.insert(schema.userSettings).values({ userId: inserted.id });
 
   // Generate JWT token
-  const token = await sign({ 
-    id: inserted.id, 
-    username: inserted.username, 
-    role: inserted.role,
-    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
-  }, JWT_SECRET, 'HS256');
+  const token = await issueAuthToken(inserted);
 
   // Audit: successful register
   await writeAuditLog(c, {
@@ -147,12 +169,7 @@ auth.post('/login', async (c) => {
   }
 
   // Generate JWT token
-  const token = await sign({ 
-    id: user.id, 
-    username: user.username, 
-    role: user.role,
-    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
-  }, JWT_SECRET, 'HS256');
+  const token = await issueAuthToken(user);
 
   // Audit: successful login
   await writeAuditLog(c, {
@@ -184,6 +201,100 @@ auth.post('/logout', async (c) => {
   });
 
   return c.json({ success: true });
+});
+
+// Google Sign-In (verifies Google ID token, creates or logs in user)
+auth.post('/google', async (c) => {
+  const clientId = c.env.GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    return c.json({ error: 'Google sign-in is not configured' }, 503);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  await seedAdminUser(db);
+
+  const body = await c.req.json<{
+    credential?: string;
+    clientLocalTime?: string;
+    sessionId?: string;
+  }>();
+  const { credential, clientLocalTime, sessionId } = body;
+
+  if (!credential) {
+    return c.json({ error: 'Google credential is required' }, 400);
+  }
+
+  const payload = await verifyGoogleIdToken(credential, clientId);
+  if (!payload) {
+    await writeAuditLog(c, {
+      eventType: 'failed_login',
+      success: false,
+      failureReason: 'invalid_google_token',
+      clientLocalTime,
+      sessionId,
+    });
+    return c.json({ error: 'Invalid Google sign-in token' }, 401);
+  }
+
+  let user = await db.select().from(schema.users)
+    .where(eq(schema.users.googleId, payload.sub))
+    .get();
+
+  let isNewUser = false;
+
+  if (!user) {
+    const cf = (c.req.raw as any).cf;
+    const country = (cf?.country as string) ?? null;
+    const username = await uniqueUsername(
+      db,
+      deriveUsernameFromGoogle(payload.email, payload.name),
+    );
+
+    const [inserted] = await db.insert(schema.users).values({
+      username,
+      passwordHash: '',
+      role: 'user',
+      googleId: payload.sub,
+      avatarUrl: payload.picture ?? null,
+      country,
+    }).returning();
+
+    await db.insert(schema.userSettings).values({ userId: inserted.id });
+    user = inserted;
+    isNewUser = true;
+  } else if (user.deletedAt) {
+    await writeAuditLog(c, {
+      userId: user.id,
+      eventType: 'failed_login',
+      success: false,
+      failureReason: 'account_deleted',
+      clientLocalTime,
+      sessionId,
+    });
+    return c.json({ error: 'This account has been deleted' }, 401);
+  } else if (payload.picture && !user.avatarUrl) {
+    await db.update(schema.users)
+      .set({ avatarUrl: payload.picture })
+      .where(eq(schema.users.id, user.id))
+      .run();
+    user = { ...user, avatarUrl: payload.picture };
+  }
+
+  const token = await issueAuthToken(user);
+
+  await writeAuditLog(c, {
+    userId: user.id,
+    eventType: isNewUser ? 'register' : 'login',
+    success: true,
+    clientLocalTime,
+    sessionId,
+  });
+
+  return c.json({
+    token,
+    user: toPublicUser(user),
+    isNewUser,
+  });
 });
 
 export default auth;

@@ -20,3 +20,6 @@ new_sqlite_classes = ["RealtimeDO"]
 [[r2_buckets]]
 binding = "MEDIA"
 bucket_name = "gmart"
+
+[vars]
+GOOGLE_CLIENT_ID = "374278266123-6i29t1ve6t76cdb6vsvumvn4nghonpd8.apps.googleusercontent.com"

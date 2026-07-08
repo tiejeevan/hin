@@ -208,3 +208,21 @@
 .animate-notification-drop {
   animation: notification-drop 0.24s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
+
+/* Transparent Google Sign-In iframe overlay — sized to match custom button */
+.google-signin-overlay {
+  display: flex;
+  align-items: stretch;
+}
+
+.google-signin-overlay > div {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.google-signin-overlay iframe {
+  width: 100% !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  margin: 0 !important;
+}

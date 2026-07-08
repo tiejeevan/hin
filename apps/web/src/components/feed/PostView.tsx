@@ -32,6 +32,7 @@ interface PostViewProps {
   onUsernameChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onToggleAuthMode: () => void;
+  onGoogleCredential?: (credential: string) => void;
   onToggleLike: (postId: number) => void;
   onToggleComments: (postId: number) => void;
   onDeletePost: (postId: number) => void;
@@ -99,6 +100,7 @@ export function PostView({
   onUsernameChange,
   onPasswordChange,
   onToggleAuthMode,
+  onGoogleCredential,
   onToggleLike,
   onToggleComments,
   onDeletePost,
@@ -186,6 +188,7 @@ export function PostView({
             onUsernameChange={onUsernameChange}
             onPasswordChange={onPasswordChange}
             onToggleMode={onToggleAuthMode}
+            onGoogleCredential={onGoogleCredential}
           />
         )}
       </div>
@@ -220,6 +223,7 @@ export function PostView({
           onUsernameChange={onUsernameChange}
           onPasswordChange={onPasswordChange}
           onToggleMode={onToggleAuthMode}
+          onGoogleCredential={onGoogleCredential}
         />
       )}
 

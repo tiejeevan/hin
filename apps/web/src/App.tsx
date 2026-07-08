@@ -1301,6 +1301,32 @@ export default function App() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
+  const completeAuthSuccess = useCallback((data: { token: string; user: UserType }) => {
+    setToken(data.token);
+    setCurrentUser(data.user);
+    localStorage.setItem('hin_token', data.token);
+    localStorage.setItem('hin_user', JSON.stringify(data.user));
+    setUsernameInput('');
+    setPasswordInput('');
+    setAuthError(null);
+    setShowGuestAuth(false);
+    const route = parseLocation(window.location.pathname, window.location.hash);
+    if (route.view === 'post') {
+      openPost(route.postId, { commentId: route.commentId, skipUrlSync: true });
+    } else if (route.view === 'profile') {
+      openProfileByUsername(route.username, { skipUrlSync: true });
+    }
+  }, []);
+
+  const getOrCreateSessionId = () => {
+    let sessionId = sessionStorage.getItem('hin_session_id');
+    if (!sessionId) {
+      sessionId = randomId();
+      sessionStorage.setItem('hin_session_id', sessionId);
+    }
+    return sessionId;
+  };
+
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!usernameInput.trim() || !passwordInput) {
@@ -1310,13 +1336,7 @@ export default function App() {
     setAuthError(null);
     setIsAuthLoading(true);
     const path = isRegisterMode ? '/api/auth/register' : '/api/auth/login';
-
-    // Persist a session ID in sessionStorage so the server can group events
-    let sessionId = sessionStorage.getItem('hin_session_id');
-    if (!sessionId) {
-      sessionId = randomId();
-      sessionStorage.setItem('hin_session_id', sessionId);
-    }
+    const sessionId = getOrCreateSessionId();
 
     try {
       const res = await fetch(`${API_URL}${path}`, {
@@ -1331,22 +1351,37 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok) {
-        setToken(data.token);
-        setCurrentUser(data.user);
-        localStorage.setItem('hin_token', data.token);
-        localStorage.setItem('hin_user', JSON.stringify(data.user));
-        setUsernameInput('');
-        setPasswordInput('');
-        setAuthError(null);
-        setShowGuestAuth(false);
-        const route = parseLocation(window.location.pathname, window.location.hash);
-        if (route.view === 'post') {
-          openPost(route.postId, { commentId: route.commentId, skipUrlSync: true });
-        } else if (route.view === 'profile') {
-          openProfileByUsername(route.username, { skipUrlSync: true });
-        }
+        completeAuthSuccess(data);
       } else {
         setAuthError(data.error || 'Authentication failed');
+      }
+    } catch {
+      setAuthError('Error connecting to authentication service');
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleGoogleCredential = async (credential: string) => {
+    setAuthError(null);
+    setIsAuthLoading(true);
+    const sessionId = getOrCreateSessionId();
+
+    try {
+      const res = await fetch(`${API_URL}/api/auth/google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          credential,
+          clientLocalTime: new Date().toISOString(),
+          sessionId,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        completeAuthSuccess(data);
+      } else {
+        setAuthError(data.error || 'Google sign-in failed');
       }
     } catch {
       setAuthError('Error connecting to authentication service');
@@ -2395,6 +2430,7 @@ export default function App() {
               setIsRegisterMode(!isRegisterMode);
               setAuthError(null);
             }}
+            onGoogleCredential={handleGoogleCredential}
           />
         ) : activeTab === 'post' ? (
           <PostView
@@ -2428,6 +2464,7 @@ export default function App() {
               setIsRegisterMode(!isRegisterMode);
               setAuthError(null);
             }}
+            onGoogleCredential={handleGoogleCredential}
             onToggleLike={handleToggleLike}
             onToggleComments={toggleComments}
             onDeletePost={handleDeletePost}
@@ -2527,6 +2564,7 @@ export default function App() {
               setIsRegisterMode(!isRegisterMode);
               setAuthError(null);
             }}
+            onGoogleCredential={handleGoogleCredential}
             onStartEdit={() => setIsProfileEditing(true)}
             onCancelEdit={() => setIsProfileEditing(false)}
             onProfileSaved={handleProfileSaved}
