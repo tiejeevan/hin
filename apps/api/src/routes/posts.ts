@@ -39,7 +39,7 @@ async function broadcastEvent(env: Env, message: object) {
   } catch (_e) {}
 }
 
-async function buildPostResponse(
+export async function buildPostResponse(
   db: ReturnType<typeof drizzle<typeof schema>>,
   post: {
     id: number;

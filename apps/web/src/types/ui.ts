@@ -23,7 +23,7 @@ export interface CommentNode extends Comment {
   replies: CommentNode[];
 }
 
-export type FeedMode = 'all' | 'following' | 'bookmarks' | 'explore';
+export type FeedMode = 'all' | 'following' | 'bookmarks' | 'explore' | 'search';
 
 export type ActiveTab = 'feed' | 'admin' | 'profile' | 'post';
 

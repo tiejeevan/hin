@@ -49,6 +49,12 @@ import { FollowersModal } from './components/profile/FollowersModal';
 import { ReportModal } from './components/moderation/ReportModal';
 import { applyGamificationReward } from './components/gamification/GamificationToast';
 import { useSessionTick } from './hooks/useSessionTick';
+import { useIntroWalkthrough } from './hooks/useIntroWalkthrough';
+import {
+  IntroWalkthrough,
+  INTRO_WALKTHROUGH_STEPS,
+} from './components/walkthrough/IntroWalkthrough';
+import { SearchOverlay } from './components/feed/SearchOverlay';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('hin_token'));
@@ -122,6 +128,7 @@ export default function App() {
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [showMessagesDropdown, setShowMessagesDropdown] = useState(false);
   const [messagesPanelExpanded, setMessagesPanelExpanded] = useState(false);
   const [messageIconPulseAt, setMessageIconPulseAt] = useState(0);
@@ -144,6 +151,7 @@ export default function App() {
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
   const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
   const [gamificationEnabled, setGamificationEnabled] = useState(false);
+  const [introWalkthroughCompleted, setIntroWalkthroughCompleted] = useState<boolean | null>(null);
   const [myGamification, setMyGamification] = useState<GamificationPublic | null>(null);
   const [profileGamification, setProfileGamification] = useState<GamificationPublic | null>(null);
   const userSettingsRef = useRef<UserSettings | null>(null);
@@ -256,6 +264,7 @@ export default function App() {
 
   const goHome = (opts?: { skipUrlSync?: boolean }) => {
     setActiveTab('feed');
+    setIsSearchOpen(false);
     setProfileUserId(null);
     setProfileUser(null);
     setProfilePosts([]);
@@ -271,6 +280,28 @@ export default function App() {
     setMessagesPanelExpanded(false);
     setChatRecipient(null);
     if (!opts?.skipUrlSync) {
+      syncUrl({ view: 'home' }, true);
+    }
+  };
+
+  const openSearch = (opts?: { skipUrlSync?: boolean; replace?: boolean }) => {
+    setShowNotifications(false);
+    setShowMessagesDropdown(false);
+    setMessagesPanelExpanded(false);
+    setIsSearchOpen(true);
+    if (!opts?.skipUrlSync) {
+      syncUrl({ view: 'search' }, opts?.replace);
+    }
+  };
+
+  const closeSearch = (opts?: { skipUrlSync?: boolean }) => {
+    setIsSearchOpen(false);
+    if (opts?.skipUrlSync) return;
+    const route = parseLocation(window.location.pathname, window.location.hash);
+    if (route.view !== 'search') return;
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
       syncUrl({ view: 'home' }, true);
     }
   };
@@ -394,6 +425,7 @@ export default function App() {
         setUnreadMessagesCount(data.counts.unreadMessages);
         setGamificationEnabled(!!data.gamificationEnabled);
         setMyGamification(data.g ?? null);
+        setIntroWalkthroughCompleted(!!data.introWalkthroughCompleted);
       }
     } catch (e) {
       console.error('Error fetching bootstrap:', e);
@@ -475,6 +507,7 @@ export default function App() {
     userId: number,
     opts?: { highlightFollowRequests?: boolean; username?: string; skipUrlSync?: boolean; replace?: boolean },
   ) => {
+    setIsSearchOpen(false);
     setProfileUserId(userId);
     setActiveTab('profile');
     setIsProfileEditing(false);
@@ -502,6 +535,7 @@ export default function App() {
     username: string,
     opts?: { skipUrlSync?: boolean; replace?: boolean },
   ) => {
+    setIsSearchOpen(false);
     setActiveTab('profile');
     setProfileLoading(true);
     setProfileError(null);
@@ -569,6 +603,7 @@ export default function App() {
     section: AdminSection = 'dashboard',
     opts?: { skipUrlSync?: boolean; replace?: boolean },
   ) => {
+    setIsSearchOpen(false);
     setActiveTab('admin');
     setAdminSection(section);
     setProfileUserId(null);
@@ -704,6 +739,7 @@ export default function App() {
     postId: number,
     opts?: { commentId?: number; replace?: boolean; skipUrlSync?: boolean },
   ) => {
+    setIsSearchOpen(false);
     setActiveTab('post');
     setPostViewId(postId);
     setHighlightCommentId(opts?.commentId ?? null);
@@ -909,6 +945,7 @@ export default function App() {
       setSystemSettings(null);
       setUnreadNotifsCount(0);
       setUnreadMessagesCount(0);
+      setIntroWalkthroughCompleted(null);
     }
   }, [token]);
 
@@ -1315,6 +1352,8 @@ export default function App() {
       openPost(route.postId, { commentId: route.commentId, skipUrlSync: true });
     } else if (route.view === 'profile') {
       openProfileByUsername(route.username, { skipUrlSync: true });
+    } else if (route.view === 'search') {
+      openSearch({ skipUrlSync: true });
     }
   }, []);
 
@@ -2206,6 +2245,8 @@ export default function App() {
       openPost(route.postId, { commentId: route.commentId, replace: true, skipUrlSync: true });
     } else if (route.view === 'profile') {
       openProfileByUsername(route.username, { replace: true, skipUrlSync: true });
+    } else if (route.view === 'search') {
+      openSearch({ replace: true, skipUrlSync: true });
     } else if (route.view === 'admin') {
       if (currentUser?.role === 'admin') {
         openAdmin(route.section, { replace: true, skipUrlSync: true });
@@ -2220,9 +2261,12 @@ export default function App() {
         openPost(r.postId, { commentId: r.commentId, skipUrlSync: true });
       } else if (r.view === 'profile') {
         openProfileByUsername(r.username, { skipUrlSync: true });
+      } else if (r.view === 'search') {
+        openSearch({ skipUrlSync: true });
       } else if (r.view === 'admin' && currentUser?.role === 'admin') {
         openAdmin(r.section, { skipUrlSync: true });
       } else {
+        setIsSearchOpen(false);
         goHome({ skipUrlSync: true });
       }
     };
@@ -2371,8 +2415,112 @@ export default function App() {
     !!currentUser && shouldShowChatIcon(effectiveSettings, activeTab);
   const postLimits = systemSettings ?? DEFAULT_SYSTEM_SETTINGS;
 
+  const handleWalkthroughStepChange = useCallback(() => {
+    setShowNotifications(false);
+    setShowMessagesDropdown(false);
+    setShowNewPostForm(false);
+  }, []);
+
+  const walkthrough = useIntroWalkthrough({
+    enabled: !!currentUser && activeTab === 'feed' && !showAuthOnly,
+    token,
+    serverCompleted: introWalkthroughCompleted,
+    getHeaders,
+    onStepChange: handleWalkthroughStepChange,
+  });
+
+  useEffect(() => {
+    if (walkthrough.isActive) {
+      handleWalkthroughStepChange();
+    }
+  }, [walkthrough.isActive, handleWalkthroughStepChange]);
+
   return (
     <AppShell
+      overlay={
+        walkthrough.isActive ? (
+          <IntroWalkthrough
+            steps={INTRO_WALKTHROUGH_STEPS}
+            stepIndex={walkthrough.stepIndex}
+            onNext={walkthrough.next}
+            onComplete={() => {
+              setIntroWalkthroughCompleted(true);
+              walkthrough.complete();
+            }}
+          />
+        ) : isSearchOpen ? (
+          <SearchOverlay
+            token={token!}
+            currentUser={currentUser}
+            onClose={() => closeSearch()}
+            onOpenPost={(postId) => {
+              setIsSearchOpen(false);
+              openPost(postId);
+            }}
+            onViewProfile={(idOrUsername) => {
+              setIsSearchOpen(false);
+              handleViewProfile(idOrUsername);
+            }}
+            onViewHashtag={(tag) => {
+              setIsSearchOpen(false);
+              handleViewHashtag(tag);
+            }}
+            commentsList={postComments}
+            expandedComments={expandedComments}
+            editingPostId={editingPostId}
+            editingPostContent={editingPostContent}
+            newCommentText={newCommentText}
+            replyingTo={replyingTo}
+            editingCommentId={editingCommentId}
+            editingCommentContent={editingCommentContent}
+            gamificationEnabled={gamificationEnabled}
+            highlightCommentId={highlightCommentId}
+            onToggleLike={handleToggleLike}
+            onToggleComments={toggleComments}
+            onDeletePost={handleDeletePost}
+            onStartPostEdit={(id, content) => {
+              setEditingPostId(id);
+              setEditingPostContent(content);
+            }}
+            onCancelPostEdit={() => setEditingPostId(null)}
+            onSavePostEdit={handleSavePostEdit}
+            onEditPostContentChange={setEditingPostContent}
+            onCreateComment={handleCreateComment}
+            onCommentTextChange={(pid, text) => setNewCommentText(prev => ({ ...prev, [pid]: text }))}
+            onCancelReply={pid => setReplyingTo(prev => ({ ...prev, [pid]: null }))}
+            onDeleteComment={handleDeleteComment}
+            onStartCommentEdit={(id, content) => {
+              setEditingCommentId(id);
+              setEditingCommentContent(content);
+            }}
+            onCancelCommentEdit={() => setEditingCommentId(null)}
+            onSaveCommentEdit={handleSaveCommentEdit}
+            onEditCommentContentChange={setEditingCommentContent}
+            onReply={(pid, comment) => setReplyingTo(prev => ({ ...prev, [pid]: comment }))}
+            onToggleCommentLike={handleToggleCommentLike}
+            onVotePoll={handleVotePoll}
+            onRetractPollVote={handleRetractPollVote}
+            onClosePoll={handleClosePoll}
+            onCopyPermalink={handleCopyPostPermalink}
+            onToggleBookmark={handleToggleBookmark}
+            onShare={handleSharePost}
+            onReportPost={(postId) => handleOpenReport('post', postId)}
+            onReportComment={(commentId) => handleOpenReport('comment', commentId)}
+            onPinPost={handlePinPost}
+            onUnpinPost={handleUnpinPost}
+            onStartThreadReply={setThreadReplyTargetId}
+            onCancelThreadReply={() => {
+              setThreadReplyTargetId(null);
+              setThreadReplyContent('');
+            }}
+            onSubmitThreadReply={handleSubmitThreadReply}
+            threadReplyTargetId={threadReplyTargetId}
+            threadReplyContent={threadReplyContent}
+            onThreadReplyContentChange={setThreadReplyContent}
+            threadPosts={postViewThreadReplies}
+          />
+        ) : undefined
+      }
       impersonationBanner={
         adminToken && adminUser && currentUser ? (
           <ImpersonationBanner
@@ -2409,6 +2557,7 @@ export default function App() {
             onMarkAllNotificationsRead={handleMarkAllNotifsRead}
             onOpenProfile={openProfile}
             onLogout={handleLogout}
+            onOpenSearch={() => openSearch()}
             gamification={myGamification}
             showGamification={shouldShowGamification(myGamification)}
             gamificationEnabled={gamificationEnabled}

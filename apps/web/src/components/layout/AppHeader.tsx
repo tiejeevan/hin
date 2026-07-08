@@ -1,4 +1,4 @@
-import { LogOut, Shield, User } from 'lucide-react';
+import { LogOut, Search, Shield, User } from 'lucide-react';
 import { User as UserType, Notification, type GamificationPublic } from '@hin/types';
 import { NotificationBell } from '../notifications/NotificationBell';
 import { NotificationPanel } from '../notifications/NotificationPanel';
@@ -21,6 +21,7 @@ interface AppHeaderProps {
   onMarkAllNotificationsRead: (category?: 'social' | 'gamification') => void;
   onOpenProfile: (userId: number) => void;
   onLogout: () => void;
+  onOpenSearch?: () => void;
   gamification?: GamificationPublic | null;
   showGamification?: boolean;
   gamificationEnabled?: boolean;
@@ -40,6 +41,7 @@ export function AppHeader({
   onMarkAllNotificationsRead,
   onOpenProfile,
   onLogout,
+  onOpenSearch,
   gamification,
   showGamification = false,
   gamificationEnabled = false,
@@ -93,6 +95,19 @@ export function AppHeader({
               aria-label="Admin"
             >
               <Shield className="h-5 w-5" />
+            </button>
+          )}
+
+          {/* Search Button */}
+          {onOpenSearch && (
+            <button
+              type="button"
+              onClick={onOpenSearch}
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors cursor-pointer"
+              title="Search"
+              aria-label="Search"
+            >
+              <Search className="h-5 w-5" />
             </button>
           )}
 

@@ -2,6 +2,7 @@ export type AdminSection = 'dashboard' | 'platform-reviver';
 
 export type AppRoute =
   | { view: 'home' }
+  | { view: 'search' }
   | { view: 'post'; postId: number; commentId?: number }
   | { view: 'profile'; username: string }
   | { view: 'admin'; section: AdminSection };
@@ -13,6 +14,10 @@ export function isValidUsername(username: string): boolean {
 }
 
 export function parseLocation(pathname: string, hash: string): AppRoute {
+  if (/^\/search\/?$/.test(pathname)) {
+    return { view: 'search' };
+  }
+
   const postMatch = pathname.match(/^\/post\/(\d+)\/?$/);
   if (postMatch) {
     const postId = Number(postMatch[1]);
@@ -56,6 +61,9 @@ export function profilePath(username: string): string {
 }
 
 export function routeToPath(route: AppRoute): string {
+  if (route.view === 'search') {
+    return '/search';
+  }
   if (route.view === 'post') {
     return postPath(route.postId, route.commentId);
   }

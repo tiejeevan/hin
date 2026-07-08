@@ -9,6 +9,7 @@ interface NotificationBellProps {
 export function NotificationBell({ showNotifications, unreadCount, onToggle }: NotificationBellProps) {
   return (
     <button
+      id="notifications-bell-trigger"
       onClick={onToggle}
       className={`relative h-10 w-10 flex items-center justify-center rounded-full transition-all duration-200 cursor-pointer ${
         showNotifications

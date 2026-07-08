@@ -16,6 +16,10 @@ import { toGamificationPublic, toGamificationBlock, emptyGamificationPublic } fr
 import { isGamificationEnabled, getGamificationVisibility } from '../lib/gamification/settings';
 import { processUserActionSafe } from '../lib/gamification/hub';
 import { setEquippedBadges } from '../lib/gamification/equipped';
+import {
+  completeIntroWalkthrough,
+  isIntroWalkthroughCompleted,
+} from '../lib/intro-walkthrough';
 
 const me = new Hono<{ Bindings: Env }>();
 
@@ -47,6 +51,7 @@ me.get('/bootstrap', async (c) => {
     unreadNotifications,
     unreadMessages,
     pendingFollowRequests,
+    introWalkthroughCompleted,
     gamification,
   ] = await Promise.all([
     getFollowedUserIds(db, authUser.id),
@@ -57,6 +62,7 @@ me.get('/bootstrap', async (c) => {
     countUnreadNotifications(db, authUser.id),
     countUnreadMessages(db, authUser.id),
     countPendingFollowRequests(db, authUser.id),
+    isIntroWalkthroughCompleted(db, authUser.id),
     // Skip all gamification DB reads entirely when the feature is disabled.
     gamificationEnabled
       ? toGamificationPublic(db, authUser.id, { includeGoals: true })
@@ -74,6 +80,7 @@ me.get('/bootstrap', async (c) => {
       unreadMessages,
       pendingFollowRequests,
     },
+    introWalkthroughCompleted,
     gamificationEnabled,
     ...(gamificationEnabled && gamification ? { g: gamification } : {}),
   };
@@ -121,6 +128,16 @@ me.patch('/gamification/equipped', async (c) => {
 
   const gamification = await toGamificationPublic(db, authUser.id);
   return c.json(gamification);
+});
+
+me.post('/intro-walkthrough/complete', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  await completeIntroWalkthrough(db, authUser.id);
+
+  return c.json({ ok: true, introWalkthroughCompleted: true });
 });
 
 me.post('/session-tick', async (c) => {

@@ -23,6 +23,14 @@ export const users = sqliteTable('users', {
   googleIdIdx: uniqueIndex('users_google_id_idx').on(table.googleId),
 }));
 
+/** One row per user once they finish the first-run intro walkthrough. */
+export const introWalkthrough = sqliteTable('intro_walkthrough', {
+  userId: integer('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  completedAt: text('completed_at').notNull(),
+  /** Bump when tour content changes so clients can re-show a new version. */
+  version: integer('version').default(1).notNull(),
+});
+
 export const userSettings = sqliteTable('user_settings', {
   userId: integer('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
   notifyLikes: integer('notify_likes').default(1).notNull(),

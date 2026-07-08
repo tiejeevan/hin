@@ -180,6 +180,14 @@ export interface PostThreadPage {
   replies: Post[];
 }
 
+export interface SearchResults {
+  users: User[];
+  posts: Post[];
+  hashtags: TrendingHashtag[];
+  mentions: Post[];
+  hasMore: boolean;
+}
+
 /** Hard caps for admin-configurable system settings. */
 export const SYSTEM_SETTING_BOUNDS = {
   maxPinnedPostsPerUser: { min: 0, max: 10 },
@@ -210,6 +218,8 @@ export interface MeBootstrap {
   userSettings: UserSettings;
   systemSettings: SystemSettings;
   counts: MeBootstrapCounts;
+  /** True when the user has finished the first-run intro walkthrough. */
+  introWalkthroughCompleted: boolean;
   gamificationEnabled?: boolean;
   /** Present when user has gamification data to display (read-only when flag is OFF). */
   g?: GamificationPublic;
