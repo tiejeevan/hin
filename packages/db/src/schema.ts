@@ -301,12 +301,15 @@ export const notifications = sqliteTable('notifications', {
   /** Optional comment for deep-link (comment / mention-in-comment). No FK — keep leaf-table flexibility. */
   commentId: integer('comment_id'),
   content: text('content').notNull(),
+  /** 'social' (default) or 'gamification' — gamification rows appear in the System inbox tab */
+  category: text('category').default('social').notNull(),
   read: integer('read').default(0).notNull(), // 0 = unread, 1 = read
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => ({
   userIdIdx: index('notifications_user_id_idx').on(table.userId),
   createdAtIdx: index('notifications_created_at_idx').on(table.createdAt),
   userIdReadIdx: index('notifications_user_id_read_idx').on(table.userId, table.read),
+  userIdCategoryReadIdx: index('notifications_user_id_category_read_idx').on(table.userId, table.category, table.read),
 }));
 
 /** User-submitted reports for admin review. */

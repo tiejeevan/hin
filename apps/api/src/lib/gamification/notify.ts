@@ -65,6 +65,7 @@ export async function notifyBadgeAwards(
       type: 'badge_award',
       entityType: 'badge',
       entityId: badge.id,
+      category: 'gamification',
       content,
       read: 0,
     }).returning();
@@ -79,6 +80,7 @@ export async function notifyBadgeAwards(
       entityId: badge.id,
       commentId: null,
       content,
+      category: 'gamification',
       read: false,
       createdAt: notif.createdAt,
     };
@@ -104,6 +106,7 @@ export async function notifyLevelUp(
     type: 'level_up',
     entityType: 'system',
     entityId: 0,
+    category: 'gamification',
     content,
     read: 0,
   }).returning();
@@ -118,6 +121,7 @@ export async function notifyLevelUp(
     entityId: 0,
     commentId: null,
     content,
+    category: 'gamification',
     read: false,
     createdAt: notif.createdAt,
   };
@@ -135,7 +139,7 @@ export async function notifyEventWins(
   if (eventIds.length === 0) return;
 
   const settings = await getOrCreateUserSettings(db, userId);
-  if (!isNotificationEnabled(settings, 'system')) return;
+  if (!isNotificationEnabled(settings, 'event_win')) return;
 
   const events = await db
     .select({ id: schema.events.id, name: schema.events.name })
@@ -148,9 +152,10 @@ export async function notifyEventWins(
     const [notif] = await db.insert(schema.notifications).values({
       userId,
       senderId: userId,
-      type: 'system',
-      entityType: 'system',
+      type: 'event_win',
+      entityType: 'event',
       entityId: event.id,
+      category: 'gamification',
       content,
       read: 0,
     }).returning();
@@ -160,11 +165,12 @@ export async function notifyEventWins(
       userId,
       senderId: userId,
       senderUsername,
-      type: 'system',
-      entityType: 'system',
+      type: 'event_win',
+      entityType: 'event',
       entityId: event.id,
       commentId: null,
       content,
+      category: 'gamification',
       read: false,
       createdAt: notif.createdAt,
     };

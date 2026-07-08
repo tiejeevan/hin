@@ -204,6 +204,13 @@
       "when": 1783160000000,
       "tag": "0029_equipped_badges",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1783161000000,
+      "tag": "0030_notification_category",
+      "breakpoints": true
     }
   ]
 }

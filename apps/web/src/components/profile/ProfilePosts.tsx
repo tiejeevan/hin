@@ -6,6 +6,7 @@ interface ProfilePostsProps {
   posts: Post[];
   currentUser?: UserType;
   readOnly?: boolean;
+  gamificationEnabled?: boolean;
   expandedComments: Record<number, boolean>;
   postComments: Record<number, Comment[]>;
   newCommentText: Record<number, string>;
@@ -55,6 +56,7 @@ export function ProfilePosts({
   posts,
   currentUser,
   readOnly = false,
+  gamificationEnabled = false,
   expandedComments,
   postComments,
   newCommentText,
@@ -108,6 +110,7 @@ export function ProfilePosts({
       post={post}
       currentUser={currentUser ?? null}
       readOnly={readOnly}
+      gamificationEnabled={gamificationEnabled}
       commentsList={postComments[post.id] || []}
       isCommentsExpanded={expandedComments[post.id] || false}
       isNewlyCreated={false}

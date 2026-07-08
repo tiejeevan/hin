@@ -2,8 +2,9 @@ import { useEffect, useMemo } from 'react';
 import { X, Shield, SquarePen, ChevronLeft, Maximize2, Minimize2, Send, MessageCircle } from 'lucide-react';
 import { ChatThread, Message, User as UserType } from '@hin/types';
 import { ChatRecipient } from '../../types/ui';
-import { getAvatarColor } from '../../utils/avatar';
+import { UserAvatar } from '../profile/UserAvatar';
 import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
+import { useOverscrollBounce } from '../../hooks/useOverscrollBounce';
 
 interface MessagesPanelProps {
   isOpen: boolean;
@@ -23,6 +24,7 @@ interface MessagesPanelProps {
   onNewMsgTextChange: (text: string) => void;
   onSendDM: (e: React.FormEvent) => void;
   onTyping: (recipientId: number) => void;
+  onOpenProfile: (userId: number, opts?: { username?: string }) => void;
 }
 
 export function MessagesPanel({
@@ -43,6 +45,7 @@ export function MessagesPanel({
   onNewMsgTextChange,
   onSendDM,
   onTyping,
+  onOpenProfile,
 }: MessagesPanelProps) {
   const sorted = useMemo(() => {
     return [...threads].sort((a, b) => {
@@ -66,6 +69,12 @@ export function MessagesPanel({
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isOpen, isExpanded, onClose, onToggleExpand]);
+
+  // Scroll stays wherever the pointer is (no page lock). These give the chat and
+  // conversation lists a rubber-band bump at the start/end and stop scroll from
+  // chaining to the page behind.
+  const chatScrollRef = useOverscrollBounce<HTMLDivElement>(isOpen);
+  const listScrollRef = useOverscrollBounce<HTMLDivElement>(isOpen);
 
   useEffect(() => {
     if (!isOpen || isExpanded) return;
@@ -113,11 +122,12 @@ export function MessagesPanel({
           onBack={onBackToList}
           onToggleExpand={onToggleExpand}
           onClose={onClose}
+          onOpenProfile={onOpenProfile}
         />
 
         {showingChat && chatRecipient ? (
           <>
-            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-chat-bg min-h-0">
+            <div ref={chatScrollRef} className="flex-1 overflow-y-auto overscroll-contain p-3 space-y-2 bg-chat-bg min-h-0">
               {chatMessages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-text-muted text-[11px] gap-1.5 py-8">
                   <MessageCircle className="h-7 w-7 opacity-40" />
@@ -190,7 +200,7 @@ export function MessagesPanel({
             </form>
           </>
         ) : (
-          <div className="overflow-y-auto divide-y divide-border-custom/50 flex-1 min-h-0">
+          <div ref={listScrollRef} className="overflow-y-auto overscroll-contain divide-y divide-border-custom/50 flex-1 min-h-0">
             {sorted.length === 0 ? (
               <div className="px-3 py-10 text-center text-[11px] text-text-muted leading-snug flex flex-col items-center gap-2">
                 <SquarePen className="h-4 w-4 opacity-50" />
@@ -203,7 +213,7 @@ export function MessagesPanel({
                 return (
                   <button
                     key={t.id}
-                    onClick={() => onSelectThread({ id: t.id, username: t.username, role: t.role })}
+                    onClick={() => onSelectThread({ id: t.id, username: t.username, role: t.role, avatarUrl: t.avatarUrl })}
                     className={`w-full px-3 py-2.5 flex gap-2.5 text-left cursor-pointer transition-colors min-h-[52px] ${
                       hasUnread
                         ? 'bg-indigo-950/20 hover:bg-indigo-950/30 border-l-2 border-l-indigo-500'
@@ -211,20 +221,19 @@ export function MessagesPanel({
                     }`}
                   >
                     <div className="relative shrink-0">
-                      <div
-                        className={`h-9 w-9 rounded-full flex items-center justify-center font-bold text-[10px] uppercase ${getAvatarColor(t.username)} ${
-                          hasUnread ? 'ring-2 ring-indigo-500/60' : ''
+                      <UserAvatar
+                        username={t.username}
+                        avatarUrl={t.avatarUrl}
+                        size="md"
+                        className={hasUnread ? 'ring-2 ring-indigo-500/60' : ''}
+                      />
+                      <span
+                        className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-bg-secondary ${
+                          isOnline ? 'bg-emerald-500' : 'bg-text-muted/60'
                         }`}
-                      >
-                        {t.username[0]}
-                      </div>
-                      {isOnline && (
-                        <span
-                          className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-500 border-2 border-bg-secondary"
-                          title="Online"
-                          aria-label="Online"
-                        />
-                      )}
+                        title={isOnline ? 'Online' : 'Offline'}
+                        aria-label={isOnline ? 'Online' : 'Offline'}
+                      />
                       {hasUnread && (
                         <span className="absolute -top-0.5 -right-0.5 h-[18px] min-w-[18px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center border-2 border-bg-secondary">
                           {t.unreadCount > 9 ? '9+' : t.unreadCount}
@@ -236,7 +245,7 @@ export function MessagesPanel({
                         <p
                           className={`text-[11px] truncate ${hasUnread ? 'font-bold text-text-primary' : 'font-semibold text-text-primary'}`}
                         >
-                          @{t.username}
+                          {t.username}
                           {t.equippedBadges && t.equippedBadges.length > 0 && (
                             <EquippedBadgesInline
                               badges={t.equippedBadges}
@@ -293,6 +302,7 @@ function PanelHeader({
   onBack,
   onToggleExpand,
   onClose,
+  onOpenProfile,
 }: {
   showingChat: boolean;
   chatRecipient: ChatRecipient | null;
@@ -301,6 +311,7 @@ function PanelHeader({
   onBack: () => void;
   onToggleExpand: () => void;
   onClose: () => void;
+  onOpenProfile: (userId: number, opts?: { username?: string }) => void;
 }) {
   return (
     <div className="px-3 py-2 flex items-center justify-between bg-bg-primary/50 border-b border-border-custom/60 shrink-0 gap-2">
@@ -314,30 +325,35 @@ function PanelHeader({
             >
               <ChevronLeft className="h-5 w-5" />
             </button>
-            <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => onOpenProfile(chatRecipient.id, { username: chatRecipient.username })}
+              className="flex items-center gap-2 min-w-0 rounded-lg hover:bg-bg-tertiary/60 px-1 -mx-1 py-0.5 transition-colors cursor-pointer text-left"
+              aria-label={`View ${chatRecipient.username}'s profile`}
+            >
               <div className="relative shrink-0">
-                <div
-                  className={`h-7 w-7 rounded-full flex items-center justify-center font-bold text-[10px] uppercase ${getAvatarColor(chatRecipient.username)}`}
-                >
-                  {chatRecipient.username[0]}
-                </div>
-                {isOnline && (
-                  <span
-                    className="absolute bottom-0 right-0 h-2 w-2 rounded-full bg-emerald-500 border-2 border-bg-primary"
-                    title="Online"
-                    aria-label="Online"
-                  />
-                )}
+                <UserAvatar
+                  username={chatRecipient.username}
+                  avatarUrl={chatRecipient.avatarUrl}
+                  size="sm"
+                />
+                <span
+                  className={`absolute bottom-0 right-0 h-2 w-2 rounded-full border-2 border-bg-primary ${
+                    isOnline ? 'bg-emerald-500' : 'bg-text-muted/60'
+                  }`}
+                  title={isOnline ? 'Online' : 'Offline'}
+                  aria-label={isOnline ? 'Online' : 'Offline'}
+                />
               </div>
-              <div className="min-w-0">
-                <span className="text-[11px] font-semibold text-text-primary truncate block">
-                  @{chatRecipient.username}
+              <div className="min-w-0 leading-tight">
+                <span className="text-[11px] font-semibold text-text-primary truncate block hover:text-indigo-400 transition-colors">
+                  {chatRecipient.username}
                 </span>
-                {isOnline && (
-                  <span className="text-[10px] text-emerald-500">Online</span>
-                )}
+                <span className={`text-[10px] ${isOnline ? 'text-emerald-500' : 'text-text-muted'}`}>
+                  {isOnline ? 'Online' : 'Offline'}
+                </span>
               </div>
-            </div>
+            </button>
           </>
         ) : (
           <span className="text-[11px] font-semibold text-text-secondary tracking-wide">Messages</span>

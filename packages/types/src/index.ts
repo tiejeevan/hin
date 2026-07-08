@@ -279,6 +279,7 @@ export interface ChatThread {
   id: number;
   username: string;
   role: string;
+  avatarUrl?: string | null;
   equippedBadges?: EquippedBadgePublic[];
   lastMessage: {
     content: string;
@@ -289,20 +290,38 @@ export interface ChatThread {
   unreadCount: number;
 }
 
+export type NotificationCategory = 'social' | 'gamification';
+
 export interface Notification {
   id: number;
   userId: number;
   senderId: number;
   senderUsername: string;
-  type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted' | 'badge_award' | 'level_up';
+  type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted' | 'badge_award' | 'level_up' | 'event_win';
   /** What entityId points at. Optional for older rows written before migration. */
-  entityType?: 'post' | 'message' | 'system' | 'user' | 'badge' | null;
+  entityType?: 'post' | 'message' | 'system' | 'user' | 'badge' | 'event' | null;
   entityId: number; // postId for likes/comments/mentions, messageId for messages, system_broadcasts.id for system
   /** Set for comment / mention-in-comment notifications. Optional for older rows. */
   commentId?: number | null;
   content: string;
+  /** Inbox tab: social (default) or gamification (System tab when gamification is enabled). */
+  category?: NotificationCategory;
   read: boolean;
   createdAt: string;
+}
+
+/** True for badge, level-up, and event-win notifications (System tab). */
+export function isGamificationNotification(
+  n: Pick<Notification, 'category' | 'type'>,
+): boolean {
+  if (n.category === 'gamification') return true;
+  return n.type === 'badge_award' || n.type === 'level_up' || n.type === 'event_win';
+}
+
+export function resolveNotificationCategory(
+  n: Pick<Notification, 'category' | 'type'>,
+): NotificationCategory {
+  return isGamificationNotification(n) ? 'gamification' : 'social';
 }
 
 export type BroadcastDelivery = 'notification' | 'toast' | 'both';
@@ -470,6 +489,7 @@ export function isNotificationEnabledForSettings(
       return settings.notifySystem;
     case 'badge_award':
     case 'level_up':
+    case 'event_win':
       return true;
     default:
       return true;

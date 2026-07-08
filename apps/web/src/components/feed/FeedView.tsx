@@ -211,6 +211,7 @@ export function FeedView({
                 key={post.id}
                 post={post}
                 currentUser={currentUser}
+                gamificationEnabled={gamificationEnabled}
                 commentsList={postComments[post.id] || []}
                 isCommentsExpanded={expandedComments[post.id] || false}
                 isNewlyCreated={newlyCreatedPostId === post.id}

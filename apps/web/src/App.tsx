@@ -19,11 +19,13 @@ import {
   shouldShowNotificationToast,
   shouldShowChatIcon,
   notificationPostTarget,
+  resolveNotificationCategory,
   SystemSettings,
   DEFAULT_SYSTEM_SETTINGS,
   validatePostLimits,
   type GamificationPublic,
   type GamificationRewardPayload,
+  type GamificationSettings,
 } from '@hin/types';
 import { API_URL, WS_URL } from './config';
 import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode, FeedMode } from './types/ui';
@@ -70,6 +72,7 @@ export default function App() {
   const [highlightFollowRequests, setHighlightFollowRequests] = useState(false);
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = useState(false);
   const feedModeRef = useRef<FeedMode>('all');
+  const profileUserIdRef = useRef<number | null>(null);
   const followedUserIdsRef = useRef<Set<number>>(new Set());
   const blockedUserIdsRef = useRef<Set<number>>(new Set());
   const mutedUserIdsRef = useRef<Set<number>>(new Set());
@@ -184,6 +187,10 @@ export default function App() {
   useEffect(() => {
     activeHashtagRef.current = activeHashtag;
   }, [activeHashtag]);
+
+  useEffect(() => {
+    profileUserIdRef.current = profileUserId;
+  }, [profileUserId]);
 
   useEffect(() => {
     followedUserIdsRef.current = followedUserIds;
@@ -366,8 +373,9 @@ export default function App() {
   };
 
   const shouldShowGamification = (g: GamificationPublic | null | undefined) => {
+    if (gamificationEnabled) return true;
     if (!g) return false;
-    return gamificationEnabled || g.badges.length > 0 || (g.totalPoints ?? 0) > 0 || (g.level ?? 1) > 1;
+    return g.badges.length > 0 || (g.totalPoints ?? 0) > 0 || (g.level ?? 1) > 1;
   };
 
   const fetchBootstrap = async () => {
@@ -1112,6 +1120,23 @@ export default function App() {
               });
               break;
             }
+            case 'gamification_settings_changed': {
+              const { settings } = message.payload as { settings: GamificationSettings };
+              setGamificationEnabled(settings.gamificationEnabled);
+              if (settings.gamificationEnabled) {
+                void fetchBootstrap();
+                void fetchPosts();
+                const pid = profileUserIdRef.current;
+                if (pid != null) {
+                  void fetchProfileGamification(pid);
+                  void fetchProfilePosts(pid);
+                }
+              } else {
+                setMyGamification(null);
+                setProfileGamification(null);
+              }
+              break;
+            }
             case 'post_created': {
               const { post } = message.payload;
               if (!shouldShowPostInFeed(post, currentUser!.id)) break;
@@ -1776,7 +1801,7 @@ export default function App() {
   };
 
   const startChat = (user: UserType | ChatRecipient) => {
-    const recipient: ChatRecipient = { id: user.id, username: user.username, role: user.role };
+    const recipient: ChatRecipient = { id: user.id, username: user.username, role: user.role, avatarUrl: user.avatarUrl };
     setShowNotifications(false);
     setShowMessagesDropdown(true);
     setMessagesPanelExpanded(false);
@@ -1833,16 +1858,24 @@ export default function App() {
     }
   };
 
-  const handleMarkAllNotifsRead = async () => {
+  const handleMarkAllNotifsRead = async (category?: 'social' | 'gamification') => {
     if (!currentUser || unreadNotifsCount === 0) return;
     try {
-      const res = await fetch(`${API_URL}/api/notifications/read-all`, {
+      const query = category ? `?category=${category}` : '';
+      const res = await fetch(`${API_URL}/api/notifications/read-all${query}`, {
         method: 'POST',
         headers: getHeaders(),
       });
       if (res.ok) {
-        setNotifications(prev => prev.map(n => (n.read ? n : { ...n, read: true })));
-        setUnreadNotifsCount(0);
+        setNotifications(prev => {
+          const next = prev.map(n => {
+            if (n.read) return n;
+            if (category && resolveNotificationCategory(n) !== category) return n;
+            return { ...n, read: true };
+          });
+          setUnreadNotifsCount(next.filter(n => !n.read && n.type !== 'message').length);
+          return next;
+        });
       }
     } catch (e) {
       console.error(e);
@@ -1853,7 +1886,7 @@ export default function App() {
     handleMarkNotifRead(n.id);
     setShowNotifications(false);
     if (n.type === 'system') return;
-    if (n.type === 'badge_award' || n.type === 'level_up') {
+    if (n.type === 'badge_award' || n.type === 'level_up' || n.type === 'event_win') {
       openProfile(currentUser!.id);
       return;
     }
@@ -2311,6 +2344,7 @@ export default function App() {
             onLogout={handleLogout}
             gamification={myGamification}
             showGamification={shouldShowGamification(myGamification)}
+            gamificationEnabled={gamificationEnabled}
           />
         ) : undefined
       }
@@ -2338,6 +2372,7 @@ export default function App() {
             error={postViewError}
             currentUser={currentUser}
             readOnly={!currentUser}
+            gamificationEnabled={gamificationEnabled}
             highlightCommentId={highlightCommentId}
             commentsList={postViewId ? (postComments[postViewId] ?? []) : []}
             isCommentsExpanded={postViewId ? !!expandedComments[postViewId] : false}
@@ -2671,6 +2706,7 @@ export default function App() {
             onNewMsgTextChange={setNewMsgText}
             onSendDM={handleSendDM}
             onTyping={handleUserTyping}
+            onOpenProfile={openProfile}
           />
         )}
 

@@ -308,6 +308,7 @@ export function ProfileView({
                 posts={profilePosts}
                 currentUser={currentUser}
                 readOnly={readOnly}
+                gamificationEnabled={gamificationEnabled}
                 expandedComments={expandedComments}
                 postComments={postComments}
                 newCommentText={newCommentText}

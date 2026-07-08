@@ -31,4 +31,5 @@ export interface ChatRecipient {
   id: number;
   username: string;
   role: string;
+  avatarUrl?: string | null;
 }

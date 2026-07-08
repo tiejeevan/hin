@@ -1,4 +1,4 @@
-import { AtSign, Heart, Megaphone, MessageSquare, MessageCircle, UserPlus, UserCheck, Award, TrendingUp } from 'lucide-react';
+import { AtSign, Heart, Megaphone, MessageSquare, MessageCircle, UserPlus, UserCheck, Award, TrendingUp, Trophy } from 'lucide-react';
 import { Notification } from '@hin/types';
 
 interface NotificationItemProps {
@@ -27,6 +27,8 @@ function iconForType(type: Notification['type']) {
       return <Award className="h-3 w-3 text-amber-400" />;
     case 'level_up':
       return <TrendingUp className="h-3 w-3 text-violet-400" />;
+    case 'event_win':
+      return <Trophy className="h-3 w-3 text-amber-400" />;
     default:
       return <MessageSquare className="h-3 w-3 text-indigo-400" />;
   }
@@ -53,6 +55,8 @@ function bgForType(type: Notification['type']) {
       return 'bg-amber-500/15';
     case 'level_up':
       return 'bg-violet-500/15';
+    case 'event_win':
+      return 'bg-amber-500/15';
     default:
       return 'bg-emerald-500/10';
   }
@@ -84,7 +88,7 @@ export function NotificationItem({ notification: n, onClick }: NotificationItemP
           {n.content}
         </p>
         <span className="text-[10px] text-text-muted mt-1 block leading-none">
-          {n.type === 'system' ? 'System · ' : n.type === 'badge_award' ? 'Badge · ' : n.type === 'level_up' ? 'Level · ' : ''}
+          {n.type === 'system' ? 'System · ' : n.type === 'badge_award' ? 'Badge · ' : n.type === 'level_up' ? 'Level · ' : n.type === 'event_win' ? 'Event · ' : ''}
           {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </span>
       </div>

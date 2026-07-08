@@ -10,6 +10,7 @@ interface PostViewProps {
   error: { status: number; message: string } | null;
   currentUser: UserType | null;
   readOnly: boolean;
+  gamificationEnabled?: boolean;
   highlightCommentId: number | null;
   commentsList: Comment[];
   isCommentsExpanded: boolean;
@@ -76,6 +77,7 @@ export function PostView({
   error,
   currentUser,
   readOnly,
+  gamificationEnabled = false,
   highlightCommentId,
   commentsList,
   isCommentsExpanded,
@@ -234,6 +236,7 @@ export function PostView({
         editingCommentId={editingCommentId}
         editingCommentContent={editingCommentContent}
         readOnly={readOnly}
+        gamificationEnabled={gamificationEnabled}
         highlightCommentId={highlightCommentId}
         onSignInRequired={onSignIn}
         onCopyPermalink={onCopyPermalink}

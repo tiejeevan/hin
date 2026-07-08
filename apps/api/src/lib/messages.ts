@@ -91,6 +91,7 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
         id: schema.users.id,
         username: schema.users.username,
         role: schema.users.role,
+        avatarUrl: schema.users.avatarUrl,
       })
       .from(schema.users)
       .where(
@@ -135,6 +136,7 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
       id: u.id,
       username: u.username,
       role: u.role,
+      avatarUrl: u.avatarUrl,
       equippedBadges: equippedBadgesByUser.get(u.id) ?? [],
       lastMessage: lastMsg
         ? {

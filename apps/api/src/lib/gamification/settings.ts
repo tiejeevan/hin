@@ -7,6 +7,7 @@ import { getSystemSetting } from '../system-settings';
 export const GAMIFICATION_ENABLED_KEY = 'gamification_enabled';
 export const GAMIFICATION_SHOW_LEVEL_KEY = 'gamification_show_level';
 export const GAMIFICATION_SHOW_POINTS_KEY = 'gamification_show_points';
+export const GAMIFICATION_SETTINGS_EPOCH_KEY = 'gamification_settings_epoch';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -15,8 +16,9 @@ export interface GamificationVisibility {
   showPoints: boolean;
 }
 
-let cachedSettings: { value: GamificationSettings; fetchedAt: number } | null = null;
-const FLAG_CACHE_TTL_MS = 60_000;
+let cachedSettings: { value: GamificationSettings; epoch: string; fetchedAt: number } | null = null;
+// Fallback TTL when the epoch has not changed (normal hot-path caching).
+const FLAG_CACHE_TTL_MS = 5_000;
 
 export function invalidateGamificationFlagCache(): void {
   cachedSettings = null;
@@ -24,7 +26,13 @@ export function invalidateGamificationFlagCache(): void {
 
 async function loadSettings(db: Db): Promise<GamificationSettings> {
   const now = Date.now();
-  if (cachedSettings && now - cachedSettings.fetchedAt < FLAG_CACHE_TTL_MS) {
+  const epoch = (await getSystemSetting(db, GAMIFICATION_SETTINGS_EPOCH_KEY)) ?? '0';
+
+  if (
+    cachedSettings
+    && cachedSettings.epoch === epoch
+    && now - cachedSettings.fetchedAt < FLAG_CACHE_TTL_MS
+  ) {
     return cachedSettings.value;
   }
 
@@ -41,7 +49,7 @@ async function loadSettings(db: Db): Promise<GamificationSettings> {
     showLevel: showLevelRaw !== 'false',
     showPoints: showPointsRaw !== 'false',
   };
-  cachedSettings = { value, fetchedAt: now };
+  cachedSettings = { value, epoch, fetchedAt: now };
   return value;
 }
 
@@ -89,6 +97,9 @@ export async function updateGamificationSettings(
   if (patch.showPoints !== undefined) {
     await upsertSetting(db, GAMIFICATION_SHOW_POINTS_KEY, patch.showPoints ? 'true' : 'false');
   }
+
+  // Bump epoch so every Worker isolate invalidates its cache on the next read.
+  await upsertSetting(db, GAMIFICATION_SETTINGS_EPOCH_KEY, String(Date.now()));
 
   invalidateGamificationFlagCache();
   return loadSettings(db);

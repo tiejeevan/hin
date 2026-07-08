@@ -18,11 +18,12 @@ interface AppHeaderProps {
   onToggleNotifications: () => void;
   onCloseNotifications: () => void;
   onNotificationClick: (notification: Notification) => void;
-  onMarkAllNotificationsRead: () => void;
+  onMarkAllNotificationsRead: (category?: 'social' | 'gamification') => void;
   onOpenProfile: (userId: number) => void;
   onLogout: () => void;
   gamification?: GamificationPublic | null;
   showGamification?: boolean;
+  gamificationEnabled?: boolean;
 }
 
 export function AppHeader({
@@ -41,6 +42,7 @@ export function AppHeader({
   onLogout,
   gamification,
   showGamification = false,
+  gamificationEnabled = false,
 }: AppHeaderProps) {
   const bellRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -104,6 +106,7 @@ export function AppHeader({
               isOpen={showNotifications}
               notifications={notifications}
               unreadCount={unreadNotifsCount}
+              gamificationEnabled={gamificationEnabled}
               anchorRef={bellRef}
               onClose={onCloseNotifications}
               onNotificationClick={onNotificationClick}

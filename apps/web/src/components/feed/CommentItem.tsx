@@ -14,6 +14,7 @@ interface CommentItemProps {
   postId: number;
   currentUser: UserType | null;
   readOnly?: boolean;
+  gamificationEnabled?: boolean;
   editingCommentId: number | null;
   editingCommentContent: string;
   onDeleteComment: (postId: number, commentId: number) => void;
@@ -35,6 +36,7 @@ export function CommentItem({
   postId,
   currentUser,
   readOnly = false,
+  gamificationEnabled = false,
   editingCommentId,
   editingCommentContent,
   onDeleteComment,
@@ -122,7 +124,7 @@ export function CommentItem({
                     {comment.username}
                   </button>
                 )}
-                {!isDeleted && comment.authorEquippedBadges && comment.authorEquippedBadges.length > 0 && (
+                {!isDeleted && gamificationEnabled && comment.authorEquippedBadges && comment.authorEquippedBadges.length > 0 && (
                   <EquippedBadgesInline badges={comment.authorEquippedBadges} size="sm" />
                 )}
                 <span className="text-[9px] text-text-muted">
@@ -283,6 +285,7 @@ export function CommentItem({
           postId={postId}
           currentUser={currentUser}
           readOnly={readOnly}
+          gamificationEnabled={gamificationEnabled}
           editingCommentId={editingCommentId}
           editingCommentContent={editingCommentContent}
           onDeleteComment={onDeleteComment}

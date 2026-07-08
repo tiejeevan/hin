@@ -32,6 +32,7 @@ import {
   adminRevokeBadge,
 } from '../lib/gamification/admin-user';
 import { archiveOldLedgerRows } from '../lib/gamification/archival';
+import { broadcastToAll } from '../lib/realtime';
 
 const adminGamification = new Hono<{ Bindings: Env }>();
 
@@ -98,7 +99,16 @@ adminGamification.patch('/settings', async (c) => {
   }
 
   const db = drizzle(c.env.DB, { schema });
-  return c.json(await updateGamificationSettings(db, parsed.data));
+  const settings = await updateGamificationSettings(db, parsed.data);
+
+  // Push the new settings to every connected client so the toggle takes effect
+  // instantly, without waiting for the per-isolate flag cache to expire.
+  await broadcastToAll(c.env, {
+    type: 'gamification_settings_changed',
+    payload: { settings },
+  });
+
+  return c.json(settings);
 });
 
 adminGamification.get('/metrics', async (c) => {

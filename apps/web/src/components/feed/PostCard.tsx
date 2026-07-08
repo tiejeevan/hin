@@ -29,6 +29,7 @@ interface PostCardProps {
   hideAuthorHeader?: boolean;
   showPinnedBadge?: boolean;
   readOnly?: boolean;
+  gamificationEnabled?: boolean;
   highlightCommentId?: number | null;
   onSignInRequired?: () => void;
   onCopyPermalink?: () => void;
@@ -86,6 +87,7 @@ export function PostCard({
   hideAuthorHeader = false,
   showPinnedBadge = false,
   readOnly = false,
+  gamificationEnabled = false,
   highlightCommentId = null,
   onSignInRequired,
   onCopyPermalink,
@@ -322,7 +324,7 @@ export function PostCard({
                 className="text-xs font-bold text-text-primary flex items-center gap-1 hover:text-indigo-400 transition-colors cursor-pointer"
               >
                 {post.username}
-                {post.authorEquippedBadges && post.authorEquippedBadges.length > 0 && (
+                {gamificationEnabled && post.authorEquippedBadges && post.authorEquippedBadges.length > 0 && (
                   <EquippedBadgesInline badges={post.authorEquippedBadges} size="sm" />
                 )}
                 {post.authorRole === 'admin' && <Shield className="h-3 w-3 text-amber-500" />}
@@ -650,8 +652,9 @@ export function PostCard({
                     depth={0}
                     postId={post.id}
                     currentUser={currentUser}
-                    readOnly={readOnly}
-                    editingCommentId={editingCommentId}
+                  readOnly={readOnly}
+                  gamificationEnabled={gamificationEnabled}
+                  editingCommentId={editingCommentId}
                     editingCommentContent={editingCommentContent}
                     onDeleteComment={onDeleteComment}
                     onStartEdit={onStartCommentEdit}

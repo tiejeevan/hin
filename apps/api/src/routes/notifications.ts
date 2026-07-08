@@ -2,10 +2,14 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, desc, and } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { Notification } from '@hin/types';
+import { Notification, type NotificationCategory } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
-import { countUnreadNotifications, resolveNotificationEntityType } from '../lib/notifications';
+import {
+  countUnreadNotifications,
+  resolveNotificationEntityType,
+  resolveStoredNotificationCategory,
+} from '../lib/notifications';
 
 const notifications = new Hono<{ Bindings: Env }>();
 
@@ -36,6 +40,7 @@ notifications.get('/', async (c) => {
       entityId: schema.notifications.entityId,
       commentId: schema.notifications.commentId,
       content: schema.notifications.content,
+      category: schema.notifications.category,
       read: schema.notifications.read,
       createdAt: schema.notifications.createdAt,
       senderUsername: schema.users.username,
@@ -56,6 +61,7 @@ notifications.get('/', async (c) => {
     entityId: notif.entityId,
     commentId: notif.commentId ?? null,
     content: notif.content,
+    category: resolveStoredNotificationCategory(notif),
     read: notif.read === 1,
     createdAt: notif.createdAt,
   }));
@@ -63,22 +69,29 @@ notifications.get('/', async (c) => {
   return c.json(populatedNotifs);
 });
 
-// Mark all notifications as read
+// Mark notifications as read (optional ?category=social|gamification for tab-scoped read-all)
 notifications.post('/read-all', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
 
+  const categoryParam = c.req.query('category');
+  const category: NotificationCategory | undefined =
+    categoryParam === 'social' || categoryParam === 'gamification' ? categoryParam : undefined;
+
   const db = drizzle(c.env.DB, { schema });
+
+  const conditions = [
+    eq(schema.notifications.userId, authUser.id),
+    eq(schema.notifications.read, 0),
+  ];
+  if (category) {
+    conditions.push(eq(schema.notifications.category, category));
+  }
 
   await db
     .update(schema.notifications)
     .set({ read: 1 })
-    .where(
-      and(
-        eq(schema.notifications.userId, authUser.id),
-        eq(schema.notifications.read, 0)
-      )
-    )
+    .where(and(...conditions))
     .run();
 
   return c.json({ success: true });

@@ -1,27 +1,48 @@
-import { useEffect } from 'react';
-import { X } from 'lucide-react';
-import { Notification } from '@hin/types';
+import { useEffect, useMemo, useState } from 'react';
+import { Trophy, X } from 'lucide-react';
+import { Notification, isGamificationNotification, resolveNotificationCategory } from '@hin/types';
 import { NotificationItem } from './NotificationItem';
+
+type InboxTab = 'social' | 'gamification';
 
 interface NotificationPanelProps {
   isOpen: boolean;
   notifications: Notification[];
   unreadCount: number;
+  gamificationEnabled: boolean;
   anchorRef: React.RefObject<HTMLDivElement | null>;
   onClose: () => void;
   onNotificationClick: (notification: Notification) => void;
-  onMarkAllRead: () => void;
+  onMarkAllRead: (category?: InboxTab) => void;
 }
 
 export function NotificationPanel({
   isOpen,
   notifications,
   unreadCount,
+  gamificationEnabled,
   anchorRef,
   onClose,
   onNotificationClick,
   onMarkAllRead,
 }: NotificationPanelProps) {
+  const [activeTab, setActiveTab] = useState<InboxTab>('social');
+
+  const socialNotifications = useMemo(
+    () => notifications.filter(n => resolveNotificationCategory(n) === 'social'),
+    [notifications],
+  );
+  const systemNotifications = useMemo(
+    () => notifications.filter(n => isGamificationNotification(n)),
+    [notifications],
+  );
+
+  const socialUnread = socialNotifications.filter(n => !n.read).length;
+  const systemUnread = systemNotifications.filter(n => !n.read).length;
+
+  const visibleNotifications = activeTab === 'gamification' ? systemNotifications : socialNotifications;
+  const tabUnread = activeTab === 'gamification' ? systemUnread : socialUnread;
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -50,6 +71,12 @@ export function NotificationPanel({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen, onClose, anchorRef]);
 
+  useEffect(() => {
+    if (!gamificationEnabled && activeTab === 'gamification') {
+      setActiveTab('social');
+    }
+  }, [gamificationEnabled, activeTab]);
+
   if (!isOpen) return null;
 
   return (
@@ -71,15 +98,39 @@ export function NotificationPanel({
         role="dialog"
         aria-label="Notifications"
       >
-        <PanelHeader unreadCount={unreadCount} onClose={onClose} onMarkAllRead={onMarkAllRead} />
+        <PanelHeader
+          unreadCount={unreadCount}
+          onClose={onClose}
+          onMarkAllRead={() => onMarkAllRead(gamificationEnabled ? activeTab : undefined)}
+          tabUnread={tabUnread}
+        />
+
+        {gamificationEnabled && (
+          <div className="flex border-b border-border-custom/50 shrink-0 bg-bg-primary/30 px-2 pt-1">
+            <TabButton
+              active={activeTab === 'social'}
+              label="Activity"
+              unread={socialUnread}
+              onClick={() => setActiveTab('social')}
+            />
+            <TabButton
+              active={activeTab === 'gamification'}
+              label="System"
+              unread={systemUnread}
+              onClick={() => setActiveTab('gamification')}
+            />
+          </div>
+        )}
 
         <div className="overflow-y-auto divide-y divide-border-custom/40 flex-1 min-h-0">
-          {notifications.length === 0 ? (
+          {visibleNotifications.length === 0 ? (
             <div className="px-4 py-10 text-center text-[11px] text-text-muted leading-snug">
-              No notifications yet.
+              {activeTab === 'gamification'
+                ? 'No system notifications yet.'
+                : 'No notifications yet.'}
             </div>
           ) : (
-            notifications.map(n => (
+            visibleNotifications.map(n => (
               <NotificationItem
                 key={n.id}
                 notification={n}
@@ -93,12 +144,52 @@ export function NotificationPanel({
   );
 }
 
+function TabButton({
+  active,
+  label,
+  unread,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  unread: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`relative flex-1 px-2 py-2 text-[11px] font-medium transition-colors cursor-pointer rounded-t-lg ${
+        active
+          ? 'text-text-primary bg-bg-secondary/80'
+          : 'text-text-muted hover:text-text-secondary hover:bg-bg-tertiary/40'
+      }`}
+      aria-pressed={active}
+    >
+      <span className="inline-flex items-center justify-center gap-1.5">
+        {label === 'System' && <Trophy className="h-3 w-3 text-amber-400/90" aria-hidden />}
+        {label}
+        {unread > 0 && (
+          <span className="text-[9px] bg-indigo-500/15 text-indigo-400 px-1 py-0.5 rounded-full font-semibold leading-none min-w-[1rem] text-center">
+            {unread}
+          </span>
+        )}
+      </span>
+      {active && (
+        <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-indigo-400/80" aria-hidden />
+      )}
+    </button>
+  );
+}
+
 function PanelHeader({
   unreadCount,
+  tabUnread,
   onClose,
   onMarkAllRead,
 }: {
   unreadCount: number;
+  tabUnread: number;
   onClose: () => void;
   onMarkAllRead: () => void;
 }) {
@@ -113,7 +204,7 @@ function PanelHeader({
         )}
       </div>
       <div className="flex items-center gap-1">
-        {unreadCount > 0 && (
+        {tabUnread > 0 && (
           <button
             type="button"
             onClick={onMarkAllRead}
