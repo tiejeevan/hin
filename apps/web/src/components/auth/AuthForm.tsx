@@ -1,6 +1,8 @@
+import { useEffect, useRef, useState } from 'react';
 import { Lock, ChevronRight } from 'lucide-react';
-import { GOOGLE_CLIENT_ID } from '../../config';
+import { GOOGLE_CLIENT_ID, TURNSTILE_SITE_KEY } from '../../config';
 import { GoogleSignInButton } from './GoogleSignInButton';
+import { TurnstileWidget, type TurnstileWidgetHandle } from './TurnstileWidget';
 
 interface AuthFormProps {
   isRegisterMode: boolean;
@@ -8,7 +10,7 @@ interface AuthFormProps {
   passwordInput: string;
   authError: string | null;
   isAuthLoading: boolean;
-  onSubmit: (e: React.FormEvent) => void;
+  onSubmit: (e: React.FormEvent, turnstileToken?: string) => void;
   onUsernameChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onToggleMode: () => void;
@@ -28,6 +30,29 @@ export function AuthForm({
   onGoogleCredential,
 }: AuthFormProps) {
   const showGoogleSignIn = !!GOOGLE_CLIENT_ID && !!onGoogleCredential;
+  const turnstileRequired = !!TURNSTILE_SITE_KEY;
+  const turnstileRef = useRef<TurnstileWidgetHandle>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileError, setTurnstileError] = useState<string | null>(null);
+
+  // Reset the challenge after a failed auth attempt so the (single-use) token isn't reused.
+  useEffect(() => {
+    if (authError) {
+      turnstileRef.current?.reset();
+      setTurnstileToken(null);
+    }
+  }, [authError]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (turnstileRequired && !turnstileToken) {
+      setTurnstileError('Please complete the verification challenge');
+      return;
+    }
+    setTurnstileError(null);
+    onSubmit(e, turnstileToken ?? undefined);
+  };
+
   return (
     <div className="flex-grow flex flex-col items-center justify-center p-4 bg-radial from-indigo-900/10 via-transparent to-transparent">
       <div className="max-w-md w-full bg-bg-secondary border border-border-custom rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
@@ -61,13 +86,13 @@ export function AuthForm({
           </div>
         )}
 
-        {authError && (
+        {(authError || turnstileError) && (
           <div className="mb-4 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs px-3.5 py-2.5 rounded-xl text-left">
-            {authError}
+            {authError || turnstileError}
           </div>
         )}
 
-        <form onSubmit={onSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-text-secondary mb-1.5">Username</label>
             <input
@@ -90,9 +115,19 @@ export function AuthForm({
               className="w-full bg-bg-primary border border-border-custom rounded-xl px-4 py-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
             />
           </div>
+          {turnstileRequired && (
+            <TurnstileWidget
+              ref={turnstileRef}
+              onToken={(token) => {
+                setTurnstileToken(token);
+                setTurnstileError(null);
+              }}
+              onExpire={() => setTurnstileToken(null)}
+            />
+          )}
           <button
             type="submit"
-            disabled={isAuthLoading}
+            disabled={isAuthLoading || (turnstileRequired && !turnstileToken)}
             className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white font-semibold text-sm py-3 rounded-xl transition-all shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2 cursor-pointer min-h-[44px]"
           >
             {isAuthLoading ? 'Please wait...' : isRegisterMode ? 'Register Account' : 'Sign In'}

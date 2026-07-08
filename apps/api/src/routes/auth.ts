@@ -9,6 +9,7 @@ import { JWT_SECRET } from '../lib/auth';
 import { toPublicUser, seedAdminUser } from '../lib/users';
 import { writeAuditLog } from '../lib/audit';
 import { verifyGoogleIdToken, deriveUsernameFromGoogle } from '../lib/google-auth';
+import { requireTurnstile } from '../lib/turnstile';
 
 const auth = new Hono<{ Bindings: Env }>();
 
@@ -48,9 +49,17 @@ auth.post('/register', async (c) => {
     password?: string;
     clientLocalTime?: string;
     sessionId?: string;
+    turnstileToken?: string;
   }>();
-  const { username, password, clientLocalTime, sessionId } = body;
-  
+  const { username, password, clientLocalTime, sessionId, turnstileToken } = body;
+
+  const turnstileError = await requireTurnstile(c, turnstileToken, {
+    eventType: 'register',
+    clientLocalTime,
+    sessionId,
+  });
+  if (turnstileError) return turnstileError;
+
   if (!username || username.trim() === '') {
     return c.json({ error: 'Username is required' }, 400);
   }
@@ -117,9 +126,17 @@ auth.post('/login', async (c) => {
     password?: string;
     clientLocalTime?: string;
     sessionId?: string;
+    turnstileToken?: string;
   }>();
-  const { username, password, clientLocalTime, sessionId } = body;
-  
+  const { username, password, clientLocalTime, sessionId, turnstileToken } = body;
+
+  const turnstileError = await requireTurnstile(c, turnstileToken, {
+    eventType: 'failed_login',
+    clientLocalTime,
+    sessionId,
+  });
+  if (turnstileError) return turnstileError;
+
   if (!username || !password) {
     return c.json({ error: 'Username and password are required' }, 400);
   }

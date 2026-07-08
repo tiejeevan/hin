@@ -1327,7 +1327,7 @@ export default function App() {
     return sessionId;
   };
 
-  const handleAuthSubmit = async (e: React.FormEvent) => {
+  const handleAuthSubmit = async (e: React.FormEvent, turnstileToken?: string) => {
     e.preventDefault();
     if (!usernameInput.trim() || !passwordInput) {
       setAuthError('Please fill in all fields');
@@ -1347,6 +1347,7 @@ export default function App() {
           password: passwordInput,
           clientLocalTime: new Date().toISOString(),
           sessionId,
+          turnstileToken,
         }),
       });
       const data = await res.json();

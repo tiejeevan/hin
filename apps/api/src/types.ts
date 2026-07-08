@@ -3,4 +3,5 @@ export interface Env {
   REALTIME_DO: DurableObjectNamespace;
   MEDIA: R2Bucket;
   GOOGLE_CLIENT_ID?: string;
+  TURNSTILE_SECRET_KEY?: string;
 }

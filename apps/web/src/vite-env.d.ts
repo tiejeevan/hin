@@ -20,18 +20,34 @@ interface GoogleAccountsId {
   ) => void;
 }
 
+interface TurnstileRenderOptions {
+  sitekey: string;
+  theme?: 'light' | 'dark' | 'auto';
+  callback?: (token: string) => void;
+  'expired-callback'?: () => void;
+  'error-callback'?: () => void;
+}
+
+interface TurnstileApi {
+  render: (container: HTMLElement, options: TurnstileRenderOptions) => string;
+  reset: (widgetId: string) => void;
+  remove: (widgetId: string) => void;
+}
+
 interface Window {
   google?: {
     accounts?: {
       id?: GoogleAccountsId;
     };
   };
+  turnstile?: TurnstileApi;
 }
 
 interface ImportMetaEnv {
   readonly VITE_API_URL?: string;
   readonly VITE_WS_URL?: string;
   readonly VITE_GOOGLE_CLIENT_ID?: string;
+  readonly VITE_TURNSTILE_SITE_KEY?: string;
 }
 
 interface ImportMeta {
