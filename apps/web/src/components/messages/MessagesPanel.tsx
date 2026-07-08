@@ -3,6 +3,7 @@ import { X, Shield, SquarePen, ChevronLeft, Maximize2, Minimize2, Send, MessageC
 import { ChatThread, Message, User as UserType } from '@hin/types';
 import { ChatRecipient } from '../../types/ui';
 import { getAvatarColor } from '../../utils/avatar';
+import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
 
 interface MessagesPanelProps {
   isOpen: boolean;
@@ -236,6 +237,13 @@ export function MessagesPanel({
                           className={`text-[11px] truncate ${hasUnread ? 'font-bold text-text-primary' : 'font-semibold text-text-primary'}`}
                         >
                           @{t.username}
+                          {t.equippedBadges && t.equippedBadges.length > 0 && (
+                            <EquippedBadgesInline
+                              badges={t.equippedBadges}
+                              size="sm"
+                              className="ml-0.5 align-text-bottom"
+                            />
+                          )}
                           {t.role === 'admin' && (
                             <Shield className="h-3 w-3 text-amber-500 inline ml-0.5 align-text-bottom" />
                           )}

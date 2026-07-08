@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
+import { eq } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import type { MeBootstrap } from '@hin/types';
+import { UpdateEquippedBadgesSchema, type MeBootstrap } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { getFollowedUserIds, countPendingFollowRequests } from '../lib/follows';
@@ -11,9 +12,10 @@ import { getOrCreateUserSettings } from '../lib/user-settings';
 import { getSystemSettings } from '../lib/system-settings';
 import { countUnreadNotifications } from '../lib/notifications';
 import { countUnreadMessages } from '../lib/messages';
-import { toGamificationPublic, toGamificationBlock } from '../lib/gamification/public';
-import { isGamificationEnabled } from '../lib/gamification/settings';
+import { toGamificationPublic, toGamificationBlock, emptyGamificationPublic } from '../lib/gamification/public';
+import { isGamificationEnabled, getGamificationVisibility } from '../lib/gamification/settings';
 import { processUserActionSafe } from '../lib/gamification/hub';
+import { setEquippedBadges } from '../lib/gamification/equipped';
 
 const me = new Hono<{ Bindings: Env }>();
 
@@ -55,14 +57,11 @@ me.get('/bootstrap', async (c) => {
     countUnreadNotifications(db, authUser.id),
     countUnreadMessages(db, authUser.id),
     countPendingFollowRequests(db, authUser.id),
-    toGamificationPublic(db, authUser.id, { includeGoals: true }),
+    // Skip all gamification DB reads entirely when the feature is disabled.
+    gamificationEnabled
+      ? toGamificationPublic(db, authUser.id, { includeGoals: true })
+      : Promise.resolve(null),
   ]);
-
-  const hasGamificationData =
-    gamification.badges.length > 0
-    || gamification.totalPoints > 0
-    || gamification.level > 1
-    || gamification.goalsInProgress.length > 0;
 
   const payload: MeBootstrap = {
     followingIds,
@@ -76,7 +75,7 @@ me.get('/bootstrap', async (c) => {
       pendingFollowRequests,
     },
     gamificationEnabled,
-    ...(gamificationEnabled || hasGamificationData ? { g: gamification } : {}),
+    ...(gamificationEnabled && gamification ? { g: gamification } : {}),
   };
 
   return c.json(payload);
@@ -87,6 +86,39 @@ me.get('/gamification', async (c) => {
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
 
   const db = drizzle(c.env.DB, { schema });
+  if (!(await isGamificationEnabled(db))) {
+    return c.json(emptyGamificationPublic());
+  }
+  const gamification = await toGamificationPublic(db, authUser.id);
+  return c.json(gamification);
+});
+
+me.patch('/gamification/equipped', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const enabled = await isGamificationEnabled(db);
+  if (!enabled) return c.json({ error: 'Gamification is disabled' }, 403);
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = UpdateEquippedBadgesSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, 400);
+  }
+
+  const summary = await db.select({ level: schema.userGamification.level })
+    .from(schema.userGamification)
+    .where(eq(schema.userGamification.userId, authUser.id))
+    .get();
+
+  const result = await setEquippedBadges(db, authUser.id, parsed.data.badgeIds, {
+    role: authUser.role,
+    level: summary?.level ?? 1,
+  });
+
+  if (!result.success) return c.json({ error: result.error }, 400);
+
   const gamification = await toGamificationPublic(db, authUser.id);
   return c.json(gamification);
 });
@@ -115,7 +147,7 @@ me.post('/session-tick', async (c) => {
     authUser.username,
   );
 
-  const g = toGamificationBlock(gResult);
+  const g = toGamificationBlock(gResult, await getGamificationVisibility(db));
   return c.json(g ? { ok: true, g } : { ok: true });
 });
 

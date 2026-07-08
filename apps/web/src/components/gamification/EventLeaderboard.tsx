@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Loader2, Trophy } from 'lucide-react';
 import type { EventLeaderboard as EventLeaderboardData } from '@hin/types';
 import { API_URL } from '../../config';
+import { EquippedBadgesInline } from './EquippedBadgesInline';
 
 interface EventLeaderboardProps {
   eventId: number;
@@ -69,7 +70,12 @@ export function EventLeaderboard({ eventId, token }: EventLeaderboardProps) {
               }`}>
                 {entry.rank <= 3 ? <Trophy className="w-4 h-4 inline" /> : `#${entry.rank}`}
               </span>
-              <span className="flex-1 truncate text-text-primary">{entry.username}</span>
+              <span className="flex-1 min-w-0 flex items-center gap-1.5">
+                <span className="truncate text-text-primary">{entry.username}</span>
+                {entry.equippedBadges && entry.equippedBadges.length > 0 && (
+                  <EquippedBadgesInline badges={entry.equippedBadges} size="sm" />
+                )}
+              </span>
               <span className="text-sm font-medium text-text-secondary">{entry.score}</span>
             </li>
           ))}

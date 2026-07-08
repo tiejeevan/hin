@@ -341,9 +341,33 @@ export default function App() {
     }
   };
 
+  const handleToggleEquipBadge = async (badgeId: number) => {
+    if (!token) return;
+    const current = profileGamification?.equippedBadges ?? myGamification?.equippedBadges ?? [];
+    const currentIds = current.map(b => b.id);
+    const nextIds = currentIds.includes(badgeId)
+      ? currentIds.filter(id => id !== badgeId)
+      : [...currentIds, badgeId];
+
+    try {
+      const res = await fetch(`${API_URL}/api/me/gamification/equipped`, {
+        method: 'PATCH',
+        headers: getHeaders(),
+        body: JSON.stringify({ badgeIds: nextIds }),
+      });
+      if (res.ok) {
+        const g: GamificationPublic = await res.json();
+        setMyGamification(g);
+        setProfileGamification(g);
+      }
+    } catch (e) {
+      console.error('Error updating equipped badges:', e);
+    }
+  };
+
   const shouldShowGamification = (g: GamificationPublic | null | undefined) => {
     if (!g) return false;
-    return gamificationEnabled || g.badges.length > 0 || g.totalPoints > 0 || g.level > 1;
+    return gamificationEnabled || g.badges.length > 0 || (g.totalPoints ?? 0) > 0 || (g.level ?? 1) > 1;
   };
 
   const fetchBootstrap = async () => {
@@ -1360,7 +1384,7 @@ export default function App() {
     setTimeout(() => setNewlyCreatedPostId(null), 3000);
     if (newPost.g) {
       void fetchMyGamification();
-      if (newPost.g.pe > 0) {
+      if ((newPost.g.pe ?? 0) > 0) {
         addToast(`+${newPost.g.pe} points earned!`, 'badge_award', undefined, { skipPrefCheck: true });
       }
     }
@@ -1687,13 +1711,10 @@ export default function App() {
         setNewCommentText(prev => ({ ...prev, [postId]: '' }));
         setReplyingTo(prev => ({ ...prev, [postId]: null }));
         if (newComment.g) {
+          // Toasts + bell entries are delivered over the realtime channel
+          // (WS `notification` for badges/level-ups, `gamification_reward` for
+          // points/event wins) to avoid duplicate toasts; just refresh here.
           void fetchMyGamification();
-          if (newComment.g.pe > 0) {
-            addToast(`+${newComment.g.pe} points earned!`, 'badge_award', undefined, { skipPrefCheck: true });
-          }
-          if (newComment.g.be && newComment.g.be.length > 0) {
-            addToast('Badge earned!', 'badge_award', undefined, { skipPrefCheck: true });
-          }
         }
       }
     } catch (e) {
@@ -2517,6 +2538,7 @@ export default function App() {
             profileGamification={profileGamification}
             showGamification={shouldShowGamification(profileGamification)}
             gamificationEnabled={gamificationEnabled}
+            onToggleEquipBadge={gamificationEnabled ? handleToggleEquipBadge : undefined}
           />
         ) : currentUser && activeTab === 'feed' ? (
           <FeedView

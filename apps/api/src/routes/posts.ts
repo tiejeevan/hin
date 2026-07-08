@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, desc, and, count, sql, isNull, lt, inArray, notInArray, asc } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { Post, Comment, Notification, PostsPage, PostThreadPage, parseCreatePostBody, VotePollSchema, validatePostLimits, type GamificationActionBlock, type GamificationActionResult, type PostVisibility } from '@hin/types';
+import { Post, Comment, Notification, PostsPage, PostThreadPage, parseCreatePostBody, VotePollSchema, validatePostLimits, type PostVisibility } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { linkPostMedia, parseMediaUrls, serializeMediaUrls, validateOwnedPostMedia } from '../lib/media';
@@ -18,21 +18,11 @@ import { pinPost, unpinPost } from '../lib/post-pins';
 import { getSystemSettings } from '../lib/system-settings';
 import { validateThreadReply, countThreadReplies, assertCanViewThread, getThreadPostRows } from '../lib/post-threads';
 import { processUserActionSafe } from '../lib/gamification/hub';
+import { isGamificationEnabled, getGamificationVisibility } from '../lib/gamification/settings';
+import { toGamificationBlock } from '../lib/gamification/public';
+import { getEquippedBadgesForUser, loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
 
 const posts = new Hono<{ Bindings: Env }>();
-
-function toGamificationBlock(result: GamificationActionResult): GamificationActionBlock | undefined {
-  if (result.skipped) return undefined;
-  const block: GamificationActionBlock = {
-    pe: result.pointsEarned,
-    pt: result.totalPoints,
-    lv: result.level,
-  };
-  if (result.badgesEarned.length > 0) {
-    block.be = result.badgesEarned;
-  }
-  return block;
-}
 
 const DEFAULT_FEED_LIMIT = 10;
 const MAX_FEED_LIMIT = 50;
@@ -148,12 +138,17 @@ async function buildPostResponse(
     }
   }
 
+  const equippedBadges = (await isGamificationEnabled(db))
+    ? await getEquippedBadgesForUser(db, post.userId)
+    : [];
+
   const response: Post = {
     id: post.id,
     userId: post.userId,
     username: post.username,
     authorAvatarUrl: post.authorAvatarUrl,
     authorRole: post.authorRole,
+    authorEquippedBadges: equippedBadges,
     type: postType,
     content: post.content,
     mediaUrls: parseMediaUrls(post.mediaUrls),
@@ -529,7 +524,7 @@ posts.post('/', async (c) => {
     { postId: inserted.id, mediaCount: mediaUrls.length },
     authUser.username,
   );
-  const g = toGamificationBlock(gResult);
+  const g = toGamificationBlock(gResult, await getGamificationVisibility(db));
 
   return c.json(g ? { ...responsePost, g } : responsePost);
 });
@@ -850,7 +845,7 @@ posts.post('/:id/share', async (c) => {
     { postId },
     authUser.username,
   );
-  const g = toGamificationBlock(gResult);
+  const g = toGamificationBlock(gResult, await getGamificationVisibility(db));
 
   return c.json(g ? { sharesCount, postId, g } : { sharesCount, postId });
 });
@@ -914,6 +909,10 @@ posts.get('/:id/comments', async (c) => {
     ? postComments.filter(comment => !hiddenIds.includes(comment.userId))
     : postComments;
 
+  const equippedBadgesByUser = (await isGamificationEnabled(db))
+    ? await loadEquippedBadgesForUsers(db, visibleComments.map(comment => comment.userId))
+    : new Map();
+
   const redactedComments: Comment[] = visibleComments.map(comment => {
     const likesCount = likesCountByComment.get(comment.id) || 0;
     const hasLiked = likedByCurrentUser.has(comment.id);
@@ -926,7 +925,12 @@ posts.get('/:id/comments', async (c) => {
         hasLiked,
       };
     }
-    return { ...comment, likesCount, hasLiked };
+    return {
+      ...comment,
+      likesCount,
+      hasLiked,
+      authorEquippedBadges: equippedBadgesByUser.get(comment.userId) ?? [],
+    };
   });
 
   return c.json(redactedComments);
@@ -1107,6 +1111,10 @@ posts.post('/:id/comments', async (c) => {
     content: content.trim(),
   }).returning();
 
+  const authorEquippedBadges = (await isGamificationEnabled(db))
+    ? await getEquippedBadgesForUser(db, authUser.id)
+    : [];
+
   const commentResponse: Comment = {
     id: inserted.id,
     postId: inserted.postId,
@@ -1118,6 +1126,7 @@ posts.post('/:id/comments', async (c) => {
     deletedAt: inserted.deletedAt,
     likesCount: 0,
     hasLiked: false,
+    authorEquippedBadges,
   };
 
   // Determine recipient
@@ -1207,7 +1216,7 @@ posts.post('/:id/comments', async (c) => {
     { postId, commentId: inserted.id },
     authUser.username,
   );
-  const g = toGamificationBlock(gResult);
+  const g = toGamificationBlock(gResult, await getGamificationVisibility(db));
 
   return c.json({ ...commentResponse, ...(g ? { g } : {}) });
 });

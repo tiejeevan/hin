@@ -6,6 +6,7 @@ import { ProfileEditForm } from './ProfileEditForm';
 import { LevelBadge } from '../gamification/LevelBadge';
 import { PointsDisplay } from '../gamification/PointsDisplay';
 import { BadgeGrid } from '../gamification/BadgeGrid';
+import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
 
 interface ProfileHeaderProps {
   user: UserType;
@@ -35,6 +36,7 @@ interface ProfileHeaderProps {
   onSignInRequired?: () => void;
   gamification?: GamificationPublic | null;
   showGamification?: boolean;
+  onToggleEquipBadge?: (badgeId: number) => void;
 }
 
 function followButtonLabel(status: FollowStatus | undefined, isPrivate: boolean | undefined): string {
@@ -71,6 +73,7 @@ export function ProfileHeader({
   onSignInRequired,
   gamification,
   showGamification = false,
+  onToggleEquipBadge,
 }: ProfileHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -308,11 +311,14 @@ export function ProfileHeader({
         <div className="mt-3 space-y-1 text-left">
           <h1 className="text-lg font-bold text-text-primary flex items-center gap-1.5 flex-wrap">
             {user.username}
-            {showGamification && gamification && (
-              <>
-                <LevelBadge level={gamification.level} />
-                <PointsDisplay totalPoints={gamification.totalPoints} compact />
-              </>
+            {showGamification && gamification && gamification.equippedBadges.length > 0 && (
+              <EquippedBadgesInline badges={gamification.equippedBadges} size="md" />
+            )}
+            {showGamification && gamification && gamification.level != null && (
+              <LevelBadge level={gamification.level} />
+            )}
+            {showGamification && gamification && gamification.totalPoints != null && (
+              <PointsDisplay totalPoints={gamification.totalPoints} compact />
             )}
             {user.role === 'admin' && <Shield className="h-4 w-4 text-amber-500" />}
             {followStatus === 'follows_you' && !isOwnProfile && canInteract && (
@@ -348,7 +354,14 @@ export function ProfileHeader({
         </div>
 
         {showGamification && gamification && gamification.badges.length > 0 && (
-          <BadgeGrid badges={gamification.badges} className="mt-4 text-left" />
+          <BadgeGrid
+            badges={gamification.badges}
+            className="mt-4 text-left"
+            equippable={isOwnProfile && !!onToggleEquipBadge}
+            equippedIds={gamification.equippedBadges.map(b => b.id)}
+            maxEquipped={gamification.maxEquippedBadges}
+            onToggleEquip={onToggleEquipBadge}
+          />
         )}
       </div>
     </div>

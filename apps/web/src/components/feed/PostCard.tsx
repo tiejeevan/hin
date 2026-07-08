@@ -10,6 +10,7 @@ import { ImageLightbox } from './ImageLightbox';
 import { PostMediaGallery } from './PostMediaGallery';
 import { PostPollBody } from './PostPollBody';
 import { UserAvatar } from '../profile/UserAvatar';
+import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
 import { useMentionAutocomplete } from '../../hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '../ui/MentionSuggestions';
 
@@ -141,7 +142,9 @@ export function PostCard({
   });
 
   const nestedComments = buildCommentTree(commentsList);
+  const COMMENTS_PAGE_SIZE = 5;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [visibleCommentCount, setVisibleCommentCount] = useState(COMMENTS_PAGE_SIZE);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const canManagePost = !readOnly && currentUser && (currentUser.role === 'admin' || currentUser.id === post.userId);
@@ -159,6 +162,18 @@ export function PostCard({
     }
     action();
   };
+
+  useEffect(() => {
+    if (!isCommentsExpanded) {
+      setVisibleCommentCount(COMMENTS_PAGE_SIZE);
+    }
+  }, [isCommentsExpanded]);
+
+  useEffect(() => {
+    if (highlightCommentId && isCommentsExpanded) {
+      setVisibleCommentCount(Number.MAX_SAFE_INTEGER);
+    }
+  }, [highlightCommentId, isCommentsExpanded]);
 
   useEffect(() => {
     if (!highlightCommentId || !isCommentsExpanded || commentsList.length === 0) return;
@@ -307,6 +322,9 @@ export function PostCard({
                 className="text-xs font-bold text-text-primary flex items-center gap-1 hover:text-indigo-400 transition-colors cursor-pointer"
               >
                 {post.username}
+                {post.authorEquippedBadges && post.authorEquippedBadges.length > 0 && (
+                  <EquippedBadgesInline badges={post.authorEquippedBadges} size="sm" />
+                )}
                 {post.authorRole === 'admin' && <Shield className="h-3 w-3 text-amber-500" />}
               </button>
               <span className="text-[9px] text-text-muted flex items-center gap-1">
@@ -563,7 +581,7 @@ export function PostCard({
       </div>
 
       {isCommentsExpanded && (
-        <div className="border-t border-border-custom pt-4 mt-3 space-y-4 bg-bg-primary/20 p-3 rounded-xl border border-border-custom/60">
+        <div className="border-t border-border-custom pt-4 mt-3 space-y-4">
           {replyingTo && !readOnly && (
             <div className="flex items-center justify-between bg-indigo-950/20 border border-indigo-900/30 rounded-xl px-3 py-1.5 text-[11px] text-indigo-300">
               <span>
@@ -620,33 +638,46 @@ export function PostCard({
             </p>
           )}
 
-          <div className="space-y-3.5 max-h-80 overflow-y-auto pr-1">
+          <div className="space-y-3.5">
             {nestedComments.length === 0 ? (
               <p className="text-[11px] text-text-muted text-center py-2">No comments yet.</p>
             ) : (
-              nestedComments.map(comment => (
-                <CommentItem
-                  key={comment.id}
-                  comment={comment}
-                  depth={0}
-                  postId={post.id}
-                  currentUser={currentUser}
-                  readOnly={readOnly}
-                  editingCommentId={editingCommentId}
-                  editingCommentContent={editingCommentContent}
-                  onDeleteComment={onDeleteComment}
-                  onStartEdit={onStartCommentEdit}
-                  onCancelEdit={onCancelCommentEdit}
-                  onSaveEdit={onSaveCommentEdit}
-                  onEditContentChange={onEditCommentContentChange}
-                  onReply={onReply}
-                  onToggleCommentLike={onToggleCommentLike}
-                  onViewProfile={onViewProfile}
-                  onViewHashtag={onViewHashtag}
-                  onSignInRequired={onSignInRequired}
-                  onReport={onReportComment}
-                />
-              ))
+              <>
+                {nestedComments.slice(0, visibleCommentCount).map(comment => (
+                  <CommentItem
+                    key={comment.id}
+                    comment={comment}
+                    depth={0}
+                    postId={post.id}
+                    currentUser={currentUser}
+                    readOnly={readOnly}
+                    editingCommentId={editingCommentId}
+                    editingCommentContent={editingCommentContent}
+                    onDeleteComment={onDeleteComment}
+                    onStartEdit={onStartCommentEdit}
+                    onCancelEdit={onCancelCommentEdit}
+                    onSaveEdit={onSaveCommentEdit}
+                    onEditContentChange={onEditCommentContentChange}
+                    onReply={onReply}
+                    onToggleCommentLike={onToggleCommentLike}
+                    onViewProfile={onViewProfile}
+                    onViewHashtag={onViewHashtag}
+                    onSignInRequired={onSignInRequired}
+                    onReport={onReportComment}
+                  />
+                ))}
+                {nestedComments.length > visibleCommentCount && (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setVisibleCommentCount(count => count + COMMENTS_PAGE_SIZE)}
+                      className="text-[11px] font-semibold text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer py-1"
+                    >
+                      Show more ({nestedComments.length - visibleCommentCount})
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

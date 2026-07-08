@@ -72,10 +72,10 @@ export function AppHeader({
 
       {currentUser && (
         <div className="flex items-center gap-3">
-          {showGamification && gamification && (
+          {showGamification && gamification && (gamification.level != null || gamification.totalPoints != null) && (
             <div className="hidden sm:flex items-center gap-2 pr-1 border-r border-border-custom">
-              <LevelBadge level={gamification.level} />
-              <PointsDisplay totalPoints={gamification.totalPoints} compact />
+              {gamification.level != null && <LevelBadge level={gamification.level} />}
+              {gamification.totalPoints != null && <PointsDisplay totalPoints={gamification.totalPoints} compact />}
             </div>
           )}
           {currentUser.role === 'admin' && onOpenAdmin && (

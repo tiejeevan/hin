@@ -12,7 +12,9 @@ import {
 } from '../lib/user-settings';
 import { UpdateUserSettingsSchema, DeleteAccountSchema } from '@hin/types';
 import { softDeleteUser, verifyPassword } from '../lib/user-lifecycle';
-import { toGamificationPublic } from '../lib/gamification/public';
+import { toGamificationPublic, emptyGamificationPublic } from '../lib/gamification/public';
+import { isGamificationEnabled } from '../lib/gamification/settings';
+import { loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
 
 const users = new Hono<{ Bindings: Env }>();
 
@@ -202,8 +204,12 @@ users.get('/search', async (c) => {
     }
 
     // 4. Sort: followed first, then interacted, then alphabetical
+    const equippedBadgesByUser = (await isGamificationEnabled(db))
+      ? await loadEquippedBadgesForUsers(db, matchingUsers.map(u => u.id))
+      : new Map();
+
     const sorted = matchingUsers.map(u => {
-      const publicUser = toPublicUser(u);
+      const publicUser = toPublicUser(u, { equippedBadges: equippedBadgesByUser.get(u.id) ?? [] });
       return {
         ...publicUser,
         isFollowing: followedSet.has(u.id),
@@ -272,6 +278,10 @@ users.get('/:id/gamification', async (c) => {
     .get();
 
   if (!user) return c.json({ error: 'User not found' }, 404);
+
+  if (!(await isGamificationEnabled(db))) {
+    return c.json(emptyGamificationPublic());
+  }
 
   const isSelf = authUser.id === userId;
   const gamification = await toGamificationPublic(db, userId, { includeGoals: isSelf });

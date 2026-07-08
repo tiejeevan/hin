@@ -390,6 +390,8 @@ export const pointRules = sqliteTable('point_rules', {
 export const levelConfig = sqliteTable('level_config', {
   level: integer('level').primaryKey(),
   minPoints: integer('min_points').notNull(),
+  /** Max badges a user at this level may equip next to their name. Admins bypass this. */
+  maxEquippedBadges: integer('max_equipped_badges').default(0).notNull(),
 });
 
 /** Badges earned by users (idempotent — one row per user + badge). */
@@ -400,6 +402,16 @@ export const userBadges = sqliteTable('user_badges', {
 }, (table) => ({
   pk: primaryKey({ columns: [table.userId, table.badgeId] }),
   badgeIdIdx: index('user_badges_badge_id_idx').on(table.badgeId),
+}));
+
+/** Badges a user has chosen to display next to their username (subset of earned badges). */
+export const userEquippedBadges = sqliteTable('user_equipped_badges', {
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  badgeId: integer('badge_id').notNull().references(() => badges.id, { onDelete: 'cascade' }),
+  sortOrder: integer('sort_order').default(0).notNull(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.badgeId] }),
+  userIdIdx: index('user_equipped_badges_user_id_idx').on(table.userId),
 }));
 
 /** Audit log of point changes per action. */

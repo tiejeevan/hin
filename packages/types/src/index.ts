@@ -26,6 +26,7 @@ export interface User {
   canViewPosts?: boolean;
   blockStatus?: BlockStatus;
   muteStatus?: MuteStatus;
+  equippedBadges?: EquippedBadgePublic[];
 }
 
 export interface FollowRequest {
@@ -142,6 +143,7 @@ export interface Post {
   username: string;
   authorAvatarUrl?: string | null;
   authorRole?: string;
+  authorEquippedBadges?: EquippedBadgePublic[];
   type: PostType;
   content: string;
   mediaUrls: string[];
@@ -256,6 +258,7 @@ export interface Comment {
   deletedAt?: string | null;
   likesCount: number;
   hasLiked?: boolean;
+  authorEquippedBadges?: EquippedBadgePublic[];
   /** Gamification delta from this action (comment create). */
   g?: GamificationActionBlock;
 }
@@ -276,6 +279,7 @@ export interface ChatThread {
   id: number;
   username: string;
   role: string;
+  equippedBadges?: EquippedBadgePublic[];
   lastMessage: {
     content: string;
     senderId: number;
@@ -570,20 +574,35 @@ export type GamificationActionType =
   | 'session_active'
   | 'session_tick';
 
-/** Minimal client-facing gamification DTO — no rules or metric keys. */
+/**
+ * Minimal client-facing gamification DTO — no rules or metric keys.
+ * `level`, `totalPoints`, and `pointsToNextLevel` are omitted entirely when the
+ * admin hides them globally (they still accrue in the background).
+ */
 export interface GamificationPublic {
-  level: number;
-  totalPoints: number;
-  pointsToNextLevel: number | null;
+  level?: number;
+  totalPoints?: number;
+  pointsToNextLevel?: number | null;
   badges: GamificationPublicBadge[];
   goalsInProgress: GamificationPublicGoal[];
+  equippedBadges: EquippedBadgePublic[];
+  /** Max badges this user may equip at once. `null` means unlimited (admins). */
+  maxEquippedBadges: number | null;
 }
 
 export interface GamificationPublicBadge {
   id: number;
   name: string;
+  description: string;
   imageUrl: string | null;
   earnedAt: string;
+}
+
+/** Minimal badge info for inline display next to a username. */
+export interface EquippedBadgePublic {
+  id: number;
+  name: string;
+  imageUrl: string | null;
 }
 
 export interface GamificationPublicGoal {
@@ -605,11 +624,25 @@ export interface GamificationInternal {
 
 export interface GamificationSettings {
   gamificationEnabled: boolean;
+  /** When false, users' global level is hidden everywhere in the UI and stripped from API responses. */
+  showLevel: boolean;
+  /** When false, users' global points are hidden everywhere in the UI and stripped from API responses. */
+  showPoints: boolean;
 }
 
-export const UpdateGamificationSettingsSchema = z.object({
-  gamificationEnabled: z.boolean(),
-});
+export const UpdateGamificationSettingsSchema = z
+  .object({
+    gamificationEnabled: z.boolean().optional(),
+    showLevel: z.boolean().optional(),
+    showPoints: z.boolean().optional(),
+  })
+  .refine(
+    (data) =>
+      data.gamificationEnabled !== undefined ||
+      data.showLevel !== undefined ||
+      data.showPoints !== undefined,
+    { message: 'At least one setting must be provided' },
+  );
 
 /** Requires the admin to type the literal phrase "RESET" to confirm a destructive, irreversible reset. */
 export const ResetGamificationProgressSchema = z.object({
@@ -651,11 +684,15 @@ export interface GamificationActionResult {
   eventWins?: number[];
 }
 
-/** Minimal gamification block for action responses (share, post create). */
+/**
+ * Minimal gamification block for action responses (share, post create).
+ * `pe`/`pt` are omitted when points are hidden globally, `lv` when the level is
+ * hidden — the values are still computed server-side.
+ */
 export interface GamificationActionBlock {
-  pe: number;
-  pt: number;
-  lv: number;
+  pe?: number;
+  pt?: number;
+  lv?: number;
   be?: number[];
 }
 
@@ -666,6 +703,7 @@ export interface AdminBadge {
   imageUrl: string | null;
   isActive: boolean;
   createdAt: string;
+  deletedAt: string | null;
   rule: BadgeRuleDefinition | null;
 }
 
@@ -678,6 +716,7 @@ export interface PointRule {
 export interface LevelConfigEntry {
   level: number;
   minPoints: number;
+  maxEquippedBadges: number;
 }
 
 export const CreateBadgeSchema = z.object({
@@ -711,7 +750,12 @@ export const UpdateLevelConfigSchema = z.object({
   levels: z.array(z.object({
     level: z.number().int().min(1),
     minPoints: z.number().int().min(0),
+    maxEquippedBadges: z.number().int().min(0),
   })).min(1),
+});
+
+export const UpdateEquippedBadgesSchema = z.object({
+  badgeIds: z.array(z.number().int().positive()),
 });
 
 // --- Events (v3) ---
@@ -752,6 +796,7 @@ export interface EventLeaderboardEntry {
   username: string;
   score: number;
   rank: number;
+  equippedBadges?: EquippedBadgePublic[];
 }
 
 export interface EventLeaderboard {
@@ -826,8 +871,8 @@ export const UpdateEventSchema = z.object({
 /** WebSocket payload for instant gamification feedback (secondary path). */
 export interface GamificationRewardPayload {
   pe?: number;
-  pt: number;
-  lv: number;
+  pt?: number;
+  lv?: number;
   be?: number[];
   levelUp?: number | null;
   eventWin?: { eventId: number; eventName: string };

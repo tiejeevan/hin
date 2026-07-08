@@ -101,6 +101,7 @@ interface ProfileViewProps {
   profileGamification?: GamificationPublic | null;
   showGamification?: boolean;
   gamificationEnabled?: boolean;
+  onToggleEquipBadge?: (badgeId: number) => void;
 }
 
 export function ProfileView({
@@ -196,6 +197,7 @@ export function ProfileView({
   profileGamification,
   showGamification = false,
   gamificationEnabled = false,
+  onToggleEquipBadge,
 }: ProfileViewProps) {
   const isOwnProfile = !!currentUser && profileUser?.id === currentUser.id;
   const canViewPosts = profileUser?.canViewPosts !== false;
@@ -250,6 +252,7 @@ export function ProfileView({
             onSignInRequired={handleSignInRequired}
             gamification={profileGamification}
             showGamification={showGamification}
+            onToggleEquipBadge={isOwnProfile ? onToggleEquipBadge : undefined}
           />
 
           {isOwnProfile && showGamification && gamificationEnabled && profileGamification && profileGamification.goalsInProgress.length > 0 && !isEditing && !isSettingsOpen && (

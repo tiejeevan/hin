@@ -94,11 +94,16 @@ export function AdminGamification({ token }: AdminGamificationProps) {
   const [uploadingBadgeId, setUploadingBadgeId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const [permanentDeleteBadge, setPermanentDeleteBadge] = useState<AdminBadge | null>(null);
+  const [permanentDeleteInput, setPermanentDeleteInput] = useState('');
+  const [permanentDeleting, setPermanentDeleting] = useState(false);
+
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerTarget, setPickerTarget] = useState<'new' | number | null>(null);
   const [pickerTab, setPickerTab] = useState<'influence' | 'creator'>('influence');
 
   const [badgesOpen, setBadgesOpen] = useState(false);
+  const [deactivatedOpen, setDeactivatedOpen] = useState(false);
   const [pointRulesOpen, setPointRulesOpen] = useState(false);
   const [levelsOpen, setLevelsOpen] = useState(false);
   const [metricsOpen, setMetricsOpen] = useState(false);
@@ -268,6 +273,43 @@ export function AdminGamification({ token }: AdminGamificationProps) {
     }
   };
 
+  const patchSettings = async (patch: Partial<GamificationSettings>, successMsg: string) => {
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/gamification/settings`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update');
+      setSettings(data);
+      setSuccess(successMsg);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to update');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleShowLevel = () => {
+    if (!settings) return;
+    void patchSettings(
+      { showLevel: !settings.showLevel },
+      settings.showLevel ? 'Level hidden from users.' : 'Level shown to users.',
+    );
+  };
+
+  const toggleShowPoints = () => {
+    if (!settings) return;
+    void patchSettings(
+      { showPoints: !settings.showPoints },
+      settings.showPoints ? 'Points hidden from users.' : 'Points shown to users.',
+    );
+  };
+
   const resetProgress = async () => {
     if (resetConfirmInput !== 'RESET') return;
     setResetting(true);
@@ -394,7 +436,7 @@ export function AdminGamification({ token }: AdminGamificationProps) {
   };
 
   const deleteBadge = async (id: number) => {
-    if (!confirm('Deactivate this badge? Users who earned it keep it.')) return;
+    if (!confirm('Deactivate this badge? Users who earned it keep it, but it can no longer be earned.')) return;
     setSaving(true);
     setError(null);
     try {
@@ -406,12 +448,39 @@ export function AdminGamification({ token }: AdminGamificationProps) {
         const data = await res.json();
         throw new Error(data.error || 'Failed to delete');
       }
-      setBadges(prev => prev.filter(b => b.id !== id));
+      setBadges(prev => prev.map(b => (
+        b.id === id ? { ...b, isActive: false, deletedAt: new Date().toISOString() } : b
+      )));
       setSuccess('Badge deactivated.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const permanentlyDeleteBadge = async () => {
+    const badge = permanentDeleteBadge;
+    if (!badge) return;
+    setPermanentDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/gamification/badges/${badge.id}/permanent`, {
+        method: 'DELETE',
+        headers,
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to delete permanently');
+      }
+      setBadges(prev => prev.filter(b => b.id !== badge.id));
+      setPermanentDeleteBadge(null);
+      setPermanentDeleteInput('');
+      setSuccess('Badge permanently deleted. All users who earned it have lost it.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete permanently');
+    } finally {
+      setPermanentDeleting(false);
     }
   };
 
@@ -467,6 +536,9 @@ export function AdminGamification({ token }: AdminGamificationProps) {
     return <p className="text-xs text-text-muted p-4">Loading gamification settings…</p>;
   }
 
+  const activeBadges = badges.filter(b => !b.deletedAt);
+  const deactivatedBadges = badges.filter(b => b.deletedAt);
+
   return (
     <div className="space-y-6 p-4">
       <div className="flex items-center gap-2">
@@ -501,6 +573,48 @@ export function AdminGamification({ token }: AdminGamificationProps) {
 
         <div className="pt-3 border-t border-border-custom flex items-center justify-between gap-3">
           <div>
+            <p className="text-xs font-medium text-text-primary">Show level</p>
+            <p className="text-[10px] text-text-muted mt-0.5">
+              When off, levels are hidden everywhere and removed from API responses. Levels still progress in the background.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={toggleShowLevel}
+            className={`px-3 py-2 rounded-xl text-xs font-semibold min-h-[44px] transition-colors cursor-pointer disabled:opacity-50 shrink-0 ${
+              settings?.showLevel
+                ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                : 'bg-bg-primary border border-border-custom text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            {settings?.showLevel ? 'ON' : 'OFF'}
+          </button>
+        </div>
+
+        <div className="pt-3 border-t border-border-custom flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium text-text-primary">Show points</p>
+            <p className="text-[10px] text-text-muted mt-0.5">
+              When off, points are hidden everywhere and removed from API responses. Points still accrue in the background.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={toggleShowPoints}
+            className={`px-3 py-2 rounded-xl text-xs font-semibold min-h-[44px] transition-colors cursor-pointer disabled:opacity-50 shrink-0 ${
+              settings?.showPoints
+                ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                : 'bg-bg-primary border border-border-custom text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            {settings?.showPoints ? 'ON' : 'OFF'}
+          </button>
+        </div>
+
+        <div className="pt-3 border-t border-border-custom flex items-center justify-between gap-3">
+          <div>
             <p className="text-xs font-medium text-rose-400">Fresh start</p>
             <p className="text-[10px] text-text-muted mt-0.5">
               Erases every user&apos;s points, level, earned badges, and streaks. Badge, point-rule, and level
@@ -528,7 +642,7 @@ export function AdminGamification({ token }: AdminGamificationProps) {
         >
           <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wide flex items-center gap-1.5">
             Badges
-            <span className="text-[10px] font-medium text-text-muted normal-case tracking-normal">({badges.length})</span>
+            <span className="text-[10px] font-medium text-text-muted normal-case tracking-normal">({activeBadges.length})</span>
           </h4>
           <ChevronDown className={`h-4 w-4 text-text-muted transition-transform ${badgesOpen ? 'rotate-180' : ''}`} />
         </button>
@@ -654,9 +768,9 @@ export function AdminGamification({ token }: AdminGamificationProps) {
         )}
 
         <div className="space-y-2">
-          {badges.length === 0 ? (
+          {activeBadges.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border-custom p-6 text-center space-y-3">
-              <p className="text-xs text-text-muted">No badges configured.</p>
+              <p className="text-xs text-text-muted">No active badges configured.</p>
               <button
                 type="button"
                 disabled={saving}
@@ -668,7 +782,7 @@ export function AdminGamification({ token }: AdminGamificationProps) {
               </button>
             </div>
           ) : (
-            badges.map(badge => (
+            activeBadges.map(badge => (
               <div
                 key={badge.id}
                 className="flex items-center gap-3 p-3 rounded-xl border border-border-custom bg-bg-tertiary/40"
@@ -775,6 +889,71 @@ export function AdminGamification({ token }: AdminGamificationProps) {
             ))
           )}
         </div>
+
+        {deactivatedBadges.length > 0 && (
+          <div className="space-y-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setDeactivatedOpen(prev => !prev)}
+              aria-expanded={deactivatedOpen}
+              className="w-full flex items-center justify-between gap-2 cursor-pointer group"
+            >
+              <span className="flex items-center gap-1.5">
+                <h5 className="text-[11px] font-semibold text-text-muted uppercase tracking-wide">Deactivated</h5>
+                <span className="text-[10px] font-medium text-text-muted">({deactivatedBadges.length})</span>
+              </span>
+              <ChevronDown className={`h-4 w-4 text-text-muted transition-transform ${deactivatedOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {deactivatedOpen && (
+            <>
+            <p className="text-[10px] text-text-muted">
+              These badges can no longer be earned. Users who already earned them keep them until you delete the badge permanently.
+            </p>
+            {deactivatedBadges.map(badge => (
+              <div
+                key={badge.id}
+                className="flex items-center gap-3 p-3 rounded-xl border border-border-custom bg-bg-tertiary/20 opacity-90"
+              >
+                <div className="relative shrink-0">
+                  {badge.imageUrl ? (
+                    <img src={badge.imageUrl} alt="" className="h-10 w-10 rounded-lg object-cover grayscale" />
+                  ) : (
+                    <div className="h-10 w-10 rounded-lg bg-bg-tertiary flex items-center justify-center">
+                      <Award className="h-5 w-5 text-text-muted" />
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0 text-left">
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-xs font-medium text-text-secondary truncate">{badge.name}</p>
+                    <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-bg-tertiary text-[9px] font-semibold text-text-muted uppercase tracking-wide">
+                      Deactivated
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-text-muted truncate">
+                    {badge.rule
+                      ? `${badge.rule.metricKey} ${badge.rule.operator} ${badge.rule.threshold}`
+                      : 'No rule'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={permanentDeleting}
+                  onClick={() => {
+                    setPermanentDeleteInput('');
+                    setPermanentDeleteBadge(badge);
+                  }}
+                  className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-[11px] font-semibold text-rose-400 border border-rose-500/30 hover:bg-rose-500/10 cursor-pointer transition-colors disabled:opacity-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete permanently
+                </button>
+              </div>
+            ))}
+            </>
+            )}
+          </div>
+        )}
         </>
         )}
       </section>
@@ -841,14 +1020,17 @@ export function AdminGamification({ token }: AdminGamificationProps) {
           aria-expanded={levelsOpen}
           className="w-full flex items-center justify-between gap-2 cursor-pointer group"
         >
-          <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Level thresholds</h4>
+          <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Level thresholds &amp; equip slots</h4>
           <ChevronDown className={`h-4 w-4 text-text-muted transition-transform ${levelsOpen ? 'rotate-180' : ''}`} />
         </button>
         {levelsOpen && (
         <>
+        <p className="text-[10px] text-text-muted">
+          Equip slots control how many badges a user at that level can display next to their username. Admins can always equip unlimited badges.
+        </p>
         <div className="space-y-2">
           {levels.map((entry, idx) => (
-            <div key={entry.level} className="flex items-center gap-2">
+            <div key={entry.level} className="flex items-center gap-2 flex-wrap">
               <span className="text-[11px] text-text-muted w-16">Level {entry.level}</span>
               <input
                 type="number"
@@ -863,6 +1045,19 @@ export function AdminGamification({ token }: AdminGamificationProps) {
                 className="w-28 px-2 py-1.5 rounded-lg border border-border-custom bg-bg-primary text-xs"
               />
               <span className="text-[10px] text-text-muted">min points</span>
+              <input
+                type="number"
+                min={0}
+                value={entry.maxEquippedBadges}
+                onChange={e => {
+                  const maxEquippedBadges = parseInt(e.target.value, 10);
+                  setLevels(prev => prev.map((l, i) => (
+                    i === idx ? { ...l, maxEquippedBadges: Number.isNaN(maxEquippedBadges) ? 0 : maxEquippedBadges } : l
+                  )));
+                }}
+                className="w-20 px-2 py-1.5 rounded-lg border border-border-custom bg-bg-primary text-xs"
+              />
+              <span className="text-[10px] text-text-muted">equip slots</span>
             </div>
           ))}
         </div>
@@ -1014,6 +1209,66 @@ export function AdminGamification({ token }: AdminGamificationProps) {
                 className="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
               >
                 {resetting ? 'Erasing…' : 'Erase everything'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {permanentDeleteBadge && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-rose-500/30 bg-bg-secondary shadow-2xl p-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-rose-400" />
+              <h3 className="text-sm font-semibold text-text-primary">Delete badge permanently?</h3>
+            </div>
+            <div className="flex items-center gap-3">
+              {permanentDeleteBadge.imageUrl ? (
+                <img src={permanentDeleteBadge.imageUrl} alt="" className="h-10 w-10 rounded-lg object-cover grayscale shrink-0" />
+              ) : (
+                <div className="h-10 w-10 rounded-lg bg-bg-tertiary flex items-center justify-center shrink-0">
+                  <Award className="h-5 w-5 text-text-muted" />
+                </div>
+              )}
+              <p className="text-xs font-medium text-text-primary truncate">{permanentDeleteBadge.name}</p>
+            </div>
+            <p className="text-xs text-text-muted">
+              This removes the badge and its rule from the database. Every user who earned it will lose it immediately.
+              <span className="block mt-1.5 font-semibold text-rose-400">This action cannot be undone.</span>
+            </p>
+            <div>
+              <label htmlFor="badge-delete-confirm-input" className="block text-[11px] font-medium text-text-secondary mb-1.5">
+                Type <span className="font-mono font-bold text-rose-400">DELETE</span> to confirm
+              </label>
+              <input
+                id="badge-delete-confirm-input"
+                type="text"
+                autoComplete="off"
+                value={permanentDeleteInput}
+                onChange={e => setPermanentDeleteInput(e.target.value)}
+                placeholder="DELETE"
+                className="w-full px-3 py-2 rounded-xl border border-border-custom bg-bg-primary text-sm font-mono focus:outline-none focus:ring-2 focus:ring-rose-500/40"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={permanentDeleting}
+                onClick={() => {
+                  setPermanentDeleteBadge(null);
+                  setPermanentDeleteInput('');
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-text-muted hover:bg-bg-tertiary transition-colors cursor-pointer min-h-[44px] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={permanentDeleteInput !== 'DELETE' || permanentDeleting}
+                onClick={() => void permanentlyDeleteBadge()}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
+              >
+                {permanentDeleting ? 'Deleting…' : 'Delete forever'}
               </button>
             </div>
           </div>

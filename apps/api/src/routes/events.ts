@@ -6,6 +6,8 @@ import type { EventLeaderboard, PublicEvent } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { getActiveEvents } from '../lib/gamification/events/cache';
+import { isGamificationEnabled } from '../lib/gamification/settings';
+import { loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
 
 const events = new Hono<{ Bindings: Env }>();
 
@@ -101,6 +103,10 @@ events.get('/:id/leaderboard', async (c) => {
     }
   }
 
+  const equippedBadgesByUser = (await isGamificationEnabled(db))
+    ? await loadEquippedBadgesForUsers(db, rows.map((r) => r.userId))
+    : new Map();
+
   const payload: EventLeaderboard = {
     eventId,
     entries: rows.map((r, i) => ({
@@ -108,6 +114,7 @@ events.get('/:id/leaderboard', async (c) => {
       username: r.username,
       score: r.score,
       rank: i + 1,
+      equippedBadges: equippedBadgesByUser.get(r.userId) ?? [],
     })),
     myRank,
     myScore,

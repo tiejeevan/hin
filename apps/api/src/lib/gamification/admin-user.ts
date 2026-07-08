@@ -6,6 +6,7 @@ import { getUserCounters } from './counters';
 import { getMetricCatalog } from './registry';
 import { isInternalCounterKey } from './abuse';
 import { getUserGamificationSummary } from './points';
+import { unequipBadgeForUser } from './equipped';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -139,5 +140,10 @@ export async function adminRevokeBadge(
     )
     .run();
 
-  return (result.meta?.changes ?? 0) > 0;
+  if ((result.meta?.changes ?? 0) > 0) {
+    await unequipBadgeForUser(db, userId, badgeId);
+    return true;
+  }
+
+  return false;
 }

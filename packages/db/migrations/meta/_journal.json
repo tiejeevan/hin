@@ -197,6 +197,13 @@
       "when": 1783159000000,
       "tag": "0028_gamification_v4",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1783160000000,
+      "tag": "0029_equipped_badges",
+      "breakpoints": true
     }
   ]
 }

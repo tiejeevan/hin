@@ -1,6 +1,6 @@
 import { eq, and, count, sql } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { FollowStatus, User, BlockStatus, MuteStatus } from '@hin/types';
+import { FollowStatus, User, BlockStatus, MuteStatus, type EquippedBadgePublic } from '@hin/types';
 import bcrypt from 'bcryptjs';
 import { drizzle } from 'drizzle-orm/d1';
 import {
@@ -34,6 +34,7 @@ export function toPublicUser(
     canViewPosts?: boolean;
     blockStatus?: BlockStatus;
     muteStatus?: MuteStatus;
+    equippedBadges?: EquippedBadgePublic[];
   },
 ): User {
   return {
@@ -53,6 +54,7 @@ export function toPublicUser(
     ...(extras?.canViewPosts !== undefined ? { canViewPosts: extras.canViewPosts } : {}),
     ...(extras?.blockStatus !== undefined ? { blockStatus: extras.blockStatus } : {}),
     ...(extras?.muteStatus !== undefined ? { muteStatus: extras.muteStatus } : {}),
+    ...(extras?.equippedBadges !== undefined ? { equippedBadges: extras.equippedBadges } : {}),
   };
 }
 

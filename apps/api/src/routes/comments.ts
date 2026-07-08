@@ -8,6 +8,8 @@ import { getAuthUser } from '../lib/auth';
 import { getOrCreateUserSettings, isNotificationEnabled } from '../lib/user-settings';
 import { shouldDeliverNotification } from '../lib/blocks';
 import { processUserActionSafe } from '../lib/gamification/hub';
+import { isGamificationEnabled } from '../lib/gamification/settings';
+import { getEquippedBadgesForUser } from '../lib/gamification/equipped';
 
 const comments = new Hono<{ Bindings: Env }>();
 
@@ -214,6 +216,9 @@ comments.put('/:id', async (c) => {
     .get();
 
   const { likesCount, hasLiked } = await getCommentLikesMeta(db, commentId, authUser.id);
+  const authorEquippedBadges = (await isGamificationEnabled(db))
+    ? await getEquippedBadgesForUser(db, updated.userId)
+    : [];
 
   const commentResponse: Comment = {
     id: updated.id,
@@ -226,6 +231,7 @@ comments.put('/:id', async (c) => {
     deletedAt: updated.deletedAt,
     likesCount,
     hasLiked,
+    authorEquippedBadges,
   };
 
   // Broadcast comment update

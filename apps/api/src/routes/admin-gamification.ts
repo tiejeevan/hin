@@ -22,7 +22,7 @@ import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import {
   getGamificationSettings,
-  setGamificationEnabled,
+  updateGamificationSettings,
 } from '../lib/gamification/settings';
 import { getMetricCatalog } from '../lib/gamification/registry';
 import { invalidateActiveEventsCache } from '../lib/gamification/events/cache';
@@ -51,7 +51,7 @@ async function loadBadgeWithRule(
   const badge = await db
     .select()
     .from(schema.badges)
-    .where(and(eq(schema.badges.id, badgeId), isNull(schema.badges.deletedAt)))
+    .where(eq(schema.badges.id, badgeId))
     .get();
 
   if (!badge) return null;
@@ -74,6 +74,7 @@ async function loadBadgeWithRule(
     imageUrl: badge.imageUrl,
     isActive: badge.isActive === 1,
     createdAt: badge.createdAt,
+    deletedAt: badge.deletedAt,
     rule: rule ?? null,
   };
 }
@@ -97,7 +98,7 @@ adminGamification.patch('/settings', async (c) => {
   }
 
   const db = drizzle(c.env.DB, { schema });
-  return c.json(await setGamificationEnabled(db, parsed.data.gamificationEnabled));
+  return c.json(await updateGamificationSettings(db, parsed.data));
 });
 
 adminGamification.get('/metrics', async (c) => {
@@ -115,7 +116,6 @@ adminGamification.get('/badges', async (c) => {
   const badges = await db
     .select()
     .from(schema.badges)
-    .where(isNull(schema.badges.deletedAt))
     .orderBy(asc(schema.badges.id))
     .all();
 
@@ -243,6 +243,34 @@ adminGamification.delete('/badges/:id', async (c) => {
   return c.json({ success: true });
 });
 
+// Permanently remove a badge from the database. Every user who earned it loses
+// it. This is irreversible — used for cleaning up deactivated badges.
+adminGamification.delete('/badges/:id/permanent', async (c) => {
+  const auth = await requireAdmin(c);
+  if ('error' in auth) return auth.error;
+
+  const badgeId = parseInt(c.req.param('id'), 10);
+  if (isNaN(badgeId)) return c.json({ error: 'Invalid badge id' }, 400);
+
+  const db = drizzle(c.env.DB, { schema });
+  const existing = await db
+    .select()
+    .from(schema.badges)
+    .where(eq(schema.badges.id, badgeId))
+    .get();
+
+  if (!existing) return c.json({ error: 'Badge not found' }, 404);
+
+  // Explicitly remove dependents so cleanup does not rely on FK cascade being
+  // enabled at the connection level.
+  await db.delete(schema.userEquippedBadges).where(eq(schema.userEquippedBadges.badgeId, badgeId)).run();
+  await db.delete(schema.userBadges).where(eq(schema.userBadges.badgeId, badgeId)).run();
+  await db.delete(schema.badgeRules).where(eq(schema.badgeRules.badgeId, badgeId)).run();
+  await db.delete(schema.badges).where(eq(schema.badges.id, badgeId)).run();
+
+  return c.json({ success: true });
+});
+
 adminGamification.get('/point-rules', async (c) => {
   const auth = await requireAdmin(c);
   if ('error' in auth) return auth.error;
@@ -306,7 +334,7 @@ adminGamification.get('/levels', async (c) => {
     .all();
 
   return c.json({
-    levels: levels.map((l) => ({ level: l.level, minPoints: l.minPoints })),
+    levels: levels.map((l) => ({ level: l.level, minPoints: l.minPoints, maxEquippedBadges: l.maxEquippedBadges })),
   });
 });
 
@@ -325,9 +353,10 @@ adminGamification.patch('/levels', async (c) => {
     await db.insert(schema.levelConfig).values({
       level: entry.level,
       minPoints: entry.minPoints,
+      maxEquippedBadges: entry.maxEquippedBadges,
     }).onConflictDoUpdate({
       target: schema.levelConfig.level,
-      set: { minPoints: entry.minPoints },
+      set: { minPoints: entry.minPoints, maxEquippedBadges: entry.maxEquippedBadges },
     }).run();
   }
 
@@ -338,7 +367,7 @@ adminGamification.patch('/levels', async (c) => {
     .all();
 
   return c.json({
-    levels: levels.map((l) => ({ level: l.level, minPoints: l.minPoints })),
+    levels: levels.map((l) => ({ level: l.level, minPoints: l.minPoints, maxEquippedBadges: l.maxEquippedBadges })),
   });
 });
 

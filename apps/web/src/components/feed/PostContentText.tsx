@@ -62,5 +62,9 @@ export function PostContentText({ content, onViewProfile, onViewHashtag, classNa
     parts.push(content.slice(lastIndex));
   }
 
-  return <p className={className}>{parts.length > 0 ? parts : content}</p>;
+  return (
+    <p className={`overflow-hidden break-words [overflow-wrap:anywhere] ${className ?? ''}`}>
+      {parts.length > 0 ? parts : content}
+    </p>
+  );
 }

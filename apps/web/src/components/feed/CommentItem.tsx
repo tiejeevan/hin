@@ -5,6 +5,8 @@ import { CommentNode } from '../../types/ui';
 import { PostContentText } from './PostContentText';
 import { useMentionAutocomplete } from '../../hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '../ui/MentionSuggestions';
+import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
+import { UserAvatar } from '../profile/UserAvatar';
 
 interface CommentItemProps {
   comment: CommentNode;
@@ -88,21 +90,41 @@ export function CommentItem({
       style={{ marginLeft: depth > 0 ? `${Math.min(depth * 14, 56)}px` : '0px' }}
     >
       <div
-        className={`flex gap-2.5 text-xs border-b border-border-custom pb-2.5 relative ${
+        className={`flex gap-2.5 text-xs relative ${
           depth > 0 ? 'border-l border-border-custom/40 pl-3.5' : ''
         }`}
       >
-        <div className="h-6 w-6 rounded-full bg-bg-tertiary flex items-center justify-center font-bold text-[10px] uppercase text-text-muted shrink-0 border border-border-custom">
-          {isDeleted ? '?' : comment.username[0]}
-        </div>
+        {isDeleted ? (
+          <div className="h-6 w-6 rounded-full bg-bg-tertiary flex items-center justify-center font-bold text-[10px] uppercase text-text-muted shrink-0 border border-border-custom">
+            ?
+          </div>
+        ) : (
+          <UserAvatar
+            username={comment.username}
+            size="sm"
+            className="h-6 w-6 text-[10px]"
+            onClick={() => onViewProfile(comment.username)}
+          />
+        )}
 
         <div className="flex-grow min-w-0 text-left">
           <div className="flex items-start gap-2">
             <div className="flex-grow min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className={`font-semibold ${isDeleted ? 'text-text-muted font-mono' : 'text-text-primary'}`}>
-                  {isDeleted ? '[deleted]' : `@${comment.username}`}
-                </span>
+                {isDeleted ? (
+                  <span className="font-semibold text-text-muted font-mono">[deleted]</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onViewProfile(comment.username)}
+                    className="font-semibold text-text-primary hover:text-indigo-400 transition-colors cursor-pointer"
+                  >
+                    {comment.username}
+                  </button>
+                )}
+                {!isDeleted && comment.authorEquippedBadges && comment.authorEquippedBadges.length > 0 && (
+                  <EquippedBadgesInline badges={comment.authorEquippedBadges} size="sm" />
+                )}
                 <span className="text-[9px] text-text-muted">
                   {new Date(comment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>

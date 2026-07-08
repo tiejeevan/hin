@@ -3,6 +3,8 @@ import { eq, and, count, sql, inArray, notInArray } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import type { ChatThread } from '@hin/types';
 import { getBlockedUserIds, getBlockerUserIds } from './blocks';
+import { isGamificationEnabled } from './gamification/settings';
+import { loadEquippedBadgesForUsers } from './gamification/equipped';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -120,6 +122,10 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
   const lastByPartner = new Map(visibleLastMessages.map(row => [row.partnerId, row]));
   const userById = new Map(otherUsers.map(u => [u.id, u]));
 
+  const equippedBadgesByUser = (await isGamificationEnabled(db))
+    ? await loadEquippedBadgesForUsers(db, partnerIds)
+    : new Map();
+
   const threads: ChatThread[] = [];
   for (const partnerId of partnerIds) {
     const u = userById.get(partnerId);
@@ -129,6 +135,7 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
       id: u.id,
       username: u.username,
       role: u.role,
+      equippedBadges: equippedBadgesByUser.get(u.id) ?? [],
       lastMessage: lastMsg
         ? {
             content: lastMsg.content,

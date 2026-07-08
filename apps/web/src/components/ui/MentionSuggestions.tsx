@@ -1,6 +1,7 @@
 import { User as UserType } from '@hin/types';
 import { Shield } from 'lucide-react';
 import { UserAvatar } from '../profile/UserAvatar';
+import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
 
 interface MentionSuggestionsProps {
   suggestions: UserType[];
@@ -30,6 +31,9 @@ export function MentionSuggestions({ suggestions, activeIndex, onSelect }: Menti
           >
             <UserAvatar username={user.username} avatarUrl={user.avatarUrl} size="sm" />
             <span className="flex-grow text-left font-medium">{user.username}</span>
+            {user.equippedBadges && user.equippedBadges.length > 0 && (
+              <EquippedBadgesInline badges={user.equippedBadges} size="sm" />
+            )}
             {user.role === 'admin' && (
               <Shield className="h-3 w-3 text-amber-500 shrink-0" />
             )}

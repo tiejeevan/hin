@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '@hin/db';
 import type { GamificationActionResult, GamificationActionType } from '@hin/types';
 import type { Env } from '../../types';
-import { isGamificationEnabled } from './settings';
+import { isGamificationEnabled, getGamificationVisibility } from './settings';
 import { resolveActionDeltas } from './registry';
 import { upsertCounterDelta } from './counters';
 import { evaluateBadgesForUser } from './evaluator';
@@ -97,10 +97,12 @@ export async function processUserAction(
 
   if (options.env) {
     const username = options.senderUsername ?? 'Hin';
+    const { showLevel, showPoints } = await getGamificationVisibility(db);
     if (result.badgesEarned.length > 0) {
       await notifyBadgeAwards(db, options.env, userId, result.badgesEarned, username);
     }
-    if (result.levelUp !== null) {
+    // Level-up notifications only make sense when the level is visible.
+    if (result.levelUp !== null && showLevel) {
       await notifyLevelUp(db, options.env, userId, result.levelUp, username);
     }
     if (result.eventWins && result.eventWins.length > 0) {
@@ -113,11 +115,9 @@ export async function processUserAction(
       || (result.eventWins && result.eventWins.length > 0)
     ) {
       await broadcastGamificationReward(options.env, userId, {
-        pe: result.pointsEarned,
-        pt: result.totalPoints,
-        lv: result.level,
+        ...(showPoints ? { pe: result.pointsEarned, pt: result.totalPoints } : {}),
+        ...(showLevel ? { lv: result.level, levelUp: result.levelUp } : {}),
         be: result.badgesEarned.length > 0 ? result.badgesEarned : undefined,
-        levelUp: result.levelUp,
       });
     }
   }

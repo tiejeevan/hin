@@ -25,11 +25,10 @@ export function applyGamificationReward(
     return;
   }
 
-  if (payload.be && payload.be.length > 0) {
-    addToast('Badge earned!', 'badge_award', undefined, { skipPrefCheck: true });
-  } else if (payload.levelUp) {
-    addToast(`Level ${payload.levelUp} reached!`, 'level_up', undefined, { skipPrefCheck: true });
-  } else if (payload.pe && payload.pe > 0) {
+  // Badge and level-up toasts (and their bell entries) are owned by the WS
+  // `notification` path (badge_award / level_up); toasting them here too would
+  // double up. This path only handles the points toast, which has no bell entry.
+  if (payload.pe && payload.pe > 0) {
     addToast(`+${payload.pe} points!`, 'badge_award', undefined, { skipPrefCheck: true });
   }
 }
