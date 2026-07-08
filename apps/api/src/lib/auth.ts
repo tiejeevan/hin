@@ -25,7 +25,20 @@ export async function getAuthUser(c: Context<{ Bindings: Env }>): Promise<any | 
         )
       )
       .get();
-    return user || null;
+
+    if (user) {
+      const cf = (c.req.raw as any).cf;
+      const detectedCountry = (cf?.country as string) ?? null;
+      if (detectedCountry && user.country !== detectedCountry) {
+        await db.update(schema.users)
+          .set({ country: detectedCountry })
+          .where(eq(schema.users.id, user.id))
+          .run();
+        user.country = detectedCountry;
+      }
+      return user;
+    }
+    return null;
   } catch (e) {
     return null;
   }

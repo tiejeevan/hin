@@ -7,7 +7,7 @@ export type ImageCompressKind = 'avatar' | 'cover' | 'post' | 'badge' | 'event_b
  * When the dev server is reached over a LAN IP (e.g. testing on a phone) the
  * page is not a secure context, so fall back to a manual UUID v4 generator.
  */
-function randomId(): string {
+export function randomId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }

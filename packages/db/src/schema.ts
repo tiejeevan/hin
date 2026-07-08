@@ -15,6 +15,7 @@ export const users = sqliteTable('users', {
   deletedAt: text('deleted_at'), // Soft delete for users
   /** 'self' | 'admin' when deleted_at is set */
   deletionSource: text('deletion_source'),
+  country: text('country'),
 }, (table) => ({
   deletedAtIdx: index('users_deleted_at_idx').on(table.deletedAt),
   isPrivateIdx: index('users_is_private_idx').on(table.isPrivate),
@@ -518,4 +519,72 @@ export const systemBroadcasts = sqliteTable('system_broadcasts', {
 }, (table) => ({
   senderIdIdx: index('system_broadcasts_sender_id_idx').on(table.senderId),
   createdAtIdx: index('system_broadcasts_created_at_idx').on(table.createdAt),
+}));
+
+/**
+ * Security audit log — one row per auth event or privileged admin action.
+ *
+ * Retention policy:
+ *  - Active rows are hard-deleted after 90 days by a scheduled job.
+ *  - When a user deletes their account, their rows are soft-deleted (deleted_at set).
+ *  - Soft-deleted rows are hard-deleted after 90 days from deleted_at.
+ *
+ * Geo data is sourced from Cloudflare's request.cf object (zero cost, zero latency).
+ * IP address is PII — ensure your Privacy Policy discloses this collection.
+ */
+export const auditLogs = sqliteTable('audit_logs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  /** Nullable: failed logins before the user row is found won't have a userId. */
+  userId: integer('user_id').references(() => users.id, { onDelete: 'set null' }),
+  /**
+   * 'login' | 'register' | 'logout' | 'failed_login' |
+   * 'password_change' | 'account_delete' |
+   * 'admin_impersonate' | 'role_change'
+   */
+  eventType: text('event_type').notNull(),
+  /** 1 = success, 0 = failure */
+  success: integer('success').notNull(),
+  /** 'bad_password' | 'user_not_found' | 'account_deleted' | 'token_invalid' etc. */
+  failureReason: text('failure_reason'),
+
+  // --- Network ---
+  ipAddress: text('ip_address'),
+
+  // --- Geolocation (from Cloudflare request.cf — no external API needed) ---
+  country: text('country'),     // ISO 3166-1 alpha-2, e.g. "US"
+  region: text('region'),       // e.g. "California"
+  city: text('city'),           // e.g. "San Francisco"
+  postalCode: text('postal_code'), // e.g. "94102"
+  latitude: text('latitude'),   // approximate, e.g. "37.7749"
+  longitude: text('longitude'), // approximate, e.g. "-122.4194"
+  timezone: text('timezone'),   // e.g. "America/New_York"
+
+  // --- Device / Browser (parsed from User-Agent) ---
+  userAgent: text('user_agent'),
+  /** 'mobile' | 'tablet' | 'desktop' | 'bot' | 'unknown' */
+  deviceType: text('device_type'),
+  os: text('os'),               // e.g. "iOS 17.4"
+  browser: text('browser'),     // e.g. "Safari 17"
+
+  // --- Client context ---
+  /** ISO-8601 timestamp sent by the browser — captures the user's local clock & offset. */
+  clientLocalTime: text('client_local_time'),
+  /** UUID grouping all events in a single browser session. */
+  sessionId: text('session_id'),
+
+  // --- Admin action metadata ---
+  /** For admin_impersonate / role_change: the affected user. */
+  targetUserId: integer('target_user_id').references(() => users.id, { onDelete: 'set null' }),
+
+  // --- Lifecycle ---
+  /** Set when the owning user soft-deletes their account. Hard-purged after 90 days. */
+  deletedAt: text('deleted_at'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  userIdIdx: index('audit_logs_user_id_idx').on(table.userId),
+  eventTypeIdx: index('audit_logs_event_type_idx').on(table.eventType),
+  createdAtIdx: index('audit_logs_created_at_idx').on(table.createdAt),
+  ipAddressIdx: index('audit_logs_ip_address_idx').on(table.ipAddress),
+  sessionIdIdx: index('audit_logs_session_id_idx').on(table.sessionId),
+  deletedAtIdx: index('audit_logs_deleted_at_idx').on(table.deletedAt),
 }));

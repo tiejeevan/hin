@@ -7,6 +7,7 @@ import { sign } from 'hono/jwt';
 import type { Env } from '../types';
 import { JWT_SECRET } from '../lib/auth';
 import { toPublicUser, seedAdminUser } from '../lib/users';
+import { writeAuditLog } from '../lib/audit';
 
 const auth = new Hono<{ Bindings: Env }>();
 
@@ -15,7 +16,13 @@ auth.post('/register', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   await seedAdminUser(db); // Seed admin user if not exists
 
-  const { username, password } = await c.req.json<{ username?: string; password?: string }>();
+  const body = await c.req.json<{
+    username?: string;
+    password?: string;
+    clientLocalTime?: string;
+    sessionId?: string;
+  }>();
+  const { username, password, clientLocalTime, sessionId } = body;
   
   if (!username || username.trim() === '') {
     return c.json({ error: 'Username is required' }, 400);
@@ -29,6 +36,13 @@ auth.post('/register', async (c) => {
   // Check if exists (case-sensitive)
   const existing = await db.select().from(schema.users).where(eq(schema.users.username, normalizedUsername)).get();
   if (existing) {
+    await writeAuditLog(c, {
+      eventType: 'register',
+      success: false,
+      failureReason: 'username_taken',
+      clientLocalTime,
+      sessionId,
+    });
     return c.json({ error: 'Username already taken' }, 400);
   }
 
@@ -36,10 +50,14 @@ auth.post('/register', async (c) => {
   const passwordHash = await bcrypt.hash(password, 10);
 
   // Insert user
+  const cf = (c.req.raw as any).cf;
+  const country = (cf?.country as string) ?? null;
+
   const [inserted] = await db.insert(schema.users).values({
     username: normalizedUsername,
     passwordHash,
     role: 'user',
+    country,
   }).returning();
 
   await db.insert(schema.userSettings).values({ userId: inserted.id });
@@ -52,6 +70,15 @@ auth.post('/register', async (c) => {
     exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
   }, JWT_SECRET, 'HS256');
 
+  // Audit: successful register
+  await writeAuditLog(c, {
+    userId: inserted.id,
+    eventType: 'register',
+    success: true,
+    clientLocalTime,
+    sessionId,
+  });
+
   return c.json({
     token,
     user: toPublicUser(inserted),
@@ -63,7 +90,13 @@ auth.post('/login', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   await seedAdminUser(db); // Seed admin user if not exists
 
-  const { username, password } = await c.req.json<{ username?: string; password?: string }>();
+  const body = await c.req.json<{
+    username?: string;
+    password?: string;
+    clientLocalTime?: string;
+    sessionId?: string;
+  }>();
+  const { username, password, clientLocalTime, sessionId } = body;
   
   if (!username || !password) {
     return c.json({ error: 'Username and password are required' }, 400);
@@ -73,21 +106,43 @@ auth.post('/login', async (c) => {
 
   // Find user (case-sensitive; filtering out soft deleted ones)
   const user = await db.select().from(schema.users)
-    .where(
-      and(
-        eq(schema.users.username, normalizedUsername),
-        sql`${schema.users.deletedAt} IS NULL`
-      )
-    )
+    .where(eq(schema.users.username, normalizedUsername))
     .get();
 
   if (!user) {
+    await writeAuditLog(c, {
+      eventType: 'failed_login',
+      success: false,
+      failureReason: 'user_not_found',
+      clientLocalTime,
+      sessionId,
+    });
+    return c.json({ error: 'Invalid username or password' }, 401);
+  }
+
+  if (user.deletedAt) {
+    await writeAuditLog(c, {
+      userId: user.id,
+      eventType: 'failed_login',
+      success: false,
+      failureReason: 'account_deleted',
+      clientLocalTime,
+      sessionId,
+    });
     return c.json({ error: 'Invalid username or password' }, 401);
   }
 
   // Compare passwords
   const passwordMatch = await bcrypt.compare(password, user.passwordHash);
   if (!passwordMatch) {
+    await writeAuditLog(c, {
+      userId: user.id,
+      eventType: 'failed_login',
+      success: false,
+      failureReason: 'bad_password',
+      clientLocalTime,
+      sessionId,
+    });
     return c.json({ error: 'Invalid username or password' }, 401);
   }
 
@@ -99,10 +154,37 @@ auth.post('/login', async (c) => {
     exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
   }, JWT_SECRET, 'HS256');
 
+  // Audit: successful login
+  await writeAuditLog(c, {
+    userId: user.id,
+    eventType: 'login',
+    success: true,
+    clientLocalTime,
+    sessionId,
+  });
+
   return c.json({
     token,
     user: toPublicUser(user),
   });
 });
 
+// Logout (client-side token discard; server records the event for audit trail)
+auth.post('/logout', async (c) => {
+  type LogoutBody = { userId?: number; clientLocalTime?: string; sessionId?: string };
+  const defaultBody: LogoutBody = {};
+  const body: LogoutBody = await c.req.json<LogoutBody>().catch(() => defaultBody);
+
+  await writeAuditLog(c, {
+    userId: body.userId ?? null,
+    eventType: 'logout',
+    success: true,
+    clientLocalTime: body.clientLocalTime,
+    sessionId: body.sessionId,
+  });
+
+  return c.json({ success: true });
+});
+
 export default auth;
+

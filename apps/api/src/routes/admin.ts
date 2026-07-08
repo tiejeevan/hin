@@ -10,6 +10,7 @@ import { isNotificationEnabled, toPublicSettings } from '../lib/user-settings';
 import { listReports, reviewReport } from '../lib/reports';
 import { softDeleteUser, reinstateUser, computeAccountStatus } from '../lib/user-lifecycle';
 import { getSystemSettings, updateSystemSettings } from '../lib/system-settings';
+import { writeAuditLog } from '../lib/audit';
 
 const admin = new Hono<{ Bindings: Env }>();
 
@@ -88,6 +89,14 @@ admin.post('/impersonate', async (c) => {
     exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
   }, JWT_SECRET, 'HS256');
 
+  // Audit: admin impersonated a user
+  await writeAuditLog(c, {
+    userId: authUser.id,
+    eventType: 'admin_impersonate',
+    success: true,
+    targetUserId: targetUser.id,
+  });
+
   return c.json({
     token,
     user: {
@@ -124,6 +133,14 @@ admin.put('/users/:id/role', async (c) => {
     .set({ role })
     .where(eq(schema.users.id, userId))
     .run();
+
+  // Audit: admin changed a user's role
+  await writeAuditLog(c, {
+    userId: authUser.id,
+    eventType: 'role_change',
+    success: true,
+    targetUserId: userId,
+  });
 
   return c.json({ success: true });
 });
@@ -335,6 +352,14 @@ admin.delete('/users/:id', async (c) => {
   if (!result.ok) {
     return c.json({ error: result.error }, result.code as 400 | 404);
   }
+
+  // Audit: admin deleted a user account
+  await writeAuditLog(c, {
+    userId: authUser.id,
+    eventType: 'account_delete',
+    success: true,
+    targetUserId: userId,
+  });
 
   return c.json({ success: true });
 });

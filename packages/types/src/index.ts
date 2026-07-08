@@ -16,6 +16,7 @@ export interface User {
   coverUrl?: string | null;
   createdAt: string;
   deletedAt?: string | null;
+  country?: string | null;
   deletionSource?: DeletionSource | null;
   accountStatus?: AccountStatus;
   postCount?: number | null;
@@ -930,3 +931,78 @@ export interface AdminUserGamification {
 export const AdminAwardBadgeSchema = z.object({
   badgeId: z.number().int().min(1),
 });
+
+// ---------------------------------------------------------------------------
+// Audit Logs
+// ---------------------------------------------------------------------------
+
+export type AuditEventType =
+  | 'login'
+  | 'register'
+  | 'logout'
+  | 'failed_login'
+  | 'password_change'
+  | 'account_delete'
+  | 'admin_impersonate'
+  | 'role_change';
+
+export type AuditDeviceType = 'mobile' | 'tablet' | 'desktop' | 'bot' | 'unknown';
+
+/** Full audit log row — returned to admins only. */
+export interface AuditLog {
+  id: number;
+  userId: number | null;
+  username: string | null;       // joined from users
+  eventType: AuditEventType;
+  success: boolean;
+  failureReason: string | null;
+  // Network
+  ipAddress: string | null;
+  // Geo
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  postalCode: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  timezone: string | null;
+  // Device
+  userAgent: string | null;
+  deviceType: AuditDeviceType | null;
+  os: string | null;
+  browser: string | null;
+  // Session
+  clientLocalTime: string | null;
+  sessionId: string | null;
+  // Admin
+  targetUserId: number | null;
+  targetUsername: string | null;  // joined from users
+  // Lifecycle
+  createdAt: string;
+}
+
+/** Partial row shown to users viewing their own login history. */
+export interface AuditLogPartial {
+  id: number;
+  eventType: AuditEventType;
+  success: boolean;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  deviceType: AuditDeviceType | null;
+  os: string | null;
+  browser: string | null;
+  clientLocalTime: string | null;
+  createdAt: string;
+}
+
+export interface AuditLogPage {
+  logs: AuditLog[];
+  nextCursor: number | null;
+}
+
+export interface AuditLogPartialPage {
+  logs: AuditLogPartial[];
+  nextCursor: number | null;
+}
+

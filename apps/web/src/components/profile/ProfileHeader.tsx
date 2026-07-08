@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Shield, MessageCircle, Pencil, UserPlus, UserCheck, Clock, Settings, MoreHorizontal, VolumeX, Volume2, Ban, UserX, Link2, Flag } from 'lucide-react';
+import { Shield, MessageCircle, Pencil, UserPlus, UserCheck, Clock, Settings, MoreHorizontal, VolumeX, Volume2, Ban, UserX, Link2, Flag, MapPin } from 'lucide-react';
 import { BlockStatus, FollowStatus, MuteStatus, User as UserType, type GamificationPublic } from '@hin/types';
 import { UserAvatar } from './UserAvatar';
 import { ProfileEditForm } from './ProfileEditForm';
@@ -7,6 +7,16 @@ import { LevelBadge } from '../gamification/LevelBadge';
 import { PointsDisplay } from '../gamification/PointsDisplay';
 import { BadgeGrid } from '../gamification/BadgeGrid';
 import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
+
+const getCountryName = (code: string | null | undefined): string | null => {
+  if (!code) return null;
+  try {
+    const regionNames = new Intl.DisplayNames([navigator.language || 'en'], { type: 'region' });
+    return regionNames.of(code.toUpperCase()) || code.toUpperCase();
+  } catch {
+    return code.toUpperCase();
+  }
+};
 
 interface ProfileHeaderProps {
   user: UserType;
@@ -342,6 +352,15 @@ export function ProfileHeader({
           </div>
           <p className="text-xs text-text-muted">
             Joined {new Date(user.createdAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+            {user.country && (
+              <>
+                {' · '}
+                <span className="inline-flex items-center gap-0.5 align-middle">
+                  <MapPin className="h-3 w-3 shrink-0" aria-hidden />
+                  {getCountryName(user.country)}
+                </span>
+              </>
+            )}
             {user.postCount != null && user.postCount > 0 && ` · ${user.postCount} post${user.postCount === 1 ? '' : 's'}`}
           </p>
         </div>

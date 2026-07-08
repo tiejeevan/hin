@@ -18,6 +18,7 @@ import meRoutes from './routes/me';
 import hashtagsRoutes from './routes/hashtags';
 import adminGamificationRoutes from './routes/admin-gamification';
 import eventsRoutes from './routes/events';
+import auditLogsRoutes from './routes/audit-logs';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -48,6 +49,8 @@ app.route('/api/hashtags', hashtagsRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/admin/gamification', adminGamificationRoutes);
 app.route('/api/events', eventsRoutes);
+// Audit logs: admin full view at /api/admin/audit-logs, user partial at /api/me/audit-logs
+app.route('/api', auditLogsRoutes);
 
 // WebSocket entrypoint -> route to Durable Object
 app.get('/ws', async (c) => {

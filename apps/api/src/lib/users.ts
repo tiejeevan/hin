@@ -25,6 +25,7 @@ export function toPublicUser(
     isPrivate?: number | boolean | null;
     createdAt: string;
     deletedAt?: string | null;
+    country?: string | null;
   },
   extras?: {
     postCount?: number | null;
@@ -47,6 +48,7 @@ export function toPublicUser(
     isPrivate: !!(user.isPrivate && user.isPrivate !== 0),
     createdAt: user.createdAt,
     deletedAt: user.deletedAt ?? null,
+    country: user.country ?? null,
     ...(extras?.postCount !== undefined ? { postCount: extras.postCount } : {}),
     ...(extras?.followerCount !== undefined ? { followerCount: extras.followerCount } : {}),
     ...(extras?.followingCount !== undefined ? { followingCount: extras.followingCount } : {}),
@@ -67,6 +69,7 @@ export const USER_PUBLIC_FIELDS = {
   coverUrl: schema.users.coverUrl,
   isPrivate: schema.users.isPrivate,
   createdAt: schema.users.createdAt,
+  country: schema.users.country,
 };
 
 type UserRow = {
@@ -78,6 +81,7 @@ type UserRow = {
   coverUrl?: string | null;
   isPrivate?: number | boolean | null;
   createdAt: string;
+  country?: string | null;
 };
 
 export async function buildProfileResponse(

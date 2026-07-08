@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { History, Megaphone, Shield, Users, Flag, Settings, Award, LayoutDashboard } from 'lucide-react';
+import { History, Megaphone, Shield, Users, Flag, Settings, Award, LayoutDashboard, ShieldAlert } from 'lucide-react';
 import { BroadcastDelivery, ContentReport, ReviewReportAction, SystemBroadcast as SystemBroadcastRecord, User as UserType } from '@hin/types';
 import type { AdminSection } from '../../lib/appRoutes';
 import { AdminData } from '../../types/ui';
@@ -11,6 +11,7 @@ import { ReportsQueue } from './ReportsQueue';
 import { AdminUserSettings } from './AdminUserSettings';
 import { AdminGamification } from './AdminGamification';
 import { AdminEvents } from './AdminEvents';
+import { AuditLogsPanel } from './AuditLogsPanel';
 
 interface AdminDashboardProps {
   section: AdminSection;
@@ -66,6 +67,8 @@ export function AdminDashboard({
   const [auditLoading, setAuditLoading] = useState(false);
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [reportsLoading, setReportsLoading] = useState(false);
+  const [securityAuditOpen, setSecurityAuditOpen] = useState(false);
+  const [securityAuditMounted, setSecurityAuditMounted] = useState(false);
 
   const toggleBroadcast = () => {
     setBroadcastOpen(prev => !prev);
@@ -185,6 +188,20 @@ export function AdminDashboard({
         </div>
       ) : (
       <>
+      <AdminCollapsibleSection
+        title="Security Audit Log"
+        description="Every login, failed attempt, logout, and privileged admin action — with IP, geo, and device info."
+        icon={<ShieldAlert className="h-5 w-5" />}
+        iconClassName="bg-cyan-500/15 border-cyan-500/25 text-cyan-400"
+        open={securityAuditOpen}
+        onToggle={() => {
+          if (!securityAuditMounted) setSecurityAuditMounted(true);
+          setSecurityAuditOpen(prev => !prev);
+        }}
+      >
+        {securityAuditMounted && <AuditLogsPanel token={token} />}
+      </AdminCollapsibleSection>
+
       <AdminCollapsibleSection
         title="Content Reports"
         description="Review user-submitted reports and take moderation action."

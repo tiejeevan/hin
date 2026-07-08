@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, Lock, MessageSquare, Settings, UserX, AlertTriangle } from 'lucide-react';
+import { Bell, Lock, MessageSquare, Settings, UserX, AlertTriangle, ShieldCheck } from 'lucide-react';
 import {
   ChatIconPage,
   FollowRequest,
@@ -10,6 +10,7 @@ import { CollapsibleSection } from '../ui/CollapsibleSection';
 import { SettingsToggle } from '../settings/SettingsToggle';
 import { FollowRequestsPanel } from './FollowRequestsPanel';
 import { BlockedMutedList } from './BlockedMutedList';
+import { LoginHistory } from '../settings/LoginHistory';
 
 const CHAT_PAGE_OPTIONS: { value: ChatIconPage; label: string }[] = [
   { value: 'feed', label: 'Feed' },
@@ -48,7 +49,7 @@ export function ProfileSettingsPanel({
   onUnmuteUser,
   onDeleteAccount,
 }: ProfileSettingsPanelProps) {
-  const [openSection, setOpenSection] = useState<'privacy' | 'notifications' | 'chat' | 'blocked' | 'danger' | null>(null);
+  const [openSection, setOpenSection] = useState<'privacy' | 'notifications' | 'chat' | 'blocked' | 'security' | 'danger' | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirmUsername, setDeleteConfirmUsername] = useState('');
@@ -94,7 +95,7 @@ export function ProfileSettingsPanel({
     [settings, token, onSettingsChange],
   );
 
-  const toggleSection = (section: 'privacy' | 'notifications' | 'chat' | 'blocked' | 'danger') => {
+  const toggleSection = (section: 'privacy' | 'notifications' | 'chat' | 'blocked' | 'security' | 'danger') => {
     setOpenSection(prev => (prev === section ? null : section));
   };
 
@@ -342,6 +343,17 @@ export function ProfileSettingsPanel({
               />
             </section>
           </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="Login history & security"
+          description="View your recent sign-ins, logouts, and failed attempts"
+          icon={<ShieldCheck className="h-4 w-4" />}
+          iconClassName="bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
+          open={openSection === 'security'}
+          onToggle={() => toggleSection('security')}
+        >
+          <LoginHistory token={token} />
         </CollapsibleSection>
 
         <CollapsibleSection

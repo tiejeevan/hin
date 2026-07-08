@@ -32,6 +32,7 @@ import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode, FeedMode } fro
 import type { CreatePostSubmitPayload } from './components/feed/CreatePostForm';
 import { mergePollFromBroadcast } from './utils/pollVisibility';
 import { parseLocation, syncUrl, postPermalinkUrl, profilePermalinkUrl, type AdminSection } from './lib/appRoutes';
+import { randomId } from './lib/compressImage';
 import { AppShell } from './components/layout/AppShell';
 import { AppHeader } from './components/layout/AppHeader';
 import { GuestHeader } from './components/layout/GuestHeader';
@@ -1309,11 +1310,24 @@ export default function App() {
     setAuthError(null);
     setIsAuthLoading(true);
     const path = isRegisterMode ? '/api/auth/register' : '/api/auth/login';
+
+    // Persist a session ID in sessionStorage so the server can group events
+    let sessionId = sessionStorage.getItem('hin_session_id');
+    if (!sessionId) {
+      sessionId = randomId();
+      sessionStorage.setItem('hin_session_id', sessionId);
+    }
+
     try {
       const res = await fetch(`${API_URL}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: usernameInput.trim(), password: passwordInput }),
+        body: JSON.stringify({
+          username: usernameInput.trim(),
+          password: passwordInput,
+          clientLocalTime: new Date().toISOString(),
+          sessionId,
+        }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -1341,7 +1355,23 @@ export default function App() {
     }
   };
 
+
   const handleLogout = () => {
+    // Fire-and-forget logout audit event
+    const sessionId = sessionStorage.getItem('hin_session_id');
+    const userId = currentUser?.id;
+    if (token) {
+      fetch(`${API_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          userId,
+          clientLocalTime: new Date().toISOString(),
+          sessionId,
+        }),
+      }).catch(() => {}); // Never block logout on audit failure
+    }
+    sessionStorage.removeItem('hin_session_id');
     setToken(null);
     setCurrentUser(null);
     localStorage.removeItem('hin_token');
@@ -1359,6 +1389,7 @@ export default function App() {
     setOnlineUserIds(new Set());
     ws.current?.close();
   };
+
 
   const applyPollUpdate = (postId: number, poll: Poll) => {
     const merge = (p: import('@hin/types').Post) =>

@@ -15,6 +15,7 @@ import { softDeleteUser, verifyPassword } from '../lib/user-lifecycle';
 import { toGamificationPublic, emptyGamificationPublic } from '../lib/gamification/public';
 import { isGamificationEnabled } from '../lib/gamification/settings';
 import { loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
+import { writeAuditLog, softDeleteUserAuditLogs } from '../lib/audit';
 
 const users = new Hono<{ Bindings: Env }>();
 
@@ -138,6 +139,15 @@ users.delete('/me', async (c) => {
   if (!result.ok) {
     return c.json({ error: result.error }, result.code as 400 | 404);
   }
+
+  // Audit: user deleted their own account
+  await writeAuditLog(c, {
+    userId: authUser.id,
+    eventType: 'account_delete',
+    success: true,
+  });
+  // Soft-delete all this user's audit logs (will be hard-purged after 90 days)
+  await softDeleteUserAuditLogs(c, authUser.id);
 
   return c.json({ success: true });
 });
