@@ -246,6 +246,13 @@
       "when": 1783165000000,
       "tag": "0035_user_profile_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1783166000000,
+      "tag": "0036_turnstile_setting",
+      "breakpoints": true
     }
   ]
 }

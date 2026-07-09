@@ -30,6 +30,29 @@ app.use('*', cors({
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
 
+// Rewrite absolute media URLs in responses to match the current request's origin dynamically
+app.use('*', async (c, next) => {
+  await next();
+  const contentType = c.res.headers.get('content-type');
+  if (
+    c.res.status !== 204 &&
+    c.res.status !== 304 &&
+    contentType &&
+    contentType.includes('application/json')
+  ) {
+    const origin = new URL(c.req.url).origin;
+    const bodyText = await c.res.text();
+    const modifiedBodyText = bodyText.replace(/https?:\/\/[^\/]+\/api\/media\//g, `${origin}/api/media/`);
+    const headers = new Headers(c.res.headers);
+    headers.delete('content-length');
+    c.res = new Response(modifiedBodyText, {
+      status: c.res.status,
+      statusText: c.res.statusText,
+      headers,
+    });
+  }
+});
+
 // Basic test endpoint
 app.get('/', (c) => c.text('Hin API is running!'));
 
