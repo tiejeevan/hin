@@ -187,8 +187,13 @@ export async function getOrFetchLinkPreview(
 
   const urlHash = await hashUrl(normalized);
   const existing = await db.select().from(schema.linkPreviews).where(eq(schema.linkPreviews.urlHash, urlHash)).get();
+  const olabidItemId = parseOlabidItemId(normalized);
+  // Stale OG scrapes for Olabid (siteName != Olabid) must be refetched via their API.
+  const olabidNeedsRefresh = Boolean(
+    olabidItemId && existing && !existing.fetchFailed && existing.siteName !== 'Olabid'
+  );
 
-  if (existing) {
+  if (existing && !olabidNeedsRefresh) {
     const ageMs = Date.now() - new Date(existing.fetchedAt).getTime();
     if (!existing.fetchFailed && ageMs < CACHE_FRESH_MS) return existing.id;
     if (existing.fetchFailed && ageMs < FAILURE_BACKOFF_MS) return null;
@@ -198,7 +203,6 @@ export async function getOrFetchLinkPreview(
     let meta: ExtractedMetadata;
 
     // Check if this is an Olabid link
-    const olabidItemId = parseOlabidItemId(normalized);
     if (olabidItemId) {
       try {
         meta = await fetchOlabidPreview(db, normalized, olabidItemId);
