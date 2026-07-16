@@ -29,10 +29,16 @@ function noStoreJson<T>(c: { header: (name: string, value: string) => void; json
  * Fetch product categories
  */
 olabid.get('/categories', async (c) => {
-  const categories = await fetchOlabidCategories();
+  const apiKey = c.env.OLABID_API_KEY;
+  
+  if (!apiKey) {
+    return noStoreJson(c, { error: 'Service temporarily unavailable' }, 503);
+  }
+
+  const categories = await fetchOlabidCategories(apiKey);
 
   if (!categories) {
-    return noStoreJson(c, { error: 'Failed to fetch categories' }, 500);
+    return noStoreJson(c, { error: 'Unable to retrieve categories at this time' }, 500);
   }
 
   return noStoreJson(c, categories);
@@ -43,10 +49,16 @@ olabid.get('/categories', async (c) => {
  * Fetch pickup warehouses
  */
 olabid.get('/warehouses', async (c) => {
-  const warehouses = await fetchOlabidWarehouses();
+  const apiKey = c.env.OLABID_API_KEY;
+  
+  if (!apiKey) {
+    return noStoreJson(c, { error: 'Service temporarily unavailable' }, 503);
+  }
+
+  const warehouses = await fetchOlabidWarehouses(apiKey);
 
   if (!warehouses) {
-    return noStoreJson(c, { error: 'Failed to fetch warehouses' }, 500);
+    return noStoreJson(c, { error: 'Unable to retrieve warehouses at this time' }, 500);
   }
 
   return noStoreJson(c, warehouses);
@@ -57,6 +69,12 @@ olabid.get('/warehouses', async (c) => {
  * Fetch list of auction items with optional search, category, section, and filters
  */
 olabid.get('/items', async (c) => {
+  const apiKey = c.env.OLABID_API_KEY;
+  
+  if (!apiKey) {
+    return noStoreJson(c, { error: 'Service temporarily unavailable' }, 503);
+  }
+
   const page = parseInt(c.req.query('page') || '1', 10);
   const size = parseInt(c.req.query('size') || '20', 10);
   const orderBy = c.req.query('orderBy') || '(EndTime:asc)';
@@ -77,7 +95,7 @@ olabid.get('/items', async (c) => {
       );
     }
 
-    const result = await fetchOlabidBySection({
+    const result = await fetchOlabidBySection(apiKey, {
       filterBy: filterBy as OlabidSectionFilter,
       warehouseIds,
       page,
@@ -85,13 +103,13 @@ olabid.get('/items', async (c) => {
     });
 
     if (!result) {
-      return noStoreJson(c, { error: 'Failed to fetch auction items' }, 500);
+      return noStoreJson(c, { error: 'Unable to retrieve auction items at this time' }, 500);
     }
 
     return noStoreJson(c, result);
   }
 
-  const result = await fetchOlabidList({
+  const result = await fetchOlabidList(apiKey, {
     page,
     size,
     orderBy,
@@ -103,7 +121,7 @@ olabid.get('/items', async (c) => {
   });
 
   if (!result) {
-    return noStoreJson(c, { error: 'Failed to fetch auction items' }, 500);
+    return noStoreJson(c, { error: 'Unable to retrieve auction items at this time' }, 500);
   }
 
   return noStoreJson(c, result);
@@ -114,13 +132,19 @@ olabid.get('/items', async (c) => {
  * Fetch single item details
  */
 olabid.get('/items/:id', async (c) => {
+  const apiKey = c.env.OLABID_API_KEY;
+  
+  if (!apiKey) {
+    return noStoreJson(c, { error: 'Service temporarily unavailable' }, 503);
+  }
+
   const itemId = c.req.param('id');
 
   if (!itemId || !/^\d+$/.test(itemId)) {
     return noStoreJson(c, { error: 'Invalid item ID' }, 400);
   }
 
-  const item = await fetchOlabidItem(itemId);
+  const item = await fetchOlabidItem(itemId, apiKey);
 
   if (!item) {
     return noStoreJson(c, { error: 'Item not found' }, 404);

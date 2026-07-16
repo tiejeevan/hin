@@ -3,7 +3,6 @@
  * Discovered from HTTP Toolkit: Olabid uses x-api-key header for authentication
  */
 
-const OLABID_API_KEY = '1BAF2123-00D7-421E-B999-FB0B222D6577';
 const OLABID_CLIENT_VERSION = 'PRODUCTION-v3.0.2-375695';
 const OLABID_API_BASE = 'https://auction-api.olabid.com/api/v2';
 
@@ -94,18 +93,24 @@ let cachedWarehouseIds: string | null = null;
 let warehouseCacheExpiresAt = 0;
 const WAREHOUSE_CACHE_MS = 5 * 60 * 1000;
 
-const OLABID_HEADERS = {
-  'x-api-key': OLABID_API_KEY,
-  'x-client-version': OLABID_CLIENT_VERSION,
-  accept: 'application/json',
-} as const;
+function buildOlabidHeaders(apiKey: string) {
+  return {
+    'x-api-key': apiKey,
+    'x-client-version': OLABID_CLIENT_VERSION,
+    accept: 'application/json',
+  };
+}
 
 function logAuthFailure(status: number) {
   if (status === 401 || status === 403) {
     console.error('⚠️ OLABID API KEY MAY BE EXPIRED! Status:', status);
-    console.error('📝 Update the API key in /apps/api/src/lib/olabidApi.ts');
+    console.error('📝 Update the OLABID_API_KEY secret in Cloudflare Workers');
     console.error('🔧 Use HTTP Toolkit to capture the new key from Olabid app');
   }
+}
+
+function sanitizeError(error: unknown): string {
+  return 'An error occurred while processing your request';
 }
 
 /**
@@ -137,10 +142,15 @@ export function parseOlabidItemId(url: string): string | null {
  * Fetch item details from Olabid API
  * Note: The API uses /auction-items/{id}/details endpoint
  */
-export async function fetchOlabidItem(itemId: string): Promise<OlabidItem | null> {
+export async function fetchOlabidItem(itemId: string, apiKey: string): Promise<OlabidItem | null> {
+  if (!apiKey) {
+    console.error('OLABID_API_KEY is not configured');
+    return null;
+  }
+
   try {
     const response = await fetch(`${OLABID_API_BASE}/auction-items/${itemId}/details`, {
-      headers: OLABID_HEADERS,
+      headers: buildOlabidHeaders(apiKey),
       signal: AbortSignal.timeout(5000),
     });
 
@@ -153,7 +163,7 @@ export async function fetchOlabidItem(itemId: string): Promise<OlabidItem | null
     const data = await response.json();
     return data as OlabidItem;
   } catch (error) {
-    console.error(`Failed to fetch Olabid item ${itemId}:`, error);
+    console.error(sanitizeError(error));
     return null;
   }
 }
@@ -161,10 +171,15 @@ export async function fetchOlabidItem(itemId: string): Promise<OlabidItem | null
 /**
  * Fetch product categories from Olabid API
  */
-export async function fetchOlabidCategories(): Promise<OlabidCategory[] | null> {
+export async function fetchOlabidCategories(apiKey: string): Promise<OlabidCategory[] | null> {
+  if (!apiKey) {
+    console.error('OLABID_API_KEY is not configured');
+    return null;
+  }
+
   try {
     const response = await fetch(`${OLABID_API_BASE}/categories`, {
-      headers: OLABID_HEADERS,
+      headers: buildOlabidHeaders(apiKey),
       signal: AbortSignal.timeout(5000),
     });
 
@@ -176,7 +191,7 @@ export async function fetchOlabidCategories(): Promise<OlabidCategory[] | null> 
 
     return (await response.json()) as OlabidCategory[];
   } catch (error) {
-    console.error('Failed to fetch Olabid categories:', error);
+    console.error(sanitizeError(error));
     return null;
   }
 }
@@ -184,10 +199,15 @@ export async function fetchOlabidCategories(): Promise<OlabidCategory[] | null> 
 /**
  * Fetch warehouses from Olabid API
  */
-export async function fetchOlabidWarehouses(): Promise<OlabidWarehouse[] | null> {
+export async function fetchOlabidWarehouses(apiKey: string): Promise<OlabidWarehouse[] | null> {
+  if (!apiKey) {
+    console.error('OLABID_API_KEY is not configured');
+    return null;
+  }
+
   try {
     const response = await fetch(`${OLABID_API_BASE}/warehouses/list`, {
-      headers: OLABID_HEADERS,
+      headers: buildOlabidHeaders(apiKey),
       signal: AbortSignal.timeout(5000),
     });
 
@@ -200,7 +220,7 @@ export async function fetchOlabidWarehouses(): Promise<OlabidWarehouse[] | null>
     const data = (await response.json()) as OlabidWarehouseListResponse;
     return data.items ?? [];
   } catch (error) {
-    console.error('Failed to fetch Olabid warehouses:', error);
+    console.error(sanitizeError(error));
     return null;
   }
 }
@@ -208,7 +228,7 @@ export async function fetchOlabidWarehouses(): Promise<OlabidWarehouse[] | null>
 /**
  * Resolve warehouse IDs from the live warehouses list (cached briefly).
  */
-export async function resolveWarehouseIds(explicit?: string): Promise<string | null> {
+export async function resolveWarehouseIds(apiKey: string, explicit?: string): Promise<string | null> {
   if (explicit && explicit.trim()) {
     return explicit.trim();
   }
@@ -218,7 +238,7 @@ export async function resolveWarehouseIds(explicit?: string): Promise<string | n
     return cachedWarehouseIds;
   }
 
-  const warehouses = await fetchOlabidWarehouses();
+  const warehouses = await fetchOlabidWarehouses(apiKey);
   if (!warehouses || warehouses.length === 0) {
     return null;
   }
@@ -254,8 +274,14 @@ export interface FetchOlabidSectionOptions {
  * Fetch home-section auction items (topDeals, trending, freeShipping, noFees)
  */
 export async function fetchOlabidBySection(
+  apiKey: string,
   options: FetchOlabidSectionOptions
 ): Promise<OlabidListResponse | null> {
+  if (!apiKey) {
+    console.error('OLABID_API_KEY is not configured');
+    return null;
+  }
+
   const {
     filterBy,
     shipping = true,
@@ -263,7 +289,7 @@ export async function fetchOlabidBySection(
     size = 20,
   } = options;
 
-  const warehouseIds = await resolveWarehouseIds(options.warehouseIds);
+  const warehouseIds = await resolveWarehouseIds(apiKey, options.warehouseIds);
   if (!warehouseIds) {
     console.warn('Olabid by-section: no warehouse IDs available');
     return null;
@@ -278,7 +304,7 @@ export async function fetchOlabidBySection(
     url.searchParams.set('size', String(size));
 
     const response = await fetch(url.toString(), {
-      headers: OLABID_HEADERS,
+      headers: buildOlabidHeaders(apiKey),
       signal: AbortSignal.timeout(10000),
     });
 
@@ -290,7 +316,7 @@ export async function fetchOlabidBySection(
 
     return (await response.json()) as OlabidListResponse;
   } catch (error) {
-    console.error('Failed to fetch Olabid section:', error);
+    console.error(sanitizeError(error));
     return null;
   }
 }
@@ -299,8 +325,14 @@ export async function fetchOlabidBySection(
  * Fetch list of auction items from Olabid API
  */
 export async function fetchOlabidList(
+  apiKey: string,
   options: FetchOlabidListOptions = {}
 ): Promise<OlabidListResponse | null> {
+  if (!apiKey) {
+    console.error('OLABID_API_KEY is not configured');
+    return null;
+  }
+
   const {
     orderBy = '(EndTime:asc)',
     isPickupSelected = true,
@@ -314,7 +346,7 @@ export async function fetchOlabidList(
     categoryIds,
   } = options;
 
-  const warehouseIds = await resolveWarehouseIds(options.warehouseIds);
+  const warehouseIds = await resolveWarehouseIds(apiKey, options.warehouseIds);
   if (!warehouseIds) {
     console.warn('Olabid list: no warehouse IDs available');
     return null;
@@ -348,10 +380,10 @@ export async function fetchOlabidList(
     const response = await fetch(url.toString(), {
       method: 'POST',
       headers: {
-        ...OLABID_HEADERS,
+        ...buildOlabidHeaders(apiKey),
         'content-type': 'application/json',
       },
-      body: '{}', // Empty body as per the HTTP Toolkit capture
+      body: '{}',
       signal: AbortSignal.timeout(10000),
     });
 
@@ -364,7 +396,7 @@ export async function fetchOlabidList(
     const data = await response.json();
     return data as OlabidListResponse;
   } catch (error) {
-    console.error('Failed to fetch Olabid list:', error);
+    console.error(sanitizeError(error));
     return null;
   }
 }

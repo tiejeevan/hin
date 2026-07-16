@@ -4,4 +4,5 @@ export interface Env {
   MEDIA: R2Bucket;
   GOOGLE_CLIENT_ID?: string;
   TURNSTILE_SECRET_KEY?: string;
+  OLABID_API_KEY?: string;
 }

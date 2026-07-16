@@ -31,6 +31,44 @@ app.use('*', cors({
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
 
+// Response sanitization: Strip sensitive headers from all responses
+app.use('*', async (c, next) => {
+  await next();
+  
+  // Skip sanitization for WebSocket upgrades and other special responses
+  if (!c.res || c.res.status === 101 || c.res.webSocket) {
+    return;
+  }
+  
+  const sensitiveHeaders = [
+    'x-api-key',
+    'x-client-version',
+    'authorization',
+    'x-auth-token',
+    'cookie',
+    'set-cookie',
+  ];
+  
+  const headers = new Headers(c.res.headers);
+  let hasChanges = false;
+  
+  sensitiveHeaders.forEach(header => {
+    if (headers.has(header)) {
+      headers.delete(header);
+      hasChanges = true;
+    }
+  });
+  
+  // Only create a new Response if we actually removed headers
+  if (hasChanges) {
+    c.res = new Response(c.res.body, {
+      status: c.res.status,
+      statusText: c.res.statusText,
+      headers,
+    });
+  }
+});
+
 // Rewrite absolute media URLs in responses to match the current request's origin dynamically
 app.use('*', async (c, next) => {
   await next();

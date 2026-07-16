@@ -11,6 +11,7 @@
   "dependencies": {
     "@hin/types": "*",
     "browser-image-compression": "^2.0.2",
+    "disable-devtool": "^0.3.9",
     "lucide-react": "^0.395.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -21,9 +22,11 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.19",
+    "javascript-obfuscator": "^5.4.7",
     "postcss": "^8.4.38",
     "tailwindcss": "^4.0.0-alpha.18",
     "typescript": "^5.4.5",
-    "vite": "^5.2.11"
+    "vite": "^5.2.11",
+    "vite-plugin-javascript-obfuscator": "^3.1.0"
   }
 }

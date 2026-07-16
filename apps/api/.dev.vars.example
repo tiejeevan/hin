@@ -1,0 +1,9 @@
+# Local development environment variables for Cloudflare Workers
+# Copy this file to .dev.vars (already gitignored) and fill in your values
+
+# Olabid API Configuration
+# Get this key using HTTP Toolkit by intercepting Olabid app requests
+OLABID_API_KEY=1BAF2123-00D7-421E-B999-FB0B222D6577
+
+# Cloudflare Turnstile Configuration (optional for local dev)
+TURNSTILE_SECRET_KEY=
