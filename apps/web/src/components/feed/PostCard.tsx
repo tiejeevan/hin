@@ -6,6 +6,7 @@ import { buildCommentTree } from '../../utils/comments';
 import { CommentItem } from './CommentItem';
 import { PostContentText } from './PostContentText';
 import { LinkPreviewCard } from './LinkPreviewCard';
+import { getOlabidItemIdFromUrl } from '../../lib/appRoutes';
 import { ImageLightbox } from './ImageLightbox';
 import { PostMediaGallery } from './PostMediaGallery';
 import { PostPollBody } from './PostPollBody';
@@ -425,7 +426,16 @@ export function PostCard({
             )}
             {post.linkPreview && (
               <div onClick={e => e.stopPropagation()}>
-                <LinkPreviewCard preview={post.linkPreview} />
+                <LinkPreviewCard
+                  preview={post.linkPreview}
+                  onClick={e => {
+                    const itemId = getOlabidItemIdFromUrl(post.linkPreview!.url);
+                    if (itemId !== null && onOpenPost) {
+                      e.preventDefault();
+                      onOpenPost(post.id);
+                    }
+                  }}
+                />
               </div>
             )}
             {post.type === 'poll' && post.poll && (
@@ -483,7 +493,18 @@ export function PostCard({
               {reply.mediaUrls.length > 0 && (
                 <PostMediaGallery urls={reply.mediaUrls} onImageClick={() => {}} />
               )}
-              {reply.linkPreview && <LinkPreviewCard preview={reply.linkPreview} />}
+              {reply.linkPreview && (
+                <LinkPreviewCard
+                  preview={reply.linkPreview}
+                  onClick={e => {
+                    const itemId = getOlabidItemIdFromUrl(reply.linkPreview!.url);
+                    if (itemId !== null && onOpenPost) {
+                      e.preventDefault();
+                      onOpenPost(reply.id);
+                    }
+                  }}
+                />
+              )}
             </div>
           ))}
         </div>

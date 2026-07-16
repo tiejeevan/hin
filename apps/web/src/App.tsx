@@ -31,7 +31,7 @@ import { API_URL, WS_URL } from './config';
 import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode, FeedMode } from './types/ui';
 import type { CreatePostSubmitPayload } from './components/feed/CreatePostForm';
 import { mergePollFromBroadcast } from './utils/pollVisibility';
-import { parseLocation, syncUrl, postPermalinkUrl, profilePermalinkUrl, type AdminSection } from './lib/appRoutes';
+import { parseLocation, syncUrl, postPermalinkUrl, profilePermalinkUrl, type AdminSection, getOlabidItemIdFromPost } from './lib/appRoutes';
 import { randomId } from './lib/compressImage';
 import { AppShell } from './components/layout/AppShell';
 import { AppHeader } from './components/layout/AppHeader';
@@ -788,6 +788,11 @@ export default function App() {
       ]);
       if (postRes.ok) {
         const post = await postRes.json();
+        const olabidItemId = getOlabidItemIdFromPost(post);
+        if (olabidItemId !== null) {
+          openOlabidItem(olabidItemId, { replace: true });
+          return;
+        }
         setPostViewPost(post);
         setExpandedComments(prev => ({ ...prev, [postId]: true }));
         fetchComments(postId);
@@ -815,6 +820,17 @@ export default function App() {
     postId: number,
     opts?: { commentId?: number; replace?: boolean; skipUrlSync?: boolean },
   ) => {
+    const existingPost = posts.find(p => p.id === postId) ||
+                         profilePosts.find(p => p.id === postId) ||
+                         (postViewPost && postViewPost.id === postId ? postViewPost : null);
+    if (existingPost) {
+      const olabidItemId = getOlabidItemIdFromPost(existingPost);
+      if (olabidItemId !== null) {
+        openOlabidItem(olabidItemId, { replace: opts?.replace, skipUrlSync: opts?.skipUrlSync });
+        return;
+      }
+    }
+
     setIsSearchOpen(false);
     setActiveTab('post');
     setPostViewId(postId);

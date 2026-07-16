@@ -2,6 +2,65 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Early DevTools detection and protection in production
+      (function() {
+        const isLocal = window.location.hostname === 'localhost' || 
+                        window.location.hostname === '127.0.0.1' || 
+                        window.location.hostname.startsWith('192.168.');
+        if (isLocal) return;
+
+        // 1. Right click context menu allowed for native UX (Open in New Tab, copy, etc.)
+
+        // 2. Keyboard shortcuts disable
+        window.addEventListener('keydown', function(e) {
+          // F12
+          if (e.key === 'F12' || e.keyCode === 123) {
+            e.preventDefault();
+            return false;
+          }
+          // Ctrl+Shift+I / Cmd+Opt+I
+          if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'I' || e.key === 'i' || e.keyCode === 73)) {
+            e.preventDefault();
+            return false;
+          }
+          // Ctrl+Shift+J / Cmd+Opt+J
+          if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'J' || e.key === 'j' || e.keyCode === 74)) {
+            e.preventDefault();
+            return false;
+          }
+          // Ctrl+Shift+C / Cmd+Opt+C
+          if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'C' || e.key === 'c' || e.keyCode === 67)) {
+            e.preventDefault();
+            return false;
+          }
+          // Ctrl+U / Cmd+Opt+U
+          if ((e.ctrlKey || e.metaKey) && (e.key === 'U' || e.key === 'u' || e.keyCode === 85)) {
+            e.preventDefault();
+            return false;
+          }
+        });
+
+        // 3. Clear console on load
+        try {
+          console.clear();
+        } catch(e) {}
+
+        // 4. Time-based debugger check
+        setInterval(function() {
+          const start = performance.now();
+          debugger;
+          const end = performance.now();
+          if (end - start > 100) {
+            try {
+              sessionStorage.clear();
+              localStorage.clear();
+            } catch(e) {}
+            window.location.replace('about:blank');
+          }
+        }, 500);
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✨</text></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Hin - Social Media Platform</title>

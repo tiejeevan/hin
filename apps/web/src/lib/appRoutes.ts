@@ -115,3 +115,54 @@ export function profilePermalinkUrl(username: string): string {
 export function olabidItemPermalinkUrl(itemId: number): string {
   return `${window.location.origin}${olabidPath(itemId)}`;
 }
+
+export function getOlabidItemIdFromUrl(url: string): number | null {
+  try {
+    let urlObj: URL;
+    if (url.startsWith('/') || url.startsWith('olabid/')) {
+      urlObj = new URL(url, window.location.origin);
+    } else {
+      urlObj = new URL(url);
+    }
+
+    if (urlObj.hostname.includes('olabid.com')) {
+      const idParam = urlObj.searchParams.get('id');
+      if (idParam) {
+        const num = Number(idParam);
+        if (!isNaN(num)) return num;
+      }
+      const pathMatch = urlObj.pathname.match(/\/olabid\/(\d+)/);
+      if (pathMatch) {
+        return Number(pathMatch[1]);
+      }
+    }
+
+    if (urlObj.origin === window.location.origin) {
+      const pathMatch = urlObj.pathname.match(/^\/olabid\/(\d+)\/?$/);
+      if (pathMatch) {
+        return Number(pathMatch[1]);
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export function getOlabidItemIdFromPost(post: { content: string; linkPreview?: { url: string } | null }): number | null {
+  if (post.linkPreview?.url) {
+    const itemId = getOlabidItemIdFromUrl(post.linkPreview.url);
+    if (itemId !== null) return itemId;
+  }
+
+  const words = post.content.split(/\s+/);
+  for (const word of words) {
+    if (word.startsWith('http://') || word.startsWith('https://') || word.startsWith('/olabid/')) {
+      const itemId = getOlabidItemIdFromUrl(word);
+      if (itemId !== null) return itemId;
+    }
+  }
+
+  return null;
+}
+

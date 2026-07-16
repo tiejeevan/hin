@@ -1,8 +1,10 @@
 import { Link2, Gavel, ExternalLink } from 'lucide-react';
 import { LinkPreview } from '@hin/types';
+import { getOlabidItemIdFromUrl } from '../../lib/appRoutes';
 
 interface LinkPreviewCardProps {
   preview: LinkPreview;
+  onClick?: (e: React.MouseEvent) => void;
 }
 
 function getHostname(url: string): string {
@@ -22,14 +24,17 @@ function isOlabidLink(url: string): boolean {
   }
 }
 
-export function LinkPreviewCard({ preview }: LinkPreviewCardProps) {
+export function LinkPreviewCard({ preview, onClick }: LinkPreviewCardProps) {
   const isOlabid = isOlabidLink(preview.url);
+  const itemId = isOlabid ? getOlabidItemIdFromUrl(preview.url) : null;
+  const href = itemId !== null ? `/olabid/${itemId}` : preview.url;
   
   return (
     <a
-      href={preview.url}
+      href={href}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={onClick}
       className="block rounded-xl overflow-hidden border border-border-custom bg-bg-primary hover:border-indigo-500/50 transition-colors cursor-pointer group"
     >
       {preview.imageUrl && (

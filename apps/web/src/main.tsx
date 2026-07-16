@@ -7,10 +7,9 @@ import disableDevtool from 'disable-devtool';
 // Disable developer tools in production and reload page on detection
 if (import.meta.env.PROD) {
   disableDevtool({
-    disableMenu: false, // Enable standard right-click context menu
-    ondevtoolopen() {
-      window.location.reload();
-    },
+    url: 'about:blank',
+    disableMenu: false,
+    clearLog: true,
   });
 }
 

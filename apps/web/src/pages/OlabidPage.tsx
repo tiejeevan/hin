@@ -96,8 +96,8 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
 
-  // Filters — default Top Deals to match Olabid's home feed
-  const [section, setSection] = useState<SectionFilter>('topDeals');
+  // Filters — default All to match user request
+  const [section, setSection] = useState<SectionFilter>('');
   const [categoryId, setCategoryId] = useState<string>('');
   const [sortBy, setSortBy] = useState<string>('(EndTime:asc)');
   const [minPrice, setMinPrice] = useState<string>('');
@@ -207,9 +207,9 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
     setSearchQuery('');
     setActiveSearch('');
     setPage(1);
-    // Return to Top Deals home feed after clearing search
-    setSection('topDeals');
-    fetchItems(1, { search: '', section: 'topDeals' });
+    // Return to All section after clearing search
+    setSection('');
+    fetchItems(1, { search: '', section: '' });
   };
 
   const handleSectionChange = (next: SectionFilter) => {
@@ -247,7 +247,7 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
     setMinPrice('');
     setMaxPrice('');
     setCategoryId('');
-    setSection('topDeals');
+    setSection('');
     setSelectedWarehouseIds(ids);
     setPage(1);
     fetchItems(1, {
@@ -255,7 +255,7 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
       minPrice: '',
       maxPrice: '',
       categoryId: '',
-      section: 'topDeals',
+      section: '',
       warehouseIds: ids,
     });
   };
@@ -263,7 +263,7 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
   useEffect(() => {
     (async () => {
       const ids = await fetchMeta();
-      await fetchItems(1, { warehouseIds: ids, section: 'topDeals' });
+      await fetchItems(1, { warehouseIds: ids, section: '' });
     })();
   }, []);
 
@@ -600,7 +600,7 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
         )}
 
         {loading && items.length === 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
             {[...Array(20)].map((_, i) => (
               <div key={i} className="bg-bg-secondary rounded-xl overflow-hidden animate-pulse">
                 <div className="aspect-square bg-bg-tertiary" />
@@ -621,7 +621,7 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
         ) : (
           <>
             {/* Items Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 mb-8">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-8">
               {items.map((item) => {
                 const savings = calculateSavings(item.retailPrice, item.currentBidAmount);
                 const hasBids = item.currentBidAmount > 0;
