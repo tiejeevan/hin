@@ -9,7 +9,7 @@ const media = new Hono<{ Bindings: Env }>();
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
-const UPLOAD_TYPES = ['avatar', 'cover', 'post', 'badge', 'event_banner'] as const;
+const UPLOAD_TYPES = ['avatar', 'cover', 'post', 'badge', 'event_banner', 'chat'] as const;
 type UploadType = (typeof UPLOAD_TYPES)[number];
 
 function folderForType(type: UploadType, userId: number): string {
@@ -17,6 +17,7 @@ function folderForType(type: UploadType, userId: number): string {
   if (type === 'cover') return `covers/${userId}`;
   if (type === 'badge') return `badges/${userId}`;
   if (type === 'event_banner') return `events/${userId}`;
+  if (type === 'chat') return `chat/${userId}`;
   return `posts/${userId}`;
 }
 

@@ -35,6 +35,7 @@ interface PostCardProps {
   onSignInRequired?: () => void;
   onCopyPermalink?: () => void;
   onOpenPost?: (postId: number) => void;
+  onOpenOlabidItem?: (itemId: number) => void;
   onToggleBookmark?: () => void;
   onShare?: () => void;
   onToggleLike: (postId: number) => void;
@@ -93,6 +94,7 @@ export function PostCard({
   onSignInRequired,
   onCopyPermalink,
   onOpenPost,
+  onOpenOlabidItem,
   onToggleBookmark,
   onShare,
   onToggleLike,
@@ -428,11 +430,12 @@ export function PostCard({
               <div onClick={e => e.stopPropagation()}>
                 <LinkPreviewCard
                   preview={post.linkPreview}
+                  inAppOlabidLinks={!!onOpenOlabidItem}
                   onClick={e => {
                     const itemId = getOlabidItemIdFromUrl(post.linkPreview!.url);
-                    if (itemId !== null && onOpenPost) {
+                    if (itemId !== null && onOpenOlabidItem) {
                       e.preventDefault();
-                      onOpenPost(post.id);
+                      onOpenOlabidItem(itemId);
                     }
                   }}
                 />
@@ -496,11 +499,12 @@ export function PostCard({
               {reply.linkPreview && (
                 <LinkPreviewCard
                   preview={reply.linkPreview}
+                  inAppOlabidLinks={!!onOpenOlabidItem}
                   onClick={e => {
                     const itemId = getOlabidItemIdFromUrl(reply.linkPreview!.url);
-                    if (itemId !== null && onOpenPost) {
+                    if (itemId !== null && onOpenOlabidItem) {
                       e.preventDefault();
-                      onOpenPost(reply.id);
+                      onOpenOlabidItem(itemId);
                     }
                   }}
                 />

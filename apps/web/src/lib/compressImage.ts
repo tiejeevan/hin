@@ -1,6 +1,7 @@
 import imageCompression from 'browser-image-compression';
+import { beginLoading, endLoading } from './globalLoading';
 
-export type ImageCompressKind = 'avatar' | 'cover' | 'post' | 'badge' | 'event_banner';
+export type ImageCompressKind = 'avatar' | 'cover' | 'post' | 'badge' | 'event_banner' | 'chat';
 
 /**
  * `crypto.randomUUID()` only exists in secure contexts (HTTPS or localhost).
@@ -31,6 +32,7 @@ const PRESETS: Record<ImageCompressKind, { maxWidthOrHeight: number; maxSizeMB: 
   post: { maxWidthOrHeight: 1920, maxSizeMB: 0.5, initialQuality: 0.75 },
   badge: { maxWidthOrHeight: 256, maxSizeMB: 0.15, initialQuality: 0.8 },
   event_banner: { maxWidthOrHeight: 1200, maxSizeMB: 0.5, initialQuality: 0.85 },
+  chat: { maxWidthOrHeight: 1600, maxSizeMB: 0.45, initialQuality: 0.75 },
 };
 
 /**
@@ -39,30 +41,34 @@ const PRESETS: Record<ImageCompressKind, { maxWidthOrHeight: number; maxSizeMB: 
  */
 export async function compressImage(file: File, kind: ImageCompressKind): Promise<File> {
   const preset = PRESETS[kind];
-
+  beginLoading();
   try {
-    const compressed = await imageCompression(file, {
-      maxWidthOrHeight: preset.maxWidthOrHeight,
-      maxSizeMB: preset.maxSizeMB,
-      initialQuality: preset.initialQuality,
-      useWebWorker: true,
-      fileType: 'image/webp',
-    });
+    try {
+      const compressed = await imageCompression(file, {
+        maxWidthOrHeight: preset.maxWidthOrHeight,
+        maxSizeMB: preset.maxSizeMB,
+        initialQuality: preset.initialQuality,
+        useWebWorker: true,
+        fileType: 'image/webp',
+      });
 
-    const name = file.name.replace(/\.[^.]+$/, '') + '.webp';
-    return new File([compressed], name, { type: 'image/webp', lastModified: Date.now() });
-  } catch {
-    // Fallback: JPEG via canvas path in the library
-    const compressed = await imageCompression(file, {
-      maxWidthOrHeight: preset.maxWidthOrHeight,
-      maxSizeMB: preset.maxSizeMB,
-      initialQuality: preset.initialQuality,
-      useWebWorker: true,
-      fileType: 'image/jpeg',
-    });
+      const name = file.name.replace(/\.[^.]+$/, '') + '.webp';
+      return new File([compressed], name, { type: 'image/webp', lastModified: Date.now() });
+    } catch {
+      // Fallback: JPEG via canvas path in the library
+      const compressed = await imageCompression(file, {
+        maxWidthOrHeight: preset.maxWidthOrHeight,
+        maxSizeMB: preset.maxSizeMB,
+        initialQuality: preset.initialQuality,
+        useWebWorker: true,
+        fileType: 'image/jpeg',
+      });
 
-    const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
-    return new File([compressed], name, { type: 'image/jpeg', lastModified: Date.now() });
+      const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+      return new File([compressed], name, { type: 'image/jpeg', lastModified: Date.now() });
+    }
+  } finally {
+    endLoading();
   }
 }
 
@@ -91,35 +97,45 @@ export async function uploadCompressedImage(
   token: string,
   apiUrl: string,
 ): Promise<{ id: number; url: string; sizeBytes: number }> {
-  const compressed = await compressImage(file, kind);
-  const formData = new FormData();
-  formData.append('file', compressed);
-  formData.append('type', kind);
-  return postUpload(formData, token, apiUrl);
+  beginLoading();
+  try {
+    const compressed = await compressImage(file, kind);
+    const formData = new FormData();
+    formData.append('file', compressed);
+    formData.append('type', kind);
+    return await postUpload(formData, token, apiUrl);
+  } finally {
+    endLoading();
+  }
 }
 
 /** Tiny avatar for feed, header, and message list (~1–3 KB WebP at 48px). */
 export async function compressAvatarThumbnail(file: File): Promise<File> {
+  beginLoading();
   try {
-    const compressed = await imageCompression(file, {
-      maxWidthOrHeight: 48,
-      maxSizeMB: 0.003,
-      initialQuality: 0.55,
-      useWebWorker: true,
-      fileType: 'image/webp',
-    });
-    const name = file.name.replace(/\.[^.]+$/, '') + '_thumb.webp';
-    return new File([compressed], name, { type: 'image/webp', lastModified: Date.now() });
-  } catch {
-    const compressed = await imageCompression(file, {
-      maxWidthOrHeight: 48,
-      maxSizeMB: 0.003,
-      initialQuality: 0.55,
-      useWebWorker: true,
-      fileType: 'image/jpeg',
-    });
-    const name = file.name.replace(/\.[^.]+$/, '') + '_thumb.jpg';
-    return new File([compressed], name, { type: 'image/jpeg', lastModified: Date.now() });
+    try {
+      const compressed = await imageCompression(file, {
+        maxWidthOrHeight: 48,
+        maxSizeMB: 0.003,
+        initialQuality: 0.55,
+        useWebWorker: true,
+        fileType: 'image/webp',
+      });
+      const name = file.name.replace(/\.[^.]+$/, '') + '_thumb.webp';
+      return new File([compressed], name, { type: 'image/webp', lastModified: Date.now() });
+    } catch {
+      const compressed = await imageCompression(file, {
+        maxWidthOrHeight: 48,
+        maxSizeMB: 0.003,
+        initialQuality: 0.55,
+        useWebWorker: true,
+        fileType: 'image/jpeg',
+      });
+      const name = file.name.replace(/\.[^.]+$/, '') + '_thumb.jpg';
+      return new File([compressed], name, { type: 'image/jpeg', lastModified: Date.now() });
+    }
+  } finally {
+    endLoading();
   }
 }
 
@@ -129,29 +145,34 @@ export async function uploadAvatarWithThumbnail(
   token: string,
   apiUrl: string,
 ): Promise<{ id: number; url: string; sizeBytes: number }> {
-  const [fullFile, thumbFile] = await Promise.all([
-    compressImage(file, 'avatar'),
-    compressAvatarThumbnail(file),
-  ]);
-  const baseName = randomId();
-
-  const fullForm = new FormData();
-  fullForm.append('file', fullFile);
-  fullForm.append('type', 'avatar');
-  fullForm.append('baseName', baseName);
-
-  const fullResult = await postUpload(fullForm, token, apiUrl);
-
+  beginLoading();
   try {
-    const thumbForm = new FormData();
-    thumbForm.append('file', thumbFile);
-    thumbForm.append('type', 'avatar');
-    thumbForm.append('baseName', baseName);
-    thumbForm.append('variant', 'thumb');
-    await postUpload(thumbForm, token, apiUrl);
-  } catch {
-    // Full avatar is enough; small views fall back to the full URL.
-  }
+    const [fullFile, thumbFile] = await Promise.all([
+      compressImage(file, 'avatar'),
+      compressAvatarThumbnail(file),
+    ]);
+    const baseName = randomId();
 
-  return fullResult;
+    const fullForm = new FormData();
+    fullForm.append('file', fullFile);
+    fullForm.append('type', 'avatar');
+    fullForm.append('baseName', baseName);
+
+    const fullResult = await postUpload(fullForm, token, apiUrl);
+
+    try {
+      const thumbForm = new FormData();
+      thumbForm.append('file', thumbFile);
+      thumbForm.append('type', 'avatar');
+      thumbForm.append('baseName', baseName);
+      thumbForm.append('variant', 'thumb');
+      await postUpload(thumbForm, token, apiUrl);
+    } catch {
+      // Full avatar is enough; small views fall back to the full URL.
+    }
+
+    return fullResult;
+  } finally {
+    endLoading();
+  }
 }

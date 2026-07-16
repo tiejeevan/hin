@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { User as UserType } from '@hin/types';
 import { API_URL } from '../config';
+import { SILENT_LOADING_HEADER, SILENT_LOADING_VALUE } from '../lib/globalLoading';
 
 interface UseMentionAutocompleteProps {
   value: string;
@@ -28,6 +29,7 @@ export function useMentionAutocomplete({ value, onChange, token }: UseMentionAut
         const res = await fetch(`${API_URL}/api/users/search?q=${encodeURIComponent(searchQuery)}`, {
           headers: {
             Authorization: `Bearer ${token}`,
+            [SILENT_LOADING_HEADER]: SILENT_LOADING_VALUE,
           },
         });
         if (res.ok) {

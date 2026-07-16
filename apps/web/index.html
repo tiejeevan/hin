@@ -66,7 +66,33 @@
     <title>Hin - Social Media Platform</title>
   </head>
   <body class="bg-slate-950 text-slate-100 antialiased min-h-screen">
-    <div id="root"></div>
+    <style>
+      #hin-boot-spinner {
+        position: fixed;
+        inset: 0;
+        z-index: 200;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(2, 6, 23, 0.7);
+        pointer-events: all;
+      }
+      #hin-boot-spinner::after {
+        content: '';
+        width: 2.5rem;
+        height: 2.5rem;
+        border: 3px solid rgba(99, 102, 241, 0.25);
+        border-top-color: rgb(99, 102, 241);
+        border-radius: 50%;
+        animation: hin-boot-spin 0.7s linear infinite;
+      }
+      @keyframes hin-boot-spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
+    <div id="root">
+      <div id="hin-boot-spinner" role="status" aria-busy="true" aria-label="Loading"></div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

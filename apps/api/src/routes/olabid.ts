@@ -155,6 +155,41 @@ olabid.get('/items', async (c) => {
 });
 
 /**
+ * GET /api/olabid/items/bookmark-status?ids=1,2,3
+ * Returns a map of itemId → true for items the current user has bookmarked.
+ * Registered before /items/:id so "bookmark-status" isn't swallowed by :id.
+ */
+olabid.get('/items/bookmark-status', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return noStoreJson(c, { error: 'Unauthorized' }, 401);
+
+  const idsParam = c.req.query('ids') || '';
+  const ids = idsParam
+    .split(',')
+    .map(s => parseInt(s.trim(), 10))
+    .filter(n => Number.isFinite(n));
+
+  if (ids.length === 0) return noStoreJson(c, {});
+
+  const db = drizzle(c.env.DB, { schema });
+  const rows = await db
+    .select({ olabidItemId: schema.itemBookmarks.olabidItemId })
+    .from(schema.itemBookmarks)
+    .where(
+      and(
+        eq(schema.itemBookmarks.userId, authUser.id),
+        isNull(schema.itemBookmarks.deletedAt),
+        inArray(schema.itemBookmarks.olabidItemId, ids),
+      ),
+    )
+    .all();
+
+  const status: Record<number, boolean> = {};
+  for (const row of rows) status[row.olabidItemId] = true;
+  return noStoreJson(c, status);
+});
+
+/**
  * GET /api/olabid/items/comment-counts?ids=1,2,3
  * Batch discussion-comment counts for listing cards. Registered before
  * /items/:id so "comment-counts" isn't swallowed by the :id param route.
@@ -174,6 +209,71 @@ olabid.get('/items/comment-counts', async (c) => {
 });
 
 /**
+ * POST /api/olabid/items/:id/bookmark
+ * Toggle bookmark / watchlist for an auction item (Hin-side).
+ */
+olabid.post('/items/:id/bookmark', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return noStoreJson(c, { error: 'Unauthorized' }, 401);
+
+  const olabidItemId = parseInt(c.req.param('id'), 10);
+  if (!Number.isFinite(olabidItemId)) return noStoreJson(c, { error: 'Invalid item ID' }, 400);
+
+  const db = drizzle(c.env.DB, { schema });
+  await ensureOlabidItemStub(db, olabidItemId);
+
+  const existing = await db
+    .select()
+    .from(schema.itemBookmarks)
+    .where(
+      and(
+        eq(schema.itemBookmarks.olabidItemId, olabidItemId),
+        eq(schema.itemBookmarks.userId, authUser.id),
+      ),
+    )
+    .get();
+
+  let bookmarked = false;
+  if (existing) {
+    if (!existing.deletedAt) {
+      await db
+        .update(schema.itemBookmarks)
+        .set({ deletedAt: new Date().toISOString() })
+        .where(
+          and(
+            eq(schema.itemBookmarks.olabidItemId, olabidItemId),
+            eq(schema.itemBookmarks.userId, authUser.id),
+          ),
+        )
+        .run();
+    } else {
+      await db
+        .update(schema.itemBookmarks)
+        .set({ deletedAt: null })
+        .where(
+          and(
+            eq(schema.itemBookmarks.olabidItemId, olabidItemId),
+            eq(schema.itemBookmarks.userId, authUser.id),
+          ),
+        )
+        .run();
+      bookmarked = true;
+    }
+  } else {
+    await db
+      .insert(schema.itemBookmarks)
+      .values({
+        olabidItemId,
+        userId: authUser.id,
+      })
+      .run();
+    bookmarked = true;
+  }
+
+  return noStoreJson(c, { bookmarked });
+});
+
+/**
  * GET /api/olabid/items/:id
  * Fetch single item details. Falls back to the last saved local snapshot when
  * the live Olabid API can't be reached (auction ended, key issues, etc.) so
@@ -188,18 +288,35 @@ olabid.get('/items/:id', async (c) => {
   }
 
   const db = drizzle(c.env.DB, { schema });
+  const authUser = await getAuthUser(c);
   const item = apiKey ? await fetchOlabidItem(itemId, apiKey) : null;
+
+  let hasBookmarked = false;
+  if (authUser) {
+    const bookmark = await db
+      .select({ olabidItemId: schema.itemBookmarks.olabidItemId })
+      .from(schema.itemBookmarks)
+      .where(
+        and(
+          eq(schema.itemBookmarks.userId, authUser.id),
+          eq(schema.itemBookmarks.olabidItemId, parseInt(itemId, 10)),
+          isNull(schema.itemBookmarks.deletedAt),
+        ),
+      )
+      .get();
+    hasBookmarked = !!bookmark;
+  }
 
   if (item) {
     try {
       await upsertOlabidItemSnapshot(db, item);
     } catch (e) {}
-    return noStoreJson(c, { ...item, source: 'live' });
+    return noStoreJson(c, { ...item, source: 'live', hasBookmarked });
   }
 
   const snapshot = await getOlabidItemSnapshot(db, parseInt(itemId, 10));
   if (snapshot) {
-    return noStoreJson(c, { ...snapshot, id: snapshot.externalId, source: 'snapshot' });
+    return noStoreJson(c, { ...snapshot, id: snapshot.externalId, source: 'snapshot', hasBookmarked });
   }
 
   return noStoreJson(c, { error: 'Item not found' }, 404);

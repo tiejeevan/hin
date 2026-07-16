@@ -3,6 +3,7 @@ import { MessageCircle, Search, X } from 'lucide-react';
 import { ChatThread, User as UserType } from '@hin/types';
 import { ChatRecipient } from '../../types/ui';
 import { API_URL } from '../../config';
+import { SILENT_LOADING_HEADER, SILENT_LOADING_VALUE } from '../../lib/globalLoading';
 import { UserAvatar } from '../profile/UserAvatar';
 
 interface ShareToChatModalProps {
@@ -55,7 +56,10 @@ export function ShareToChatModal({
       setSearching(true);
       try {
         const res = await fetch(`${API_URL}/api/users/search?q=${encodeURIComponent(query.trim())}`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            [SILENT_LOADING_HEADER]: SILENT_LOADING_VALUE,
+          },
         });
         if (res.ok) {
           setSearchResults(await res.json());

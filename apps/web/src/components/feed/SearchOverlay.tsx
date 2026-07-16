@@ -11,6 +11,7 @@ interface SearchOverlayProps {
   currentUser: User | null;
   onClose: () => void;
   onOpenPost: (postId: number) => void;
+  onOpenOlabidItem?: (itemId: number) => void;
   onViewProfile: (userIdOrUsername: number | string) => void;
   onViewHashtag: (tag: string) => void;
 
@@ -76,6 +77,7 @@ export function SearchOverlay({
   currentUser,
   onClose,
   onOpenPost,
+  onOpenOlabidItem,
   onViewProfile,
   onViewHashtag,
   commentsList,
@@ -265,6 +267,7 @@ export function SearchOverlay({
       onClosePoll={onClosePoll}
       onCopyPermalink={onCopyPermalink ? () => onCopyPermalink(post.id) : undefined}
       onOpenPost={onOpenPost}
+      onOpenOlabidItem={onOpenOlabidItem}
       onToggleBookmark={onToggleBookmark ? () => onToggleBookmark(post.id) : undefined}
       onShare={onShare ? () => onShare(post.id) : undefined}
       onReport={onReportPost}

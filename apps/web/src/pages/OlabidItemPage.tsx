@@ -14,15 +14,17 @@ import {
   ChevronLeft,
   ChevronRight,
   ShoppingBag,
-  Share2,
   Archive,
+  Bookmark,
 } from 'lucide-react';
-import { ChatThread, ItemComment, User as UserType } from '@hin/types';
+import { ChatThread, ItemComment, LinkPreview, User as UserType } from '@hin/types';
 import { ChatRecipient, ItemCommentNode } from '../types/ui';
 import { API_URL } from '../config';
 import { olabidItemPermalinkUrl } from '../lib/appRoutes';
+import { buildOlabidLinkPreview } from '../lib/olabidPreview';
 import { ItemDiscussionSection } from '../components/olabid/ItemDiscussionSection';
 import { ShareToChatModal } from '../components/olabid/ShareToChatModal';
+import { ItemActionsMenu } from '../components/olabid/ItemActionsMenu';
 
 interface OlabidItemDetails {
   id: number;
@@ -57,6 +59,8 @@ interface OlabidItemDetails {
   source?: 'live' | 'snapshot';
   imageUrl?: string | null;
   lastSyncedAt?: string;
+  /** Hin-side watchlist bookmark for the current user. */
+  hasBookmarked?: boolean;
 }
 
 interface OlabidItemPageProps {
@@ -85,7 +89,8 @@ interface OlabidItemPageProps {
   onViewProfile: (userIdOrUsername: number | string) => void;
   onViewHashtag?: (tag: string) => void;
   onSignInRequired?: () => void;
-  onShareToChat: (recipient: ChatRecipient, prefillText: string) => void;
+  onShareToChat: (recipient: ChatRecipient, prefillText: string, seedPreview?: LinkPreview | null) => void;
+  onPostItem: (permalink: string, seedPreview: LinkPreview) => void;
 }
 
 function formatTimeRemaining(ms: number): string {
@@ -131,6 +136,7 @@ export function OlabidItemPage({
   onViewHashtag,
   onSignInRequired,
   onShareToChat,
+  onPostItem,
 }: OlabidItemPageProps) {
   const [item, setItem] = useState<OlabidItemDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -139,6 +145,7 @@ export function OlabidItemPage({
   const [copied, setCopied] = useState(false);
   const [remainingMs, setRemainingMs] = useState(0);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [hasBookmarked, setHasBookmarked] = useState(false);
 
   const fetchItem = async () => {
     setLoading(true);
@@ -146,6 +153,7 @@ export function OlabidItemPage({
     try {
       const response = await fetch(`${API_URL}/api/olabid/items/${itemId}`, {
         cache: 'no-store',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
       if (response.status === 404) {
         throw new Error('Item not found');
@@ -155,6 +163,7 @@ export function OlabidItemPage({
       }
       const data: OlabidItemDetails = await response.json();
       setItem(data);
+      setHasBookmarked(!!data.hasBookmarked);
       setRemainingMs(data.auctionFinishesInMs ?? 0);
       setImageIndex(0);
     } catch (err) {
@@ -192,6 +201,45 @@ export function OlabidItemPage({
     window.open(`https://link.olabid.com/item-details?id=${itemId}`, '_blank');
   };
 
+  const requireAuth = (action: () => void) => {
+    if (!currentUser) {
+      onSignInRequired?.();
+      return;
+    }
+    action();
+  };
+
+  const toggleBookmark = async () => {
+    if (!currentUser || !token) {
+      onSignInRequired?.();
+      return;
+    }
+    const prev = hasBookmarked;
+    setHasBookmarked(!prev);
+    try {
+      const res = await fetch(`${API_URL}/api/olabid/items/${itemId}/bookmark`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setHasBookmarked(!!data.bookmarked);
+      } else {
+        setHasBookmarked(prev);
+      }
+    } catch {
+      setHasBookmarked(prev);
+    }
+  };
+
+  const handlePostIt = () => {
+    requireAuth(() => {
+      if (!item) return;
+      const preview = buildOlabidLinkPreview(item);
+      onPostItem(olabidItemPermalinkUrl(itemId), preview);
+    });
+  };
+
   const isSnapshot = item?.source === 'snapshot';
   const currentBid = item?.currentBidAmount ?? 0;
   const retailPrice = item?.retailPrice ?? 0;
@@ -216,17 +264,24 @@ export function OlabidItemPage({
             <ArrowLeft className="h-5 w-5" />
             <span className="font-medium">Back to auctions</span>
           </button>
-          <div className="flex items-center gap-2">
-            {currentUser && (
-              <button
-                type="button"
-                onClick={() => setShowShareModal(true)}
-                className="p-2.5 rounded-xl hover:bg-bg-tertiary text-text-secondary hover:text-text-primary transition-colors"
-                title="Share to chat"
-              >
-                <Share2 className="h-5 w-5" />
-              </button>
-            )}
+          <div className="flex items-center gap-1 sm:gap-2">
+            <button
+              type="button"
+              onClick={toggleBookmark}
+              className={`p-2.5 rounded-xl transition-colors ${
+                hasBookmarked
+                  ? 'text-amber-500 hover:bg-amber-500/10'
+                  : 'text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
+              }`}
+              title={hasBookmarked ? 'Remove from watchlist' : 'Add to watchlist'}
+              aria-label={hasBookmarked ? 'Remove from watchlist' : 'Add to watchlist'}
+            >
+              <Bookmark className={`h-5 w-5 ${hasBookmarked ? 'fill-current' : ''}`} />
+            </button>
+            <ItemActionsMenu
+              onSendToChat={() => requireAuth(() => setShowShareModal(true))}
+              onPostIt={handlePostIt}
+            />
             <button
               type="button"
               onClick={copyPermalink}
@@ -506,7 +561,7 @@ export function OlabidItemPage({
           onClose={() => setShowShareModal(false)}
           onSelect={(recipient, prefillText) => {
             setShowShareModal(false);
-            onShareToChat(recipient, prefillText);
+            onShareToChat(recipient, prefillText, buildOlabidLinkPreview(item));
           }}
         />
       )}

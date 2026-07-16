@@ -262,6 +262,18 @@ export const itemCommentLikes = sqliteTable('item_comment_likes', {
   deletedAtIdx: index('item_comment_likes_deleted_at_idx').on(table.deletedAt),
 }));
 
+/** Per-user watchlist / bookmark for Olabid auction items (Hin-side, not Olabid's own watchlist). */
+export const itemBookmarks = sqliteTable('item_bookmarks', {
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  olabidItemId: integer('olabid_item_id').notNull().references(() => olabidItems.externalId, { onDelete: 'cascade' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text('deleted_at'),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.olabidItemId] }),
+  olabidItemIdIdx: index('item_bookmarks_olabid_item_id_idx').on(table.olabidItemId),
+  deletedAtIdx: index('item_bookmarks_deleted_at_idx').on(table.deletedAt),
+}));
+
 export const userFollows = sqliteTable('user_follows', {
   followerId: integer('follower_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   followingId: integer('following_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -359,6 +371,10 @@ export const messages = sqliteTable('messages', {
   deletedAt: text('deleted_at'), // Soft delete
   /** First URL's cached Open Graph preview, if any (only one preview per message). */
   linkPreviewId: integer('link_preview_id').references(() => linkPreviews.id, { onDelete: 'set null' }),
+  /** Optional single image attachment (R2 URL). */
+  mediaUrl: text('media_url'),
+  /** MIME type for mediaUrl, e.g. image/jpeg | image/png | image/webp. */
+  mediaType: text('media_type'),
 }, (table) => ({
   senderIdIdx: index('messages_sender_id_idx').on(table.senderId),
   receiverIdIdx: index('messages_receiver_id_idx').on(table.receiverId),

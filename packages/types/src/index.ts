@@ -294,6 +294,8 @@ export interface Message {
   read: boolean;
   deletedAt?: string | null;
   linkPreview?: LinkPreview | null;
+  mediaUrl?: string | null;
+  mediaType?: string | null;
 }
 
 /** Discussion comment on an Olabid item, mirrors Comment but keyed by the external Olabid item id. */
@@ -479,7 +481,11 @@ export const CreateItemCommentSchema = z.object({
 });
 
 export const CreateMessageSchema = z.object({
-  content: z.string().min(1, 'Message cannot be empty').max(1000, 'Message is too long'),
+  content: z.string().max(1000, 'Message is too long').optional().default(''),
+  mediaUrl: z.string().url().optional(),
+  mediaType: z.enum(['image/jpeg', 'image/png', 'image/webp']).optional(),
+}).refine(data => !!(data.content?.trim() || data.mediaUrl), {
+  message: 'Message cannot be empty',
 });
 
 export const RegisterSchema = z.object({
@@ -586,7 +592,16 @@ export function shouldShowChatIcon(
 export type ClientMessage =
   | { type: 'join'; payload: { token: string } }
   | { type: 'active_chat'; payload: { recipientId: number | null } }
-  | { type: 'send_message'; payload: { receiverId: number; content: string } }
+  | {
+      type: 'send_message';
+      payload: {
+        receiverId: number;
+        content: string;
+        suppressLinkPreview?: boolean;
+        mediaUrl?: string;
+        mediaType?: string;
+      };
+    }
   | { type: 'typing'; payload: { receiverId: number; isTyping: boolean } };
 
 export type ServerMessage =

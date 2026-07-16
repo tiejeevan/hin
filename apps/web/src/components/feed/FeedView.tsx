@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { Loader2 } from 'lucide-react';
-import { Post, Comment, User as UserType, SystemSettings } from '@hin/types';
+import { Post, Comment, User as UserType, SystemSettings, LinkPreview } from '@hin/types';
 import { CommentNode, FeedMode } from '../../types/ui';
 import { CreatePostForm } from './CreatePostForm';
 import type { CreatePostSubmitPayload } from './CreatePostForm';
@@ -14,6 +14,7 @@ interface FeedViewProps {
   currentUser: UserType;
   showNewPostForm: boolean;
   newPostContent: string;
+  postSeedPreview?: LinkPreview | null;
   token: string;
   newlyCreatedPostId: number | null;
   expandedComments: Record<number, boolean>;
@@ -57,6 +58,7 @@ interface FeedViewProps {
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
   onOpenPost: (postId: number) => void;
+  onOpenOlabidItem?: (itemId: number) => void;
   onReportPost?: (postId: number) => void;
   onReportComment?: (commentId: number) => void;
   onPinPost?: (postId: number) => void;
@@ -77,6 +79,7 @@ export function FeedView({
   currentUser,
   showNewPostForm,
   newPostContent,
+  postSeedPreview = null,
   token,
   newlyCreatedPostId,
   expandedComments,
@@ -120,6 +123,7 @@ export function FeedView({
   onRetractPollVote,
   onClosePoll,
   onOpenPost,
+  onOpenOlabidItem,
   onReportPost,
   onReportComment,
   onPinPost,
@@ -185,6 +189,7 @@ export function FeedView({
           content={newPostContent}
           token={token}
           postLimits={postLimits}
+          seedPreview={postSeedPreview}
           onContentChange={onNewPostContentChange}
           onSubmit={onCreatePost}
           onClose={onCloseCreatePost}
@@ -244,6 +249,7 @@ export function FeedView({
                 onRetractPollVote={onRetractPollVote}
                 onClosePoll={onClosePoll}
                 onOpenPost={onOpenPost}
+                onOpenOlabidItem={onOpenOlabidItem}
                 onReport={onReportPost}
                 onReportComment={onReportComment}
                 onPinPost={onPinPost}

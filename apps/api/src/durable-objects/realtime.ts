@@ -244,7 +244,60 @@ export class RealtimeDO implements DurableObject {
       const session = this.sessions.get(ws);
       if (!session) return;
 
-      const { receiverId, content } = message.payload;
+      const {
+        receiverId,
+        content: rawContent,
+        suppressLinkPreview,
+        mediaUrl: rawMediaUrl,
+        mediaType: rawMediaType,
+      } = message.payload as {
+        receiverId: number;
+        content?: string;
+        suppressLinkPreview?: boolean;
+        mediaUrl?: string;
+        mediaType?: string;
+      };
+
+      const content = typeof rawContent === 'string' ? rawContent.trim() : '';
+      const mediaUrl = typeof rawMediaUrl === 'string' && rawMediaUrl.trim() ? rawMediaUrl.trim() : null;
+      const allowedMediaTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+      const mediaType =
+        typeof rawMediaType === 'string' && allowedMediaTypes.has(rawMediaType) ? rawMediaType : null;
+
+      if (!content && !mediaUrl) {
+        try {
+          ws.send(JSON.stringify({ type: 'error', payload: { message: 'Message cannot be empty' } }));
+        } catch (e) {}
+        return;
+      }
+      if (content.length > 1000) {
+        try {
+          ws.send(JSON.stringify({ type: 'error', payload: { message: 'Message is too long' } }));
+        } catch (e) {}
+        return;
+      }
+
+      let resolvedMediaType: string | null = null;
+      if (mediaUrl) {
+        const owned = await db
+          .select({ id: schema.mediaUploads.id, mimeType: schema.mediaUploads.mimeType })
+          .from(schema.mediaUploads)
+          .where(
+            and(
+              eq(schema.mediaUploads.url, mediaUrl),
+              eq(schema.mediaUploads.userId, session.userId),
+              eq(schema.mediaUploads.type, 'chat'),
+            ),
+          )
+          .get();
+        if (!owned) {
+          try {
+            ws.send(JSON.stringify({ type: 'error', payload: { message: 'Invalid image attachment' } }));
+          } catch (e) {}
+          return;
+        }
+        resolvedMediaType = mediaType || owned.mimeType || 'image/jpeg';
+      }
 
       if (await isBlocked(db, session.userId, receiverId)) {
         try {
@@ -262,7 +315,7 @@ export class RealtimeDO implements DurableObject {
         }
       }
 
-      const firstUrl = parseFirstUrl(content);
+      const firstUrl = !suppressLinkPreview && content ? parseFirstUrl(content) : null;
       const linkPreviewId = firstUrl
         ? await getOrFetchLinkPreview(db, firstUrl, { olabidApiKey: this.env.OLABID_API_KEY })
         : null;
@@ -270,9 +323,11 @@ export class RealtimeDO implements DurableObject {
       const [inserted] = await db.insert(schema.messages).values({
         senderId: session.userId,
         receiverId,
-        content,
+        content: content || '',
         read: receiverIsViewingChat ? 1 : 0,
         linkPreviewId,
+        mediaUrl,
+        mediaType: resolvedMediaType,
       }).returning();
 
       const receiverUser = await db.select().from(schema.users).where(eq(schema.users.id, receiverId)).get();
@@ -286,12 +341,14 @@ export class RealtimeDO implements DurableObject {
         senderUsername: session.username,
         receiverId,
         receiverUsername: receiverUser?.username || 'Unknown',
-        content,
+        content: inserted.content,
         createdAt: inserted.createdAt,
         read: inserted.read === 1,
         linkPreview: linkPreviewRow
           ? { url: linkPreviewRow.url, title: linkPreviewRow.title, description: linkPreviewRow.description, imageUrl: linkPreviewRow.imageUrl, siteName: linkPreviewRow.siteName }
           : null,
+        mediaUrl: inserted.mediaUrl,
+        mediaType: inserted.mediaType,
       };
 
       try {

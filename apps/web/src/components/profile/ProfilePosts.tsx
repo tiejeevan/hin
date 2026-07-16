@@ -38,6 +38,7 @@ interface ProfilePostsProps {
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
   onOpenPost: (postId: number) => void;
+  onOpenOlabidItem?: (itemId: number) => void;
   onSignInRequired?: () => void;
   onReportPost?: (postId: number) => void;
   onReportComment?: (commentId: number) => void;
@@ -88,6 +89,7 @@ export function ProfilePosts({
   onRetractPollVote,
   onClosePoll,
   onOpenPost,
+  onOpenOlabidItem,
   onSignInRequired,
   onReportPost,
   onReportComment,
@@ -145,6 +147,7 @@ export function ProfilePosts({
       onRetractPollVote={onRetractPollVote}
       onClosePoll={onClosePoll}
       onOpenPost={onOpenPost}
+      onOpenOlabidItem={onOpenOlabidItem}
       onSignInRequired={onSignInRequired}
       onReport={onReportPost}
       onReportComment={onReportComment}

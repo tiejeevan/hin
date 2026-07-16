@@ -106,6 +106,8 @@ messages.get('/:otherUserId', async (c) => {
       read: schema.messages.read,
       createdAt: schema.messages.createdAt,
       linkPreviewId: schema.messages.linkPreviewId,
+      mediaUrl: schema.messages.mediaUrl,
+      mediaType: schema.messages.mediaType,
     })
     .from(schema.messages)
     .where(
@@ -143,6 +145,8 @@ messages.get('/:otherUserId', async (c) => {
         linkPreview: preview
           ? { url: preview.url, title: preview.title, description: preview.description, imageUrl: preview.imageUrl, siteName: preview.siteName }
           : null,
+        mediaUrl: msg.mediaUrl,
+        mediaType: msg.mediaType,
       };
     })
   );

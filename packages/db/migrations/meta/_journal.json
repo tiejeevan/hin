@@ -267,6 +267,20 @@
       "when": 1783168000000,
       "tag": "0038_olabid_enabled",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1783169000000,
+      "tag": "0039_item_bookmarks",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1783170000000,
+      "tag": "0040_message_media",
+      "breakpoints": true
     }
   ]
 }

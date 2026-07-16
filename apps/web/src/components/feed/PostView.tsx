@@ -56,6 +56,7 @@ interface PostViewProps {
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
   onCopyPermalink: () => void;
+  onOpenOlabidItem?: (itemId: number) => void;
   onToggleBookmark: () => void;
   onShare: () => void;
   onReportPost?: (postId: number) => void;
@@ -124,6 +125,7 @@ export function PostView({
   onRetractPollVote,
   onClosePoll,
   onCopyPermalink,
+  onOpenOlabidItem,
   onToggleBookmark,
   onShare,
   onReportPost,
@@ -244,6 +246,7 @@ export function PostView({
         highlightCommentId={highlightCommentId}
         onSignInRequired={onSignIn}
         onCopyPermalink={onCopyPermalink}
+        onOpenOlabidItem={onOpenOlabidItem}
         onToggleBookmark={onToggleBookmark}
         onShare={onShare}
         onToggleLike={onToggleLike}

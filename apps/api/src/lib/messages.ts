@@ -38,6 +38,7 @@ export async function countUnreadMessages(db: Db, userId: number): Promise<numbe
 type LastMessageRow = {
   partnerId: number;
   content: string;
+  mediaUrl: string | null;
   senderId: number;
   createdAt: string;
   read: number;
@@ -53,6 +54,7 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
         m.sender_id AS sender_id,
         m.receiver_id AS receiver_id,
         m.content,
+        m.media_url AS media_url,
         m.read,
         m.created_at AS created_at,
         CASE
@@ -67,13 +69,14 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
       SELECT
         partner_id AS partnerId,
         content,
+        media_url AS mediaUrl,
         sender_id AS senderId,
         created_at AS createdAt,
         read,
         ROW_NUMBER() OVER (PARTITION BY partner_id ORDER BY created_at DESC) AS rn
       FROM partner_messages
     )
-    SELECT partnerId, content, senderId, createdAt, read
+    SELECT partnerId, content, mediaUrl, senderId, createdAt, read
     FROM ranked
     WHERE rn = 1
   `);
@@ -140,7 +143,11 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
       equippedBadges: equippedBadgesByUser.get(u.id) ?? [],
       lastMessage: lastMsg
         ? {
-            content: lastMsg.content,
+            content: lastMsg.content.trim()
+              ? lastMsg.content
+              : lastMsg.mediaUrl
+                ? 'Photo'
+                : '',
             senderId: lastMsg.senderId,
             createdAt: lastMsg.createdAt,
             read: lastMsg.read === 1,

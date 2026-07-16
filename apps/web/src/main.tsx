@@ -3,6 +3,10 @@ import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import disableDevtool from 'disable-devtool';
+import { installGlobalFetchLoading } from './lib/globalLoading';
+import { GlobalLoadingOverlay } from './components/ui/GlobalLoadingOverlay';
+
+installGlobalFetchLoading();
 
 // Disable developer tools in production and reload page on detection
 if (import.meta.env.PROD) {
@@ -16,5 +20,6 @@ if (import.meta.env.PROD) {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
+    <GlobalLoadingOverlay />
   </React.StrictMode>,
 );

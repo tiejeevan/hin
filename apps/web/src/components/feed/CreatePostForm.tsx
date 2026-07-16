@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { BarChart3, Globe, Loader2, Lock, MoreVertical, Send, Users, X } from 'lucide-react';
 import { useMentionAutocomplete } from '../../hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '../ui/MentionSuggestions';
-import type { PostVisibility, SystemSettings } from '@hin/types';
+import type { LinkPreview, PostVisibility, SystemSettings } from '@hin/types';
 import { DEFAULT_SYSTEM_SETTINGS, validatePostLimits } from '@hin/types';
 import { ImagePicker, PickedImage } from '../ui/ImagePicker';
 import { uploadCompressedImage } from '../../lib/compressImage';
 import { API_URL } from '../../config';
+import { LinkPreviewCard } from './LinkPreviewCard';
 import {
   PollCreatorFields,
   defaultPollDraft,
@@ -14,6 +15,11 @@ import {
   pollDraftToApiFields,
   type PollDraft,
 } from './PollCreatorFields';
+
+function extractFirstUrl(text: string): string | null {
+  const match = text.match(/(https?:\/\/[^\s<>"')]+)/i);
+  return match?.[1]?.replace(/[.,!?;:)\]}>'"]+$/, '') || null;
+}
 
 const VISIBILITY_OPTIONS: { value: PostVisibility; label: string; Icon: typeof Globe }[] = [
   { value: 'public', label: 'Public', Icon: Globe },
@@ -29,6 +35,8 @@ interface CreatePostFormProps {
   content: string;
   token: string;
   postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
+  /** Optimistic preview (e.g. when sharing an Olabid item) shown until the API refresh completes. */
+  seedPreview?: LinkPreview | null;
   onContentChange: (value: string) => void;
   onSubmit: (e: React.FormEvent, payload: CreatePostSubmitPayload) => void | Promise<void>;
   onClose: () => void;
@@ -38,6 +46,7 @@ export function CreatePostForm({
   content,
   token,
   postLimits = DEFAULT_SYSTEM_SETTINGS,
+  seedPreview = null,
   onContentChange,
   onSubmit,
   onClose,
@@ -66,8 +75,40 @@ export function CreatePostForm({
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [draftLinkPreview, setDraftLinkPreview] = useState<LinkPreview | null>(seedPreview);
   const menuRef = useRef<HTMLDivElement>(null);
   const visibilityRef = useRef<HTMLDivElement>(null);
+
+  // Live link preview while composing (same behavior as DM composer).
+  useEffect(() => {
+    const url = extractFirstUrl(content);
+    if (!url || !token) {
+      setDraftLinkPreview(null);
+      return;
+    }
+    // Keep seeded preview visible immediately when the URL matches.
+    if (seedPreview && seedPreview.url === url) {
+      setDraftLinkPreview(seedPreview);
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/link-preview?url=${encodeURIComponent(url)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!cancelled && res.ok) {
+          setDraftLinkPreview(await res.json());
+        }
+        // Keep seeded preview on failure.
+      } catch {
+        // Keep existing draft preview
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [content, token, seedPreview]);
 
   useEffect(() => {
     if (!menuOpen && !visibilityOpen) return;
@@ -224,6 +265,12 @@ export function CreatePostForm({
             />
           )}
         </div>
+
+        {draftLinkPreview && (
+          <div className="rounded-xl overflow-hidden">
+            <LinkPreviewCard preview={draftLinkPreview} />
+          </div>
+        )}
 
         {hasPoll && (
           <section className="space-y-3 pt-1 border-t border-border-custom/60">

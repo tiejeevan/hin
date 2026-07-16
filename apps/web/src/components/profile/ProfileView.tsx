@@ -84,6 +84,7 @@ interface ProfileViewProps {
   onRetractPollVote: (postId: number) => Promise<void>;
   onClosePoll: (postId: number) => Promise<void>;
   onOpenPost: (postId: number) => void;
+  onOpenOlabidItem?: (itemId: number) => void;
   onCopyPermalink?: () => void;
   onReport?: () => void;
   onReportPost?: (postId: number) => void;
@@ -182,6 +183,7 @@ export function ProfileView({
   onRetractPollVote,
   onClosePoll,
   onOpenPost,
+  onOpenOlabidItem,
   onCopyPermalink,
   onReport,
   onReportPost,
@@ -342,6 +344,7 @@ export function ProfileView({
                 onRetractPollVote={onRetractPollVote}
                 onClosePoll={onClosePoll}
                 onOpenPost={onOpenPost}
+                onOpenOlabidItem={onOpenOlabidItem}
                 onSignInRequired={handleSignInRequired}
                 onReportPost={onReportPost}
                 onReportComment={onReportComment}

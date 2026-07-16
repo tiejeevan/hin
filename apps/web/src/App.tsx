@@ -34,8 +34,16 @@ import { API_URL, WS_URL } from './config';
 import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode, FeedMode } from './types/ui';
 import type { CreatePostSubmitPayload } from './components/feed/CreatePostForm';
 import { mergePollFromBroadcast } from './utils/pollVisibility';
-import { parseLocation, syncUrl, postPermalinkUrl, profilePermalinkUrl, type AdminSection, getOlabidItemIdFromPost } from './lib/appRoutes';
-import { randomId } from './lib/compressImage';
+import { parseLocation, syncUrl, postPermalinkUrl, profilePermalinkUrl, type AdminSection } from './lib/appRoutes';
+import { randomId, uploadCompressedImage } from './lib/compressImage';
+import {
+  loadChatState,
+  saveChatState,
+  clearChatState,
+  getDraftForRecipient,
+  pruneDraftEntry,
+  type DraftEntry,
+} from './lib/chatStorage';
 import { AppShell } from './components/layout/AppShell';
 import { AppHeader } from './components/layout/AppHeader';
 import { GuestHeader } from './components/layout/GuestHeader';
@@ -154,6 +162,7 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
   const [newPostContent, setNewPostContent] = useState('');
+  const [postSeedPreview, setPostSeedPreview] = useState<LinkPreview | null>(null);
   const [newlyCreatedPostId, setNewlyCreatedPostId] = useState<number | null>(null);
   const [onlineUserIds, setOnlineUserIds] = useState<Set<number>>(new Set());
   const [showNewPostForm, setShowNewPostForm] = useState(false);
@@ -174,22 +183,49 @@ export default function App() {
   const [editingItemCommentId, setEditingItemCommentId] = useState<number | null>(null);
   const [editingItemCommentContent, setEditingItemCommentContent] = useState('');
 
-  const [chatRecipient, setChatRecipient] = useState<ChatRecipient | null>(null);
+  const [chatRecipient, setChatRecipient] = useState<ChatRecipient | null>(() => {
+    if (!localStorage.getItem('hin_token')) return null;
+    return loadChatState().recipient;
+  });
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
-  const [newMsgText, setNewMsgText] = useState('');
-  const [draftLinkPreview, setDraftLinkPreview] = useState<LinkPreview | null>(null);
+  const [chatDrafts, setChatDrafts] = useState<Record<number, DraftEntry>>(() => {
+    if (!localStorage.getItem('hin_token')) return {};
+    return loadChatState().drafts;
+  });
+  const [newMsgText, setNewMsgText] = useState(() => {
+    if (!localStorage.getItem('hin_token')) return '';
+    const state = loadChatState();
+    if (!state.recipient) return '';
+    return getDraftForRecipient(state.drafts, state.recipient.id).text;
+  });
+  const [draftLinkPreview, setDraftLinkPreview] = useState<LinkPreview | null>(() => {
+    if (!localStorage.getItem('hin_token')) return null;
+    const state = loadChatState();
+    if (!state.recipient) return null;
+    return getDraftForRecipient(state.drafts, state.recipient.id).preview;
+  });
+  const [pendingChatMedia, setPendingChatMedia] = useState<{ file: File; previewUrl: string } | null>(null);
+  const [sendingChatMedia, setSendingChatMedia] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const chatDraftsRef = useRef(chatDrafts);
 
   const [threads, setThreads] = useState<import('@hin/types').ChatThread[]>([]);
   const [typingUsers, setTypingUsers] = useState<Record<number, boolean>>({});
   const typingTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+  const typingClearTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const lastTypingSentRef = useRef<Record<number, number>>({});
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [showMessagesDropdown, setShowMessagesDropdown] = useState(false);
-  const [messagesPanelExpanded, setMessagesPanelExpanded] = useState(false);
+  const [showMessagesDropdown, setShowMessagesDropdown] = useState(() => {
+    if (!localStorage.getItem('hin_token')) return false;
+    return loadChatState().isOpen;
+  });
+  const [messagesPanelExpanded, setMessagesPanelExpanded] = useState(() => {
+    if (!localStorage.getItem('hin_token')) return false;
+    return loadChatState().isExpanded;
+  });
   const [messageIconPulseAt, setMessageIconPulseAt] = useState(0);
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
@@ -245,6 +281,7 @@ export default function App() {
   const appliedItemCommentDeletesRef = useRef(new Set<number>());
   const showMessagesDropdownRef = useRef(showMessagesDropdown);
   const chatRecipientRef = useRef(chatRecipient);
+  const handleSessionExpiredRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     showMessagesDropdownRef.current = showMessagesDropdown;
@@ -253,6 +290,69 @@ export default function App() {
   useEffect(() => {
     chatRecipientRef.current = chatRecipient;
   }, [chatRecipient]);
+
+  useEffect(() => {
+    chatDraftsRef.current = chatDrafts;
+  }, [chatDrafts]);
+
+  // Keep per-conversation draft map in sync with the active composer.
+  useEffect(() => {
+    if (!chatRecipient) return;
+    const id = chatRecipient.id;
+    setChatDrafts(prev => {
+      const current = prev[id];
+      const next = pruneDraftEntry({
+        text: newMsgText,
+        preview: draftLinkPreview,
+        dismissedPreviewUrl: current?.dismissedPreviewUrl,
+      });
+      if (!next) {
+        if (!current) return prev;
+        const { [id]: _removed, ...rest } = prev;
+        return rest;
+      }
+      if (
+        current?.text === next.text &&
+        current?.preview === next.preview &&
+        current?.dismissedPreviewUrl === next.dismissedPreviewUrl
+      ) {
+        return prev;
+      }
+      return { ...prev, [id]: next };
+    });
+  }, [chatRecipient, newMsgText, draftLinkPreview]);
+
+  // Persist chat UI state so drafts + open conversation survive refresh / navigation.
+  useEffect(() => {
+    if (!token) {
+      clearChatState();
+      return;
+    }
+    let drafts = chatDrafts;
+    if (chatRecipient) {
+      drafts = { ...chatDrafts };
+      const entry = pruneDraftEntry({
+        text: newMsgText,
+        preview: draftLinkPreview,
+        dismissedPreviewUrl: chatDrafts[chatRecipient.id]?.dismissedPreviewUrl,
+      });
+      if (entry) drafts[chatRecipient.id] = entry;
+      else delete drafts[chatRecipient.id];
+    }
+    saveChatState({
+      isOpen: showMessagesDropdown,
+      isExpanded: messagesPanelExpanded,
+      recipient: chatRecipient,
+      drafts,
+    });
+  }, [token, showMessagesDropdown, messagesPanelExpanded, chatRecipient, chatDrafts, newMsgText, draftLinkPreview]);
+
+  // After reload, rehydrate the open conversation's messages.
+  useEffect(() => {
+    if (!token || !chatRecipient) return;
+    fetchMessages(chatRecipient.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once when session is ready
+  }, [token]);
 
   useEffect(() => {
     feedModeRef.current = feedMode;
@@ -344,7 +444,7 @@ export default function App() {
     setShowNotifications(false);
     setShowMessagesDropdown(false);
     setMessagesPanelExpanded(false);
-    setChatRecipient(null);
+    // Keep chat recipient + draft so the conversation restores from localStorage.
     if (!opts?.skipUrlSync) {
       syncUrl({ view: 'home' }, true);
     }
@@ -375,11 +475,29 @@ export default function App() {
   const closeMessagesPanel = () => {
     setShowMessagesDropdown(false);
     setMessagesPanelExpanded(false);
-    setChatRecipient(null);
+    // Preserve recipient + draft text/preview in state (and localStorage).
   };
 
-  const openChatInPanel = (recipient: ChatRecipient) => {
+  const openChatInPanel = (recipient: ChatRecipient, opts?: { draft?: DraftEntry }) => {
+    const draft = opts?.draft ?? getDraftForRecipient(chatDraftsRef.current, recipient.id);
+    if (opts?.draft) {
+      const pruned = pruneDraftEntry(opts.draft);
+      setChatDrafts(prev => {
+        if (!pruned) {
+          if (!prev[recipient.id]) return prev;
+          const { [recipient.id]: _removed, ...rest } = prev;
+          return rest;
+        }
+        return { ...prev, [recipient.id]: pruned };
+      });
+    }
+    setPendingChatMedia(prev => {
+      if (prev) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
     setChatRecipient(recipient);
+    setNewMsgText(draft.text);
+    setDraftLinkPreview(draft.preview);
     fetchMessages(recipient.id);
     setThreads(prev => {
       const thread = prev.find(t => t.id === recipient.id);
@@ -392,7 +510,56 @@ export default function App() {
   };
 
   const backToMessagesList = () => {
+    // Drafts stay in chatDrafts (and localStorage); only clear the active composer view.
+    setPendingChatMedia(prev => {
+      if (prev) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
     setChatRecipient(null);
+    setChatMessages([]);
+    setNewMsgText('');
+    setDraftLinkPreview(null);
+  };
+
+  const dismissDraftLinkPreview = () => {
+    if (!chatRecipient || !draftLinkPreview) return;
+    const dismissedUrl = draftLinkPreview.url;
+    setDraftLinkPreview(null);
+    setChatDrafts(prev => {
+      const current = prev[chatRecipient.id] ?? { text: newMsgText, preview: null };
+      return {
+        ...prev,
+        [chatRecipient.id]: {
+          ...current,
+          text: newMsgText,
+          preview: null,
+          dismissedPreviewUrl: dismissedUrl,
+        },
+      };
+    });
+  };
+
+  const pickChatImage = (file: File) => {
+    // Device camera/gallery may report jpeg/png/webp, or occasionally an empty/other image MIME.
+    if (file.type && !file.type.startsWith('image/')) {
+      alert('Please choose a JPEG, PNG, or WebP image.');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      alert('Image is too large (max 8MB).');
+      return;
+    }
+    setPendingChatMedia(prev => {
+      if (prev) URL.revokeObjectURL(prev.previewUrl);
+      return { file, previewUrl: URL.createObjectURL(file) };
+    });
+  };
+
+  const clearDraftMedia = () => {
+    setPendingChatMedia(prev => {
+      if (prev) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
   };
 
   const toggleMessagesDropdown = () => {
@@ -401,9 +568,11 @@ export default function App() {
       if (next) {
         setShowNotifications(false);
         fetchThreads();
+        if (chatRecipientRef.current) {
+          fetchMessages(chatRecipientRef.current.id);
+        }
       } else {
         setMessagesPanelExpanded(false);
-        setChatRecipient(null);
       }
       return next;
     });
@@ -480,6 +649,10 @@ export default function App() {
     if (!token) return;
     try {
       const res = await fetch(`${API_URL}/api/me/bootstrap`, { headers: getHeaders() });
+      if (res.status === 401) {
+        handleSessionExpiredRef.current();
+        return;
+      }
       if (res.ok) {
         const data: MeBootstrap = await res.json();
         setFollowedUserIds(new Set(data.followingIds));
@@ -582,7 +755,6 @@ export default function App() {
     setShowNotifications(false);
     setShowMessagesDropdown(false);
     setMessagesPanelExpanded(false);
-    setChatRecipient(null);
     setProfilePostsError(null);
     setHighlightFollowRequests(!!opts?.highlightFollowRequests);
     setShowGuestAuth(false);
@@ -613,7 +785,6 @@ export default function App() {
     setShowNotifications(false);
     setShowMessagesDropdown(false);
     setMessagesPanelExpanded(false);
-    setChatRecipient(null);
     setProfilePostsError(null);
     setHighlightFollowRequests(false);
     setShowGuestAuth(false);
@@ -829,6 +1000,28 @@ export default function App() {
       setDraftLinkPreview(null);
       return;
     }
+
+    const dismissedUrl = chatRecipient
+      ? chatDraftsRef.current[chatRecipient.id]?.dismissedPreviewUrl ?? null
+      : null;
+
+    if (dismissedUrl && url === dismissedUrl) {
+      setDraftLinkPreview(null);
+      return;
+    }
+
+    // URL changed away from a previously dismissed one — allow preview again.
+    if (chatRecipient && dismissedUrl && url !== dismissedUrl) {
+      setChatDrafts(prev => {
+        const current = prev[chatRecipient.id];
+        if (!current?.dismissedPreviewUrl) return prev;
+        return {
+          ...prev,
+          [chatRecipient.id]: { ...current, dismissedPreviewUrl: null },
+        };
+      });
+    }
+
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
@@ -837,18 +1030,17 @@ export default function App() {
         });
         if (!cancelled && res.ok) {
           setDraftLinkPreview(await res.json());
-        } else if (!cancelled) {
-          setDraftLinkPreview(null);
         }
+        // Keep any seeded preview on failure so share-from-item stays visible.
       } catch {
-        if (!cancelled) setDraftLinkPreview(null);
+        // Keep existing draft preview
       }
-    }, 400);
+    }, 200);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [newMsgText, token]);
+  }, [newMsgText, token, chatRecipient]);
 
   const fetchPost = async (postId: number) => {
     setPostViewLoading(true);
@@ -861,11 +1053,6 @@ export default function App() {
       ]);
       if (postRes.ok) {
         const post = await postRes.json();
-        const olabidItemIdFromPost = getOlabidItemIdFromPost(post);
-        if (olabidItemIdFromPost !== null && olabidEnabled) {
-          openOlabidItem(olabidItemIdFromPost, { replace: true });
-          return;
-        }
         setPostViewPost(post);
         setExpandedComments(prev => ({ ...prev, [postId]: true }));
         fetchComments(postId);
@@ -893,17 +1080,6 @@ export default function App() {
     postId: number,
     opts?: { commentId?: number; replace?: boolean; skipUrlSync?: boolean },
   ) => {
-    const existingPost = posts.find(p => p.id === postId) ||
-                         profilePosts.find(p => p.id === postId) ||
-                         (postViewPost && postViewPost.id === postId ? postViewPost : null);
-    if (existingPost) {
-      const olabidItemIdFromPost = getOlabidItemIdFromPost(existingPost);
-      if (olabidItemIdFromPost !== null && olabidEnabled) {
-        openOlabidItem(olabidItemIdFromPost, { replace: opts?.replace, skipUrlSync: opts?.skipUrlSync });
-        return;
-      }
-    }
-
     setIsSearchOpen(false);
     setActiveTab('post');
     setPostViewId(postId);
@@ -913,7 +1089,6 @@ export default function App() {
     setShowNotifications(false);
     setShowMessagesDropdown(false);
     setMessagesPanelExpanded(false);
-    setChatRecipient(null);
     setShowGuestAuth(false);
     if (!opts?.skipUrlSync) {
       syncUrl({ view: 'post', postId, commentId: opts?.commentId }, opts?.replace);
@@ -1245,6 +1420,11 @@ export default function App() {
               if (viewingPartner) {
                 appendChatMessage(msg);
                 if (isIncoming) {
+                  setTypingUsers(prev => ({ ...prev, [msg.senderId]: false }));
+                  if (typingClearTimeoutRef.current[msg.senderId]) {
+                    clearTimeout(typingClearTimeoutRef.current[msg.senderId]);
+                    delete typingClearTimeoutRef.current[msg.senderId];
+                  }
                   fetch(`${API_URL}/api/messages/read/${partnerId}`, {
                     method: 'POST',
                     headers: getHeaders(),
@@ -1296,9 +1476,22 @@ export default function App() {
               );
               break;
             }
-            case 'typing':
-              setTypingUsers(prev => ({ ...prev, [message.payload.senderId]: message.payload.isTyping }));
+            case 'typing': {
+              const senderId = message.payload.senderId as number;
+              const isTyping = !!message.payload.isTyping;
+              setTypingUsers(prev => ({ ...prev, [senderId]: isTyping }));
+              if (typingClearTimeoutRef.current[senderId]) {
+                clearTimeout(typingClearTimeoutRef.current[senderId]);
+                delete typingClearTimeoutRef.current[senderId];
+              }
+              if (isTyping) {
+                typingClearTimeoutRef.current[senderId] = setTimeout(() => {
+                  setTypingUsers(prev => ({ ...prev, [senderId]: false }));
+                  delete typingClearTimeoutRef.current[senderId];
+                }, 3000);
+              }
               break;
+            }
             case 'notification': {
               const notif: Notification = message.payload;
               if (notif.type === 'message') break;
@@ -1755,10 +1948,20 @@ export default function App() {
     localStorage.removeItem('hin_user');
     localStorage.removeItem('hin_admin_token');
     localStorage.removeItem('hin_admin_user');
+    clearChatState();
     setAdminToken(null);
     setAdminUser(null);
     setChatRecipient(null);
     setChatMessages([]);
+    setChatDrafts({});
+    setPendingChatMedia(prev => {
+      if (prev) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+    setNewMsgText('');
+    setDraftLinkPreview(null);
+    setShowMessagesDropdown(false);
+    setMessagesPanelExpanded(false);
     setNotifications([]);
     setUnreadNotifsCount(0);
     setActiveTab('feed');
@@ -1767,6 +1970,16 @@ export default function App() {
     ws.current?.close();
   };
 
+  /** Stale/invalid JWT — clear local session and prompt sign-in. */
+  const handleSessionExpired = () => {
+    addToast('Your session expired. Please sign in again.', 'system', undefined, { skipPrefCheck: true });
+    handleLogout();
+    handleGuestSignIn();
+  };
+
+  useEffect(() => {
+    handleSessionExpiredRef.current = handleSessionExpired;
+  });
 
   const applyPollUpdate = (postId: number, poll: Poll) => {
     const merge = (p: import('@hin/types').Post) =>
@@ -1812,6 +2025,7 @@ export default function App() {
       setProfileUser(prev => (prev ? { ...prev, postCount: (prev.postCount || 0) + 1 } : prev));
     }
     setNewPostContent('');
+    setPostSeedPreview(null);
     setShowNewPostForm(false);
     setNewlyCreatedPostId(newPost.id);
     setTimeout(() => setNewlyCreatedPostId(null), 3000);
@@ -2124,6 +2338,10 @@ export default function App() {
         headers: getHeaders(),
         body: JSON.stringify({ content: text, parentId: parent ? parent.id : null }),
       });
+      if (res.status === 401) {
+        handleSessionExpired();
+        return;
+      }
       if (res.ok) {
         const newComment = await res.json();
         // Realtime may have already applied this comment; avoid duplicates.
@@ -2149,6 +2367,9 @@ export default function App() {
           // points/event wins) to avoid duplicate toasts; just refresh here.
           void fetchMyGamification();
         }
+      } else {
+        const data = await res.json().catch(() => ({}));
+        addToast(data.error || 'Failed to post comment', 'system', undefined, { skipPrefCheck: true });
       }
     } catch (e) {
       console.error(e);
@@ -2220,6 +2441,10 @@ export default function App() {
         headers: getHeaders(),
         body: JSON.stringify({ content: text, parentId: parent ? parent.id : null }),
       });
+      if (res.status === 401) {
+        handleSessionExpired();
+        return;
+      }
       if (res.ok) {
         const newComment = await res.json();
         if (!appliedItemCommentCreatesRef.current.has(newComment.id)) {
@@ -2235,6 +2460,9 @@ export default function App() {
         if (newComment.g) {
           void fetchMyGamification();
         }
+      } else {
+        const data = await res.json().catch(() => ({}));
+        addToast(data.error || 'Failed to post comment', 'system', undefined, { skipPrefCheck: true });
       }
     } catch (e) {
       console.error(e);
@@ -2249,6 +2477,10 @@ export default function App() {
         headers: getHeaders(),
         body: JSON.stringify({ content: editingItemCommentContent }),
       });
+      if (res.status === 401) {
+        handleSessionExpired();
+        return;
+      }
       if (res.ok) {
         const updatedComment = await res.json();
         setItemComments(prev => ({
@@ -2257,6 +2489,9 @@ export default function App() {
         }));
         setEditingItemCommentId(null);
         addToast('Comment updated successfully', 'system', undefined, { skipPrefCheck: true });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        addToast(data.error || 'Failed to update comment', 'system', undefined, { skipPrefCheck: true });
       }
     } catch (e) {
       console.error(e);
@@ -2270,6 +2505,10 @@ export default function App() {
         method: 'DELETE',
         headers: getHeaders(),
       });
+      if (res.status === 401) {
+        handleSessionExpired();
+        return;
+      }
       if (res.ok) {
         if (!appliedItemCommentDeletesRef.current.has(commentId)) {
           appliedItemCommentDeletesRef.current.add(commentId);
@@ -2296,6 +2535,10 @@ export default function App() {
         method: 'POST',
         headers: getHeaders(),
       });
+      if (res.status === 401) {
+        handleSessionExpired();
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setItemComments(prev => ({
@@ -2310,51 +2553,120 @@ export default function App() {
     }
   };
 
-  const startChat = (user: UserType | ChatRecipient, opts?: { prefillText?: string }) => {
+  const startChat = (user: UserType | ChatRecipient, opts?: { prefillText?: string; seedPreview?: LinkPreview | null }) => {
     const recipient: ChatRecipient = { id: user.id, username: user.username, role: user.role, avatarUrl: user.avatarUrl };
     setShowNotifications(false);
     setShowMessagesDropdown(true);
     setMessagesPanelExpanded(false);
-    openChatInPanel(recipient);
-    if (opts?.prefillText) {
-      setNewMsgText(opts.prefillText);
+    if (opts?.prefillText != null || opts?.seedPreview != null) {
+      openChatInPanel(recipient, {
+        draft: {
+          text: opts.prefillText ?? '',
+          preview: opts.seedPreview ?? null,
+        },
+      });
+    } else {
+      openChatInPanel(recipient);
     }
     fetchThreads();
   };
 
-  const handleSendDM = (e: React.FormEvent) => {
+  const handlePostOlabidItem = (permalink: string, seedPreview: LinkPreview) => {
+    setShowMessagesDropdown(false);
+    goHome();
+    setNewPostContent(permalink);
+    setPostSeedPreview(seedPreview);
+    setShowNewPostForm(true);
+  };
+
+  const handleSendDM = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser || !chatRecipient || !newMsgText.trim()) return;
+    if (!currentUser || !chatRecipient || sendingChatMedia) return;
     const content = newMsgText.trim();
-    if (ws.current?.readyState === WebSocket.OPEN && wsReadyRef.current) {
-      setChatMessages(prev => [
-        ...prev,
-        {
-          id: -Date.now(),
-          senderId: currentUser.id,
-          senderUsername: currentUser.username,
-          receiverId: chatRecipient.id,
-          receiverUsername: chatRecipient.username,
-          content,
-          createdAt: new Date().toISOString(),
-          read: false,
-          linkPreview: draftLinkPreview,
-        },
-      ]);
-      ws.current.send(
-        JSON.stringify({
-          type: 'send_message',
-          payload: { receiverId: chatRecipient.id, content },
-        })
-      );
-      if (typingTimeoutRef.current[chatRecipient.id]) clearTimeout(typingTimeoutRef.current[chatRecipient.id]);
-      ws.current.send(JSON.stringify({ type: 'typing', payload: { receiverId: chatRecipient.id, isTyping: false } }));
-      lastTypingSentRef.current[chatRecipient.id] = 0;
-      setNewMsgText('');
-      setDraftLinkPreview(null);
-    } else {
+    const pendingMedia = pendingChatMedia;
+    if (!content && !pendingMedia) return;
+    if (!(ws.current?.readyState === WebSocket.OPEN && wsReadyRef.current)) {
       alert('Real-time connection is not ready yet. Please wait a moment and try again.');
+      return;
     }
+
+    const dismissedUrl = chatDraftsRef.current[chatRecipient.id]?.dismissedPreviewUrl ?? null;
+    const firstUrlMatch = content.match(/(https?:\/\/[^\s<>"')]+)/i);
+    const firstUrl = firstUrlMatch?.[1]?.replace(/[.,!?;:)\]}>'"]+$/, '') || null;
+    const suppressLinkPreview = !!(dismissedUrl && firstUrl && dismissedUrl === firstUrl);
+    const optimisticPreview = suppressLinkPreview ? null : draftLinkPreview;
+
+    let mediaUrl: string | undefined;
+    let mediaType: string | undefined;
+    let optimisticMediaUrl: string | null = pendingMedia?.previewUrl ?? null;
+
+    if (pendingMedia) {
+      if (!token) return;
+      setSendingChatMedia(true);
+      try {
+        const uploaded = await uploadCompressedImage(pendingMedia.file, 'chat', token, API_URL);
+        mediaUrl = uploaded.url;
+        // Client compression prefers WebP; server also records the stored mime.
+        mediaType = 'image/webp';
+        optimisticMediaUrl = mediaUrl;
+      } catch (err) {
+        console.error(err);
+        alert(err instanceof Error ? err.message : 'Failed to upload image');
+        setSendingChatMedia(false);
+        return;
+      } finally {
+        setSendingChatMedia(false);
+      }
+    }
+
+    if (!(ws.current?.readyState === WebSocket.OPEN && wsReadyRef.current)) {
+      alert('Real-time connection is not ready yet. Please wait a moment and try again.');
+      return;
+    }
+
+    setChatMessages(prev => [
+      ...prev,
+      {
+        id: -Date.now(),
+        senderId: currentUser.id,
+        senderUsername: currentUser.username,
+        receiverId: chatRecipient.id,
+        receiverUsername: chatRecipient.username,
+        content,
+        createdAt: new Date().toISOString(),
+        read: false,
+        linkPreview: optimisticPreview,
+        mediaUrl: optimisticMediaUrl,
+        mediaType: mediaType ?? null,
+      },
+    ]);
+    ws.current.send(
+      JSON.stringify({
+        type: 'send_message',
+        payload: {
+          receiverId: chatRecipient.id,
+          content,
+          suppressLinkPreview: suppressLinkPreview || undefined,
+          mediaUrl,
+          mediaType,
+        },
+      })
+    );
+    if (typingTimeoutRef.current[chatRecipient.id]) clearTimeout(typingTimeoutRef.current[chatRecipient.id]);
+    ws.current.send(JSON.stringify({ type: 'typing', payload: { receiverId: chatRecipient.id, isTyping: false } }));
+    lastTypingSentRef.current[chatRecipient.id] = 0;
+    const sentToId = chatRecipient.id;
+    setChatDrafts(prev => {
+      if (!prev[sentToId]) return prev;
+      const { [sentToId]: _removed, ...rest } = prev;
+      return rest;
+    });
+    setPendingChatMedia(prev => {
+      if (prev) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+    setNewMsgText('');
+    setDraftLinkPreview(null);
   };
 
   const handleMarkNotifRead = async (notifId: number) => {
@@ -2769,6 +3081,13 @@ export default function App() {
       setAdminUser(null);
       setActiveTab('admin');
       setChatRecipient(null);
+      setChatMessages([]);
+      setChatDrafts({});
+      setNewMsgText('');
+      setDraftLinkPreview(null);
+      setShowMessagesDropdown(false);
+      setMessagesPanelExpanded(false);
+      clearChatState();
       addToast('Returned to Admin session', 'system', undefined, { skipPrefCheck: true });
     }
   };
@@ -2911,6 +3230,10 @@ export default function App() {
               setIsSearchOpen(false);
               openPost(postId);
             }}
+            onOpenOlabidItem={olabidEnabled ? (itemId) => {
+              setIsSearchOpen(false);
+              openOlabidItem(itemId);
+            } : undefined}
             onViewProfile={(idOrUsername) => {
               setIsSearchOpen(false);
               handleViewProfile(idOrUsername);
@@ -3112,6 +3435,7 @@ export default function App() {
             onRetractPollVote={handleRetractPollVote}
             onClosePoll={handleClosePoll}
             onCopyPermalink={() => postViewId && handleCopyPostPermalink(postViewId)}
+            onOpenOlabidItem={olabidEnabled ? openOlabidItem : undefined}
             onToggleBookmark={() => postViewId && handleToggleBookmark(postViewId)}
             onShare={() => postViewId && handleSharePost(postViewId)}
             onReportPost={(postId) => handleOpenReport('post', postId)}
@@ -3226,6 +3550,7 @@ export default function App() {
             onRetractPollVote={handleRetractPollVote}
             onClosePoll={handleClosePoll}
             onOpenPost={openPost}
+            onOpenOlabidItem={olabidEnabled ? openOlabidItem : undefined}
             onCopyPermalink={profileUser ? () => handleCopyProfilePermalink(profileUser.username) : undefined}
             onReport={profileUser && currentUser && profileUser.id !== currentUser.id
               ? () => handleOpenReport('user', profileUser.id)
@@ -3256,6 +3581,7 @@ export default function App() {
             currentUser={currentUser}
             showNewPostForm={showNewPostForm}
             newPostContent={newPostContent}
+            postSeedPreview={postSeedPreview}
             token={token!}
             newlyCreatedPostId={newlyCreatedPostId}
             expandedComments={expandedComments}
@@ -3273,7 +3599,10 @@ export default function App() {
             activeHashtag={activeHashtag}
             onSelectHashtag={handleSelectHashtag}
             onLoadMore={loadMorePosts}
-            onCloseCreatePost={() => setShowNewPostForm(false)}
+            onCloseCreatePost={() => {
+              setShowNewPostForm(false);
+              setPostSeedPreview(null);
+            }}
             onNewPostContentChange={setNewPostContent}
             onCreatePost={handleCreatePost}
             onToggleLike={handleToggleLike}
@@ -3305,6 +3634,7 @@ export default function App() {
             onRetractPollVote={handleRetractPollVote}
             onClosePoll={handleClosePoll}
             onOpenPost={openPost}
+            onOpenOlabidItem={olabidEnabled ? openOlabidItem : undefined}
             onReportPost={(postId) => handleOpenReport('post', postId)}
             onReportComment={(commentId) => handleOpenReport('comment', commentId)}
             onPinPost={handlePinPost}
@@ -3353,10 +3683,23 @@ export default function App() {
               onViewProfile={handleViewProfile}
               onViewHashtag={handleViewHashtag}
               onSignInRequired={handleGuestSignIn}
-              onShareToChat={(recipient, prefillText) => startChat(recipient, { prefillText })}
+              onShareToChat={(recipient, prefillText, seedPreview) =>
+                startChat(recipient, { prefillText, seedPreview })
+              }
+              onPostItem={handlePostOlabidItem}
             />
           ) : (
-            <OlabidPage onOpenItem={(id) => openOlabidItem(id)} />
+            <OlabidPage
+              onOpenItem={(id) => openOlabidItem(id)}
+              currentUser={currentUser}
+              threads={threads}
+              token={token}
+              onShareToChat={(recipient, prefillText, seedPreview) =>
+                startChat(recipient, { prefillText, seedPreview })
+              }
+              onPostItem={handlePostOlabidItem}
+              onSignInRequired={handleGuestSignIn}
+            />
           )
         ) : currentUser && activeTab === 'admin' ? (
           <AdminDashboard
@@ -3392,6 +3735,7 @@ export default function App() {
             onOpenCreatePost={() => {
               setShowMessagesDropdown(false);
               if (activeTab !== 'feed') goHome();
+              setPostSeedPreview(null);
               setShowNewPostForm(true);
             }}
             onToggleMessages={toggleMessagesDropdown}
@@ -3409,6 +3753,8 @@ export default function App() {
             chatMessages={chatMessages}
             newMsgText={newMsgText}
             draftLinkPreview={draftLinkPreview}
+            draftMediaPreviewUrl={pendingChatMedia?.previewUrl ?? null}
+            sendingMedia={sendingChatMedia}
             typingUsers={typingUsers}
             onlineUserIds={onlineUserIds}
             chatBottomRef={chatBottomRef}
@@ -3420,6 +3766,9 @@ export default function App() {
             onTyping={handleUserTyping}
             onOpenProfile={openProfile}
             onOpenOlabidItem={olabidEnabled ? openOlabidItem : undefined}
+            onDismissDraftPreview={dismissDraftLinkPreview}
+            onPickChatImage={pickChatImage}
+            onClearDraftMedia={clearDraftMedia}
             olabidEnabled={olabidEnabled}
           />
         )}

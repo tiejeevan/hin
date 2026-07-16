@@ -15,8 +15,15 @@ import {
   Flame,
   Sparkles,
   MessageSquare,
+  Bookmark,
 } from 'lucide-react';
+import { ChatThread, LinkPreview, User as UserType } from '@hin/types';
+import { ChatRecipient } from '../types/ui';
 import { API_URL } from '../config';
+import { olabidItemPermalinkUrl } from '../lib/appRoutes';
+import { buildOlabidLinkPreview, OlabidPreviewSource } from '../lib/olabidPreview';
+import { ItemActionsMenu } from '../components/olabid/ItemActionsMenu';
+import { ShareToChatModal } from '../components/olabid/ShareToChatModal';
 
 interface OlabidItem {
   id: number;
@@ -82,11 +89,26 @@ const SORT_LABELS: Record<string, string> = {
 
 interface OlabidPageProps {
   onOpenItem: (itemId: number) => void;
+  currentUser: UserType | null;
+  threads: ChatThread[];
+  token: string | null;
+  onShareToChat: (recipient: ChatRecipient, prefillText: string, seedPreview?: LinkPreview | null) => void;
+  onPostItem: (permalink: string, seedPreview: LinkPreview) => void;
+  onSignInRequired?: () => void;
 }
 
-export function OlabidPage({ onOpenItem }: OlabidPageProps) {
+export function OlabidPage({
+  onOpenItem,
+  currentUser,
+  threads,
+  token,
+  onShareToChat,
+  onPostItem,
+  onSignInRequired,
+}: OlabidPageProps) {
   const [items, setItems] = useState<OlabidItem[]>([]);
   const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
+  const [bookmarks, setBookmarks] = useState<Record<number, boolean>>({});
   const [categories, setCategories] = useState<OlabidCategory[]>([]);
   const [warehouses, setWarehouses] = useState<OlabidWarehouse[]>([]);
   const [selectedWarehouseIds, setSelectedWarehouseIds] = useState<number[]>([]);
@@ -97,8 +119,8 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
   const [activeSearch, setActiveSearch] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [shareItem, setShareItem] = useState<OlabidItem | null>(null);
 
-  // Filters — default All to match user request
   const [section, setSection] = useState<SectionFilter>('');
   const [categoryId, setCategoryId] = useState<string>('');
   const [sortBy, setSortBy] = useState<string>('(EndTime:asc)');
@@ -111,6 +133,67 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
 
   const warehouseIdsParam = (ids: number[] = selectedWarehouseIds) =>
     ids.length > 0 ? ids.join(',') : undefined;
+
+  const requireAuth = (action: () => void) => {
+    if (!currentUser) {
+      onSignInRequired?.();
+      return;
+    }
+    action();
+  };
+
+  const fetchBookmarkStatus = async (ids: number[]) => {
+    if (!token || ids.length === 0) {
+      setBookmarks({});
+      return;
+    }
+    try {
+      const res = await fetch(
+        `${API_URL}/api/olabid/items/bookmark-status?ids=${ids.join(',')}`,
+        { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' },
+      );
+      if (res.ok) {
+        setBookmarks(await res.json());
+      }
+    } catch {
+      // Non-critical
+    }
+  };
+
+  const toggleBookmark = async (itemId: number, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!currentUser || !token) {
+      onSignInRequired?.();
+      return;
+    }
+    const prev = !!bookmarks[itemId];
+    setBookmarks(b => ({ ...b, [itemId]: !prev }));
+    try {
+      const res = await fetch(`${API_URL}/api/olabid/items/${itemId}/bookmark`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBookmarks(b => ({ ...b, [itemId]: data.bookmarked }));
+      } else {
+        setBookmarks(b => ({ ...b, [itemId]: prev }));
+      }
+    } catch {
+      setBookmarks(b => ({ ...b, [itemId]: prev }));
+    }
+  };
+
+  const handleSendToChat = (item: OlabidItem) => {
+    requireAuth(() => setShareItem(item));
+  };
+
+  const handlePostIt = (item: OlabidItem) => {
+    requireAuth(() => {
+      const preview = buildOlabidLinkPreview(item as OlabidPreviewSource);
+      onPostItem(olabidItemPermalinkUrl(item.id), preview);
+    });
+  };
 
   const fetchMeta = async (): Promise<number[]> => {
     const [catRes, whRes] = await Promise.all([
@@ -160,7 +243,7 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
       const params = new URLSearchParams({
         page: String(pageNum),
         size: '20',
-        _: String(Date.now()), // bust any intermediate caches
+        _: String(Date.now()),
       });
 
       const wh = warehouseIdsParam(nextWarehouseIds);
@@ -200,10 +283,12 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
             setCommentCounts(await countsRes.json());
           }
         } catch {
-          // Non-critical — badges just won't show
+          // Non-critical
         }
+        void fetchBookmarkStatus(ids);
       } else {
         setCommentCounts({});
+        setBookmarks({});
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -226,7 +311,6 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
     setSearchQuery('');
     setActiveSearch('');
     setPage(1);
-    // Return to All section after clearing search
     setSection('');
     fetchItems(1, { search: '', section: '' });
   };
@@ -244,7 +328,6 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
   const toggleWarehouse = (id: number) => {
     setSelectedWarehouseIds((prev) => {
       const exists = prev.includes(id);
-      // Keep at least one warehouse selected
       if (exists && prev.length === 1) return prev;
       const next = exists ? prev.filter((w) => w !== id) : [...prev, id];
       setPage(1);
@@ -286,7 +369,6 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
     })();
   }, []);
 
-  // Refetch when list filters change (not used for sections)
   useEffect(() => {
     if (!hasLoaded || sectionActive) return;
     setPage(1);
@@ -341,11 +423,9 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
 
   return (
     <div className="min-h-screen bg-bg-primary">
-      {/* Header */}
       <div className="sticky top-0 z-10 bg-bg-secondary/95 backdrop-blur-md border-b border-border">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-4">
           <div className="flex flex-col gap-4">
-            {/* Top Row */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-gradient-to-br from-amber-500 to-orange-600 rounded-xl shadow-lg">
@@ -365,7 +445,6 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
               </button>
             </div>
 
-            {/* Section chips */}
             <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-thin">
               {SECTIONS.map((s) => {
                 const active = section === s.id;
@@ -387,7 +466,6 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
               })}
             </div>
 
-            {/* Search Bar */}
             <form onSubmit={handleSearch} className="relative">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-text-tertiary" />
@@ -415,7 +493,6 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
               )}
             </form>
 
-            {/* Filters Toggle Button */}
             <button
               onClick={() => setShowFilters(!showFilters)}
               className="flex items-center gap-2 px-4 py-2.5 bg-bg-tertiary hover:bg-bg-primary border border-border rounded-xl transition-all text-text-primary font-medium"
@@ -430,11 +507,9 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
               <ChevronDown className={`h-4 w-4 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
             </button>
 
-            {/* Filters Panel */}
             {showFilters && (
               <div className="bg-bg-tertiary border border-border rounded-xl p-4 space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-                  {/* Category */}
                   <div>
                     <label className="block text-sm font-medium text-text-primary mb-2">
                       Category
@@ -459,7 +534,6 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
                     </select>
                   </div>
 
-                  {/* Sort By */}
                   <div>
                     <label className="block text-sm font-medium text-text-primary mb-2">
                       Sort By
@@ -482,7 +556,6 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
                     </select>
                   </div>
 
-                  {/* Min Price */}
                   <div>
                     <label className="block text-sm font-medium text-text-primary mb-2">
                       Min Retail Price
@@ -498,7 +571,6 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
                     />
                   </div>
 
-                  {/* Max Price */}
                   <div>
                     <label className="block text-sm font-medium text-text-primary mb-2">
                       Max Retail Price
@@ -514,7 +586,6 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
                     />
                   </div>
 
-                  {/* Clear Filters Button */}
                   <div className="flex items-end">
                     <button
                       onClick={clearFilters}
@@ -525,7 +596,6 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
                   </div>
                 </div>
 
-                {/* Warehouses */}
                 {warehouses.length > 0 && (
                   <div className="pt-2 border-t border-border space-y-2">
                     <div className="flex items-center justify-between gap-2">
@@ -567,7 +637,6 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
                   </div>
                 )}
 
-                {/* Active Filters Summary */}
                 {hasActiveFilters && (
                   <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
                     <span className="text-xs text-text-secondary">Active filters:</span>
@@ -610,7 +679,6 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
         </div>
       </div>
 
-      {/* Content */}
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-6">
         {error && (
           <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 mb-6">
@@ -639,21 +707,23 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
           </div>
         ) : (
           <>
-            {/* Items Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-8">
               {items.map((item) => {
                 const savings = calculateSavings(item.retailPrice, item.currentBidAmount);
                 const hasBids = item.currentBidAmount > 0;
                 const discussionCount = commentCounts[item.id] || 0;
+                const isBookmarked = !!bookmarks[item.id];
 
                 return (
-                  <button
+                  <div
                     key={item.id}
-                    onClick={() => handleItemClick(item.id)}
-                    className="bg-bg-secondary rounded-xl overflow-hidden hover:ring-2 hover:ring-amber-500 transition-all group cursor-pointer hover:scale-[1.02] active:scale-[0.98] text-left"
+                    className="bg-bg-secondary rounded-xl overflow-hidden hover:ring-2 hover:ring-amber-500 transition-all group hover:scale-[1.02] active:scale-[0.98] text-left relative"
                   >
-                    {/* Image */}
-                    <div className="aspect-square bg-bg-tertiary relative overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => handleItemClick(item.id)}
+                      className="aspect-square bg-bg-tertiary relative overflow-hidden w-full cursor-pointer"
+                    >
                       {item.previewBlobUrl ? (
                         <img
                           src={item.previewBlobUrl}
@@ -667,25 +737,22 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
                         </div>
                       )}
 
-                      {/* Top Badges */}
-                      <div className="absolute top-2 left-2 right-2 flex items-start justify-between gap-2">
+                      <div className="absolute top-2 left-2 right-12 flex items-start gap-1.5 pointer-events-none flex-wrap">
                         {savings >= 50 && (
                           <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-2.5 py-1 rounded-lg text-xs font-bold shadow-lg flex items-center gap-1">
                             <TrendingUp className="h-3 w-3" />
                             {savings}% OFF
                           </div>
                         )}
-
                         {item.isWithoutFees && (
-                          <div className="bg-gradient-to-r from-purple-500 to-pink-600 text-white px-2.5 py-1 rounded-lg text-xs font-bold shadow-lg flex items-center gap-1 ml-auto">
+                          <div className="bg-gradient-to-r from-purple-500 to-pink-600 text-white px-2.5 py-1 rounded-lg text-xs font-bold shadow-lg flex items-center gap-1">
                             <Award className="h-3 w-3" />
                             NO FEES
                           </div>
                         )}
                       </div>
 
-                      {/* Bottom Badges */}
-                      <div className="absolute bottom-2 left-2 right-2 flex gap-1.5 items-end justify-between">
+                      <div className="absolute bottom-2 left-2 right-2 flex gap-1.5 items-end justify-between pointer-events-none">
                         <div className="flex gap-1.5 flex-wrap">
                           {item.shippingIsFree && (
                             <div className="bg-emerald-600/90 text-white px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1">
@@ -707,15 +774,38 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
                           </div>
                         )}
                       </div>
+                    </button>
+
+                    <div className="absolute top-2 right-2 z-10 flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={e => toggleBookmark(item.id, e)}
+                        className={`p-1.5 rounded-lg transition-colors min-h-[32px] min-w-[32px] flex items-center justify-center ${
+                          isBookmarked
+                            ? 'bg-amber-500 text-white'
+                            : 'bg-black/55 text-white hover:bg-black/75'
+                        }`}
+                        title={isBookmarked ? 'Remove from watchlist' : 'Add to watchlist'}
+                        aria-label={isBookmarked ? 'Remove from watchlist' : 'Add to watchlist'}
+                      >
+                        <Bookmark className={`h-4 w-4 ${isBookmarked ? 'fill-current' : ''}`} />
+                      </button>
+                      <ItemActionsMenu
+                        compact
+                        onSendToChat={() => handleSendToChat(item)}
+                        onPostIt={() => handlePostIt(item)}
+                      />
                     </div>
 
-                    {/* Details */}
-                    <div className="p-4">
+                    <button
+                      type="button"
+                      onClick={() => handleItemClick(item.id)}
+                      className="p-4 w-full text-left cursor-pointer"
+                    >
                       <h3 className="text-sm font-medium text-text-primary line-clamp-2 mb-3 min-h-[2.5rem] leading-tight">
                         {item.name}
                       </h3>
 
-                      {/* Pricing */}
                       <div className="space-y-2 mb-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-baseline gap-2">
@@ -742,20 +832,18 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
                         </div>
                       </div>
 
-                      {/* Time Remaining */}
                       <div className="flex items-center gap-1.5 px-3 py-2 bg-bg-tertiary rounded-lg">
                         <Clock className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
                         <span className="text-xs font-medium text-text-secondary">
                           Ends in {formatTimeRemaining(item.auctionFinishesInMs)}
                         </span>
                       </div>
-                    </div>
-                  </button>
+                    </button>
+                  </div>
                 );
               })}
             </div>
 
-            {/* Pagination */}
             <div className="flex items-center justify-center gap-3 pb-8">
               <button
                 onClick={() => fetchItems(page - 1)}
@@ -778,6 +866,22 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
           </>
         )}
       </div>
+
+      {shareItem && (
+        <ShareToChatModal
+          itemId={shareItem.id}
+          itemName={shareItem.name}
+          threads={threads}
+          token={token}
+          permalinkUrl={olabidItemPermalinkUrl(shareItem.id)}
+          onClose={() => setShareItem(null)}
+          onSelect={(recipient, prefillText) => {
+            const preview = buildOlabidLinkPreview(shareItem);
+            setShareItem(null);
+            onShareToChat(recipient, prefillText, preview);
+          }}
+        />
+      )}
     </div>
   );
 }
