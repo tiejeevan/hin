@@ -12,7 +12,10 @@ type FormState = {
   maxPostLength: string;
   maxMediaPerPost: string;
   turnstileEnabled: boolean;
+  olabidEnabled: boolean;
 };
+
+type ConfirmKind = 'turnstile' | 'olabid';
 
 function settingsToForm(settings: SystemSettings): FormState {
   return {
@@ -20,6 +23,7 @@ function settingsToForm(settings: SystemSettings): FormState {
     maxPostLength: String(settings.maxPostLength),
     maxMediaPerPost: String(settings.maxMediaPerPost),
     turnstileEnabled: !!settings.turnstileEnabled,
+    olabidEnabled: !!settings.olabidEnabled,
   };
 }
 
@@ -30,17 +34,21 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [pendingTurnstileValue, setPendingTurnstileValue] = useState(false);
+  const [confirmKind, setConfirmKind] = useState<ConfirmKind | null>(null);
+  const [pendingBoolValue, setPendingBoolValue] = useState(false);
 
-  const handleToggleTurnstileClick = () => {
-    setPendingTurnstileValue(!form.turnstileEnabled);
-    setShowConfirmModal(true);
+  const openConfirm = (kind: ConfirmKind, nextValue: boolean) => {
+    setConfirmKind(kind);
+    setPendingBoolValue(nextValue);
   };
 
-  const handleConfirmTurnstileToggle = () => {
-    setForm(prev => ({ ...prev, turnstileEnabled: pendingTurnstileValue }));
-    setShowConfirmModal(false);
+  const handleConfirmToggle = () => {
+    if (confirmKind === 'turnstile') {
+      setForm(prev => ({ ...prev, turnstileEnabled: pendingBoolValue }));
+    } else if (confirmKind === 'olabid') {
+      setForm(prev => ({ ...prev, olabidEnabled: pendingBoolValue }));
+    }
+    setConfirmKind(null);
   };
 
   useEffect(() => {
@@ -70,6 +78,7 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
     const maxPostLength = parseInt(form.maxPostLength, 10);
     const maxMediaPerPost = parseInt(form.maxMediaPerPost, 10);
     const turnstileEnabled = form.turnstileEnabled;
+    const olabidEnabled = form.olabidEnabled;
 
     if (
       Number.isNaN(maxPinnedPostsPerUser)
@@ -111,6 +120,7 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
           maxPostLength,
           maxMediaPerPost,
           turnstileEnabled,
+          olabidEnabled,
         }),
       });
       const data = await res.json();
@@ -128,6 +138,20 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
   if (loading) {
     return <p className="text-xs text-text-muted p-4">Loading platform settings…</p>;
   }
+
+  const confirmTitle =
+    confirmKind === 'olabid'
+      ? (pendingBoolValue ? 'Enable Olabid panel?' : 'Disable Olabid panel?')
+      : (pendingBoolValue ? 'Enable bot protection?' : 'Disable bot protection?');
+
+  const confirmBody =
+    confirmKind === 'olabid'
+      ? (pendingBoolValue
+        ? 'Enabling Olabid shows the auctions tab, item pages, discussion, and share-to-chat flows for all users. The app will resume calling Olabid-related APIs.'
+        : 'Disabling Olabid hides the auctions tab and all Olabid UI for every user. No Olabid API calls will be made. Existing discussion data remains stored but inaccessible until re-enabled.')
+      : (pendingBoolValue
+        ? 'Enabling Cloudflare Turnstile adds a secure, non-intrusive bot verification challenge to the login and registration pages. Please ensure that VITE_TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY are correctly configured.'
+        : 'Disabling Cloudflare Turnstile removes the bot verification challenge on the login and registration pages. This makes the platform more vulnerable to automated spam registrations and brute-force attempts.');
 
   return (
     <div className="space-y-6 p-4">
@@ -185,18 +209,47 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
       </section>
 
       <section className="space-y-3">
+        <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Features</h4>
+        <div className="flex items-center justify-between max-w-md p-3.5 rounded-xl border border-border-custom bg-bg-primary">
+          <div className="space-y-0.5 pr-3">
+            <span className="text-xs font-medium text-text-secondary block">Olabid auctions</span>
+            <span className="text-[10px] text-text-muted block">
+              Show the Olabid tab, item pages, discussion, and related APIs.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => openConfirm('olabid', !form.olabidEnabled)}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              form.olabidEnabled ? 'bg-indigo-600' : 'bg-zinc-700'
+            }`}
+            aria-pressed={form.olabidEnabled}
+            aria-label="Toggle Olabid auctions"
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                form.olabidEnabled ? 'translate-x-4' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+      </section>
+
+      <section className="space-y-3">
         <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Security settings</h4>
-        <div className="flex items-center justify-between max-w-xs p-3.5 rounded-xl border border-border-custom bg-bg-primary">
-          <div className="space-y-0.5">
+        <div className="flex items-center justify-between max-w-md p-3.5 rounded-xl border border-border-custom bg-bg-primary">
+          <div className="space-y-0.5 pr-3">
             <span className="text-xs font-medium text-text-secondary block">Cloudflare Turnstile</span>
             <span className="text-[10px] text-text-muted block">Enforce bot protection on login/signup.</span>
           </div>
           <button
             type="button"
-            onClick={handleToggleTurnstileClick}
+            onClick={() => openConfirm('turnstile', !form.turnstileEnabled)}
             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
               form.turnstileEnabled ? 'bg-indigo-600' : 'bg-zinc-700'
             }`}
+            aria-pressed={form.turnstileEnabled}
+            aria-label="Toggle Cloudflare Turnstile"
           >
             <span
               className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
@@ -221,35 +274,34 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
           Current limits: {settings.maxPinnedPostsPerUser} pinned post{settings.maxPinnedPostsPerUser === 1 ? '' : 's'},
           {' '}{settings.maxPostLength} characters,
           {' '}{settings.maxMediaPerPost} media file{settings.maxMediaPerPost === 1 ? '' : 's'} per post.
+          {' '}Olabid is {settings.olabidEnabled ? 'enabled' : 'disabled'}.
           {' '}Cloudflare Turnstile is {settings.turnstileEnabled ? 'enabled' : 'disabled'}.
         </p>
       )}
 
-      {showConfirmModal && (
+      {confirmKind && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fadeIn">
           <div className="w-full max-w-sm rounded-2xl border border-border-custom bg-bg-secondary shadow-2xl p-6 space-y-4">
             <div className="flex items-center gap-2 text-amber-400">
               <AlertTriangle className="h-5 w-5" />
               <h3 className="text-sm font-semibold text-text-primary">
-                {pendingTurnstileValue ? 'Enable bot protection?' : 'Disable bot protection?'}
+                {confirmTitle}
               </h3>
             </div>
             <p className="text-xs text-text-muted leading-relaxed">
-              {pendingTurnstileValue
-                ? 'Enabling Cloudflare Turnstile adds a secure, non-intrusive bot verification challenge to the login and registration pages. Please ensure that VITE_TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY are correctly configured.'
-                : 'Disabling Cloudflare Turnstile removes the bot verification challenge on the login and registration pages. This makes the platform more vulnerable to automated spam registrations and brute-force attempts.'}
+              {confirmBody}
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setShowConfirmModal(false)}
+                onClick={() => setConfirmKind(null)}
                 className="px-4 py-2 rounded-xl text-xs font-semibold text-text-muted hover:bg-bg-tertiary transition-colors cursor-pointer min-h-[44px]"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={handleConfirmTurnstileToggle}
+                onClick={handleConfirmToggle}
                 className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer transition-colors min-h-[44px]"
               >
                 Confirm

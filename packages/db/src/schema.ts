@@ -217,6 +217,51 @@ export const comments = sqliteTable('comments', {
   deletedAtIdx: index('comments_deleted_at_idx').on(table.deletedAt),
 }));
 
+/**
+ * Local snapshot of an external Olabid auction item, keyed by the Olabid API's own item id.
+ * Populated/refreshed whenever the item is fetched live, so discussion (and a read-only
+ * fallback view) survives even after the auction ends or the Olabid tab is removed.
+ */
+export const olabidItems = sqliteTable('olabid_items', {
+  externalId: integer('external_id').primaryKey(),
+  name: text('name').notNull(),
+  sku: text('sku'),
+  condition: text('condition'),
+  currentBidAmount: integer('current_bid_amount'),
+  retailPrice: integer('retail_price'),
+  imageUrl: text('image_url'),
+  /** Full API response at last sync, for a richer archived view. */
+  snapshotJson: text('snapshot_json'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  lastSyncedAt: text('last_synced_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const itemComments = sqliteTable('item_comments', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  olabidItemId: integer('olabid_item_id').notNull().references(() => olabidItems.externalId, { onDelete: 'cascade' }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  parentId: integer('parent_id').references((): any => itemComments.id, { onDelete: 'cascade' }), // Self reference for nesting
+  content: text('content').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text('deleted_at'), // Soft delete
+}, (table) => ({
+  olabidItemIdIdx: index('item_comments_olabid_item_id_idx').on(table.olabidItemId),
+  parentIdIdx: index('item_comments_parent_id_idx').on(table.parentId),
+  userIdIdx: index('item_comments_user_id_idx').on(table.userId),
+  deletedAtIdx: index('item_comments_deleted_at_idx').on(table.deletedAt),
+}));
+
+export const itemCommentLikes = sqliteTable('item_comment_likes', {
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  commentId: integer('comment_id').notNull().references(() => itemComments.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  deletedAt: text('deleted_at'), // Soft delete
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.commentId] }),
+  commentIdIdx: index('item_comment_likes_comment_id_idx').on(table.commentId),
+  deletedAtIdx: index('item_comment_likes_deleted_at_idx').on(table.deletedAt),
+}));
+
 export const userFollows = sqliteTable('user_follows', {
   followerId: integer('follower_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   followingId: integer('following_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -312,6 +357,8 @@ export const messages = sqliteTable('messages', {
   read: integer('read').default(0).notNull(), // 0 = unread, 1 = read
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
   deletedAt: text('deleted_at'), // Soft delete
+  /** First URL's cached Open Graph preview, if any (only one preview per message). */
+  linkPreviewId: integer('link_preview_id').references(() => linkPreviews.id, { onDelete: 'set null' }),
 }, (table) => ({
   senderIdIdx: index('messages_sender_id_idx').on(table.senderId),
   receiverIdIdx: index('messages_receiver_id_idx').on(table.receiverId),

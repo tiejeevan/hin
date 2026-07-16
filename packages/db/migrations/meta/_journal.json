@@ -253,6 +253,20 @@
       "when": 1783166000000,
       "tag": "0036_turnstile_setting",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1783167000000,
+      "tag": "0037_item_discussion",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1783168000000,
+      "tag": "0038_olabid_enabled",
+      "breakpoints": true
     }
   ]
 }

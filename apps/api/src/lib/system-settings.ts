@@ -39,6 +39,11 @@ const SETTING_REGISTRY = {
     defaultValue: DEFAULT_SYSTEM_SETTINGS.turnstileEnabled,
     parse: (raw: string | null) => parseBooleanSetting(raw, DEFAULT_SYSTEM_SETTINGS.turnstileEnabled),
   },
+  olabidEnabled: {
+    key: 'olabid_enabled',
+    defaultValue: DEFAULT_SYSTEM_SETTINGS.olabidEnabled,
+    parse: (raw: string | null) => parseBooleanSetting(raw, DEFAULT_SYSTEM_SETTINGS.olabidEnabled),
+  },
 } as const satisfies Record<
   keyof SystemSettings,
   { key: string; defaultValue: number | boolean; parse: (raw: string | null) => number | boolean }
@@ -102,6 +107,10 @@ export async function getMaxPostLength(db: Db): Promise<number> {
 
 export async function getMaxMediaPerPost(db: Db): Promise<number> {
   return (await getSystemSettings(db)).maxMediaPerPost;
+}
+
+export async function isOlabidEnabled(db: Db): Promise<boolean> {
+  return (await getSystemSettings(db)).olabidEnabled;
 }
 
 export async function getSystemSettings(db: Db): Promise<SystemSettings> {

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import { Message } from '@hin/types';
 import type { Env } from '../types';
@@ -105,6 +105,7 @@ messages.get('/:otherUserId', async (c) => {
       content: schema.messages.content,
       read: schema.messages.read,
       createdAt: schema.messages.createdAt,
+      linkPreviewId: schema.messages.linkPreviewId,
     })
     .from(schema.messages)
     .where(
@@ -117,11 +118,18 @@ messages.get('/:otherUserId', async (c) => {
     .orderBy(schema.messages.createdAt)
     .all();
 
+  const previewIds = [...new Set(chatMessages.map(m => m.linkPreviewId).filter((id): id is number => id !== null))];
+  const previews = previewIds.length
+    ? await db.select().from(schema.linkPreviews).where(inArray(schema.linkPreviews.id, previewIds)).all()
+    : [];
+  const previewById = new Map(previews.map(p => [p.id, p]));
+
   // Populate usernames
   const populatedMessages: Message[] = await Promise.all(
     chatMessages.map(async (msg) => {
       const sender = await db.select({ username: schema.users.username }).from(schema.users).where(eq(schema.users.id, msg.senderId)).get();
       const receiver = await db.select({ username: schema.users.username }).from(schema.users).where(eq(schema.users.id, msg.receiverId)).get();
+      const preview = msg.linkPreviewId ? previewById.get(msg.linkPreviewId) : null;
 
       return {
         id: msg.id,
@@ -132,6 +140,9 @@ messages.get('/:otherUserId', async (c) => {
         content: msg.content,
         createdAt: msg.createdAt,
         read: msg.read === 1,
+        linkPreview: preview
+          ? { url: preview.url, title: preview.title, description: preview.description, imageUrl: preview.imageUrl, siteName: preview.siteName }
+          : null,
       };
     })
   );

@@ -208,6 +208,8 @@ export interface SystemSettings {
   maxPostLength: number;
   maxMediaPerPost: number;
   turnstileEnabled: boolean;
+  /** When false, Olabid UI is hidden and Olabid/item-discussion APIs reject requests. */
+  olabidEnabled: boolean;
 }
 
 export interface MeBootstrapCounts {
@@ -235,6 +237,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   maxPostLength: 1000,
   maxMediaPerPost: 5,
   turnstileEnabled: false,
+  olabidEnabled: true,
 };
 
 export function validatePostLimits(
@@ -290,6 +293,36 @@ export interface Message {
   createdAt: string;
   read: boolean;
   deletedAt?: string | null;
+  linkPreview?: LinkPreview | null;
+}
+
+/** Discussion comment on an Olabid item, mirrors Comment but keyed by the external Olabid item id. */
+export interface ItemComment {
+  id: number;
+  olabidItemId: number;
+  userId: number;
+  username: string;
+  content: string;
+  parentId: number | null; // For nesting comment replies
+  createdAt: string;
+  deletedAt?: string | null;
+  likesCount: number;
+  hasLiked?: boolean;
+  authorEquippedBadges?: EquippedBadgePublic[];
+  /** Gamification delta from this action (comment create). */
+  g?: GamificationActionBlock;
+}
+
+/** Locally persisted snapshot of an Olabid auction item, used as a fallback once the live listing disappears. */
+export interface OlabidItemSnapshot {
+  externalId: number;
+  name: string;
+  sku: string | null;
+  condition: string | null;
+  currentBidAmount: number | null;
+  retailPrice: number | null;
+  imageUrl: string | null;
+  lastSyncedAt: string;
 }
 
 export interface ChatThread {
@@ -316,8 +349,8 @@ export interface Notification {
   senderUsername: string;
   type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted' | 'badge_award' | 'level_up' | 'event_win';
   /** What entityId points at. Optional for older rows written before migration. */
-  entityType?: 'post' | 'message' | 'system' | 'user' | 'badge' | 'event' | null;
-  entityId: number; // postId for likes/comments/mentions, messageId for messages, system_broadcasts.id for system
+  entityType?: 'post' | 'message' | 'system' | 'user' | 'badge' | 'event' | 'olabid_item' | null;
+  entityId: number; // postId for likes/comments/mentions, messageId for messages, olabidItemId for item comments, system_broadcasts.id for system
   /** Set for comment / mention-in-comment notifications. Optional for older rows. */
   commentId?: number | null;
   content: string;
@@ -366,6 +399,19 @@ export function notificationPostTarget(
     if (n.entityType && n.entityType !== 'post') return null;
     return {
       postId: n.entityId,
+      commentId: n.commentId ?? undefined,
+    };
+  }
+  return null;
+}
+
+/** Resolve Olabid item deep-link target from a notification (item discussion likes/replies). */
+export function notificationItemTarget(
+  n: Notification,
+): { olabidItemId: number; commentId?: number } | null {
+  if ((n.type === 'like' || n.type === 'comment') && n.entityType === 'olabid_item') {
+    return {
+      olabidItemId: n.entityId,
       commentId: n.commentId ?? undefined,
     };
   }
@@ -423,6 +469,11 @@ export const VotePollSchema = z.object({
 });
 
 export const CreateCommentSchema = z.object({
+  content: z.string().min(1, 'Comment cannot be empty').max(500, 'Comment is too long'),
+  parentId: z.number().nullable().optional(),
+});
+
+export const CreateItemCommentSchema = z.object({
   content: z.string().min(1, 'Comment cannot be empty').max(500, 'Comment is too long'),
   parentId: z.number().nullable().optional(),
 });
@@ -551,6 +602,10 @@ export type ServerMessage =
   | { type: 'comment_deleted'; payload: { commentId: number; postId: number } }
   | { type: 'post_updated'; payload: { post: Post } }
   | { type: 'comment_updated'; payload: { comment: Comment } }
+  | { type: 'item_comment_like_update'; payload: { commentId: number; olabidItemId: number; likesCount: number; userId: number; liked: boolean } }
+  | { type: 'item_comment_created'; payload: { comment: ItemComment } }
+  | { type: 'item_comment_deleted'; payload: { commentId: number; olabidItemId: number } }
+  | { type: 'item_comment_updated'; payload: { comment: ItemComment } }
   | { type: 'poll_vote_update'; payload: { postId: number; poll: Poll } }
   | { type: 'poll_closed'; payload: { postId: number; poll: Poll } }
   | { type: 'typing'; payload: { senderId: number; isTyping: boolean } }
@@ -558,7 +613,8 @@ export type ServerMessage =
   | { type: 'presence_snapshot'; payload: { onlineUserIds: number[] } }
   | { type: 'user_online'; payload: { userId: number } }
   | { type: 'user_offline'; payload: { userId: number } }
-  | { type: 'system_toast'; payload: { content: string } };
+  | { type: 'system_toast'; payload: { content: string } }
+  | { type: 'system_settings_changed'; payload: { settings: SystemSettings } };
 
 export const BroadcastSystemMessageSchema = z.object({
   message: z.string().min(1, 'Message cannot be empty').max(500, 'Message is too long'),
@@ -585,11 +641,13 @@ export const UpdateSystemSettingsSchema = z.object({
   maxPostLength: z.number().int().min(SYSTEM_SETTING_BOUNDS.maxPostLength.min).max(SYSTEM_SETTING_BOUNDS.maxPostLength.max).optional(),
   maxMediaPerPost: z.number().int().min(SYSTEM_SETTING_BOUNDS.maxMediaPerPost.min).max(SYSTEM_SETTING_BOUNDS.maxMediaPerPost.max).optional(),
   turnstileEnabled: z.boolean().optional(),
+  olabidEnabled: z.boolean().optional(),
 }).refine(
   data => data.maxPinnedPostsPerUser !== undefined
     || data.maxPostLength !== undefined
     || data.maxMediaPerPost !== undefined
-    || data.turnstileEnabled !== undefined,
+    || data.turnstileEnabled !== undefined
+    || data.olabidEnabled !== undefined,
   { message: 'At least one setting must be provided' },
 );
 

@@ -10,6 +10,7 @@ import { isNotificationEnabled, toPublicSettings } from '../lib/user-settings';
 import { listReports, reviewReport } from '../lib/reports';
 import { softDeleteUser, reinstateUser, computeAccountStatus } from '../lib/user-lifecycle';
 import { getSystemSettings, updateSystemSettings } from '../lib/system-settings';
+import { broadcastToAll } from '../lib/realtime';
 import { writeAuditLog } from '../lib/audit';
 
 const admin = new Hono<{ Bindings: Env }>();
@@ -407,6 +408,12 @@ admin.patch('/settings', async (c) => {
 
   const db = drizzle(c.env.DB, { schema });
   const systemSettings = await updateSystemSettings(db, parsed.data);
+
+  await broadcastToAll(c.env, {
+    type: 'system_settings_changed',
+    payload: { settings: systemSettings },
+  });
+
   return c.json(systemSettings satisfies SystemSettings);
 });
 

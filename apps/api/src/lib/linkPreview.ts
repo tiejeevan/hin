@@ -2,6 +2,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import { parseOlabidItemId, fetchOlabidItem } from './olabidApi';
+import { isOlabidEnabled } from './system-settings';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -137,11 +138,10 @@ function extractMetadata(html: Uint8Array): Promise<ExtractedMetadata> {
  * Fetch Olabid item preview using their API.
  */
 async function fetchOlabidPreview(
-  db: Db,
-  normalized: string,
-  itemId: string
+  itemId: string,
+  apiKey: string
 ): Promise<ExtractedMetadata> {
-  const itemData = await fetchOlabidItem(itemId);
+  const itemData = await fetchOlabidItem(itemId, apiKey);
 
   if (!itemData) {
     throw new Error('Item not found');
@@ -159,7 +159,7 @@ async function fetchOlabidPreview(
   return {
     title: `${itemData.name} - Olabid Auction`,
     description,
-    imageUrl: itemData.images?.[0]?.largeUrl || itemData.images?.[0]?.url || null,
+    imageUrl: itemData.images?.[0]?.largeUrl || itemData.images?.[0]?.url || undefined,
     siteName: 'Olabid',
   };
 }
@@ -172,7 +172,8 @@ async function fetchOlabidPreview(
  */
 export async function getOrFetchLinkPreview(
   db: Db,
-  rawUrl: string
+  rawUrl: string,
+  opts?: { olabidApiKey?: string },
 ): Promise<number | null> {
   const normalized = normalizeUrl(rawUrl);
   if (!normalized) return null;
@@ -202,10 +203,11 @@ export async function getOrFetchLinkPreview(
   try {
     let meta: ExtractedMetadata;
 
-    // Check if this is an Olabid link
-    if (olabidItemId) {
+    // Olabid auction API preview — only when the feature is enabled and we have a key.
+    const olabidOn = Boolean(olabidItemId && opts?.olabidApiKey && await isOlabidEnabled(db));
+    if (olabidOn && olabidItemId && opts?.olabidApiKey) {
       try {
-        meta = await fetchOlabidPreview(db, normalized, olabidItemId);
+        meta = await fetchOlabidPreview(olabidItemId, opts.olabidApiKey);
       } catch (olabidError) {
         console.warn(`Olabid preview failed, falling back to Open Graph: ${olabidError}`);
         // Fall back to regular Open Graph scraping

@@ -1,4 +1,4 @@
-import { Comment, User as UserType } from '@hin/types';
+import { Comment, ItemComment, User as UserType } from '@hin/types';
 
 export interface Toast {
   id: string;
@@ -6,6 +6,7 @@ export interface Toast {
   type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted' | 'badge_award' | 'level_up';
   postId?: number;
   commentId?: number;
+  olabidItemId?: number;
 }
 
 export interface AdminData {
@@ -21,6 +22,10 @@ export interface AdminData {
 
 export interface CommentNode extends Comment {
   replies: CommentNode[];
+}
+
+export interface ItemCommentNode extends ItemComment {
+  replies: ItemCommentNode[];
 }
 
 export type FeedMode = 'all' | 'following' | 'bookmarks' | 'explore' | 'search';

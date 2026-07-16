@@ -122,6 +122,11 @@ function sanitizeError(error: unknown): string {
 export function parseOlabidItemId(url: string): string | null {
   try {
     const u = new URL(url);
+
+    // Hin permalinks: /olabid/12345 (any host — local, staging, prod)
+    const hinPathMatch = u.pathname.match(/^\/olabid\/(\d+)\/?$/);
+    if (hinPathMatch) return hinPathMatch[1];
+
     if (!u.hostname.includes('olabid.com')) return null;
 
     // Check query parameter ?id=

@@ -5,6 +5,8 @@ import { getOlabidItemIdFromUrl } from '../../lib/appRoutes';
 interface LinkPreviewCardProps {
   preview: LinkPreview;
   onClick?: (e: React.MouseEvent) => void;
+  /** When false, Olabid links stay as external URLs (no in-app /olabid/:id navigation). */
+  inAppOlabidLinks?: boolean;
 }
 
 function getHostname(url: string): string {
@@ -16,6 +18,7 @@ function getHostname(url: string): string {
 }
 
 function isOlabidLink(url: string): boolean {
+  if (getOlabidItemIdFromUrl(url) !== null) return true;
   try {
     const urlObj = new URL(url);
     return urlObj.hostname.includes('olabid.com');
@@ -24,10 +27,10 @@ function isOlabidLink(url: string): boolean {
   }
 }
 
-export function LinkPreviewCard({ preview, onClick }: LinkPreviewCardProps) {
-  const isOlabid = isOlabidLink(preview.url);
-  const itemId = isOlabid ? getOlabidItemIdFromUrl(preview.url) : null;
-  const href = itemId !== null ? `/olabid/${itemId}` : preview.url;
+export function LinkPreviewCard({ preview, onClick, inAppOlabidLinks = true }: LinkPreviewCardProps) {
+  const itemId = getOlabidItemIdFromUrl(preview.url);
+  const isOlabid = itemId !== null || isOlabidLink(preview.url);
+  const href = itemId !== null && inAppOlabidLinks ? `/olabid/${itemId}` : preview.url;
   
   return (
     <a

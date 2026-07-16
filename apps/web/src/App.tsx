@@ -6,6 +6,8 @@ import {
   ReportReason,
   ReportTargetType,
   Comment,
+  ItemComment,
+  LinkPreview,
   FollowRequest,
   MeBootstrap,
   Message,
@@ -19,6 +21,7 @@ import {
   shouldShowNotificationToast,
   shouldShowChatIcon,
   notificationPostTarget,
+  notificationItemTarget,
   resolveNotificationCategory,
   SystemSettings,
   DEFAULT_SYSTEM_SETTINGS,
@@ -164,9 +167,17 @@ export default function App() {
   const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
   const [editingCommentContent, setEditingCommentContent] = useState('');
 
+  // Olabid item discussion — keyed by external Olabid item id.
+  const [itemComments, setItemComments] = useState<Record<number, ItemComment[]>>({});
+  const [newItemCommentText, setNewItemCommentText] = useState<Record<number, string>>({});
+  const [replyingToItemComment, setReplyingToItemComment] = useState<Record<number, ItemComment | null>>({});
+  const [editingItemCommentId, setEditingItemCommentId] = useState<number | null>(null);
+  const [editingItemCommentContent, setEditingItemCommentContent] = useState('');
+
   const [chatRecipient, setChatRecipient] = useState<ChatRecipient | null>(null);
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [newMsgText, setNewMsgText] = useState('');
+  const [draftLinkPreview, setDraftLinkPreview] = useState<LinkPreview | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   const [threads, setThreads] = useState<import('@hin/types').ChatThread[]>([]);
@@ -198,6 +209,10 @@ export default function App() {
   const [isProfileEditing, setIsProfileEditing] = useState(false);
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
   const [systemSettings, setSystemSettings] = useState<SystemSettings | null>(null);
+  /** False until /api/settings/public (or bootstrap) reports the Olabid flag — keeps public /olabid shut until then. */
+  const [olabidFlagKnown, setOlabidFlagKnown] = useState(false);
+  const olabidFlagKnownRef = useRef(false);
+  const olabidEnabledRef = useRef(false);
   const [gamificationEnabled, setGamificationEnabled] = useState(false);
   const [introWalkthroughCompleted, setIntroWalkthroughCompleted] = useState<boolean | null>(null);
   const [myGamification, setMyGamification] = useState<GamificationPublic | null>(null);
@@ -226,6 +241,8 @@ export default function App() {
   /** Sync dedupe for comment create/delete (HTTP + WS). setState updaters are async in React 18. */
   const appliedCommentCreatesRef = useRef(new Set<number>());
   const appliedCommentDeletesRef = useRef(new Set<number>());
+  const appliedItemCommentCreatesRef = useRef(new Set<number>());
+  const appliedItemCommentDeletesRef = useRef(new Set<number>());
   const showMessagesDropdownRef = useRef(showMessagesDropdown);
   const chatRecipientRef = useRef(chatRecipient);
 
@@ -297,7 +314,7 @@ export default function App() {
   const addToast = (
     content: string,
     type: Toast['type'],
-    target?: { postId?: number; commentId?: number },
+    target?: { postId?: number; commentId?: number; olabidItemId?: number },
     opts?: { skipPrefCheck?: boolean },
   ) => {
     const settings = userSettingsRef.current;
@@ -470,6 +487,7 @@ export default function App() {
         setMutedUserIds(new Set(data.mutedIds));
         setUserSettings(data.userSettings);
         setSystemSettings(data.systemSettings);
+        setOlabidFlagKnown(true);
         setUnreadNotifsCount(data.counts.unreadNotifications);
         setUnreadMessagesCount(data.counts.unreadMessages);
         setGamificationEnabled(!!data.gamificationEnabled);
@@ -648,7 +666,17 @@ export default function App() {
     addToast('Profile updated successfully', 'system', undefined, { skipPrefCheck: true });
   };
 
+  // Treat as OFF until the public/bootstrap flag is known so /olabid never fetches early.
+  const olabidEnabled = olabidFlagKnown && systemSettings?.olabidEnabled === true;
+  olabidFlagKnownRef.current = olabidFlagKnown;
+  olabidEnabledRef.current = olabidEnabled;
+
   const openOlabid = (opts?: { skipUrlSync?: boolean; replace?: boolean }) => {
+    if (!olabidEnabled) {
+      // Always leave /olabid URLs when the feature is off or still loading.
+      if (olabidFlagKnown) goHome();
+      return;
+    }
     setIsSearchOpen(false);
     setActiveTab('olabid');
     setOlabidItemId(null);
@@ -664,6 +692,10 @@ export default function App() {
     itemId: number,
     opts?: { skipUrlSync?: boolean; replace?: boolean },
   ) => {
+    if (!olabidEnabled) {
+      if (olabidFlagKnown) goHome();
+      return;
+    }
     setIsSearchOpen(false);
     setActiveTab('olabid');
     setOlabidItemId(itemId);
@@ -777,6 +809,47 @@ export default function App() {
     }
   };
 
+  const fetchItemComments = async (olabidItemId: number) => {
+    try {
+      const res = await fetch(`${API_URL}/api/olabid/items/${olabidItemId}/comments`, { headers: getHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setItemComments(prev => ({ ...prev, [olabidItemId]: data }));
+      }
+    } catch (e) {
+      console.error('Error fetching item comments:', e);
+    }
+  };
+
+  // Draft link preview while composing a DM (debounced URL detection).
+  useEffect(() => {
+    const match = newMsgText.match(/(https?:\/\/[^\s<>"')]+)/i);
+    const url = match?.[1]?.replace(/[.,!?;:)\]}>'"]+$/, '') || null;
+    if (!url || !token) {
+      setDraftLinkPreview(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/link-preview?url=${encodeURIComponent(url)}`, {
+          headers: getHeaders(),
+        });
+        if (!cancelled && res.ok) {
+          setDraftLinkPreview(await res.json());
+        } else if (!cancelled) {
+          setDraftLinkPreview(null);
+        }
+      } catch {
+        if (!cancelled) setDraftLinkPreview(null);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [newMsgText, token]);
+
   const fetchPost = async (postId: number) => {
     setPostViewLoading(true);
     setPostViewError(null);
@@ -788,9 +861,9 @@ export default function App() {
       ]);
       if (postRes.ok) {
         const post = await postRes.json();
-        const olabidItemId = getOlabidItemIdFromPost(post);
-        if (olabidItemId !== null) {
-          openOlabidItem(olabidItemId, { replace: true });
+        const olabidItemIdFromPost = getOlabidItemIdFromPost(post);
+        if (olabidItemIdFromPost !== null && olabidEnabled) {
+          openOlabidItem(olabidItemIdFromPost, { replace: true });
           return;
         }
         setPostViewPost(post);
@@ -824,9 +897,9 @@ export default function App() {
                          profilePosts.find(p => p.id === postId) ||
                          (postViewPost && postViewPost.id === postId ? postViewPost : null);
     if (existingPost) {
-      const olabidItemId = getOlabidItemIdFromPost(existingPost);
-      if (olabidItemId !== null) {
-        openOlabidItem(olabidItemId, { replace: opts?.replace, skipUrlSync: opts?.skipUrlSync });
+      const olabidItemIdFromPost = getOlabidItemIdFromPost(existingPost);
+      if (olabidItemIdFromPost !== null && olabidEnabled) {
+        openOlabidItem(olabidItemIdFromPost, { replace: opts?.replace, skipUrlSync: opts?.skipUrlSync });
         return;
       }
     }
@@ -933,6 +1006,10 @@ export default function App() {
   };
 
   const handleToastClick = (toast: Toast) => {
+    if (toast.olabidItemId) {
+      if (olabidEnabled) openOlabidItem(toast.olabidItemId);
+      return;
+    }
     if (toast.postId) {
       openPost(toast.postId, { commentId: toast.commentId });
     }
@@ -1018,6 +1095,50 @@ export default function App() {
     }, 1500);
   };
 
+  // Public feature flags (no auth) — guests + logged-out users; also blocks public /olabid until known.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/settings/public`, { cache: 'no-store' });
+        if (!res.ok || cancelled) return;
+        const data = await res.json() as { olabidEnabled?: boolean };
+        if (cancelled) return;
+        setSystemSettings(prev => ({
+          ...(prev ?? DEFAULT_SYSTEM_SETTINGS),
+          olabidEnabled: data.olabidEnabled === true,
+        }));
+        setOlabidFlagKnown(true);
+      } catch {
+        // If the flag can't be loaded, keep Olabid shut (no public API traffic).
+        if (!cancelled) {
+          setSystemSettings(prev => ({
+            ...(prev ?? DEFAULT_SYSTEM_SETTINGS),
+            olabidEnabled: false,
+          }));
+          setOlabidFlagKnown(true);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // When the flag becomes known (or flips off), resolve any /olabid deep link — open or leave.
+  useEffect(() => {
+    if (!olabidFlagKnown) return;
+    const route = parseLocation(window.location.pathname, window.location.hash);
+    if (route.view !== 'olabid') {
+      if (!olabidEnabled && activeTab === 'olabid') goHome();
+      return;
+    }
+    if (!olabidEnabled) {
+      goHome();
+      return;
+    }
+    if (route.itemId) openOlabidItem(route.itemId, { skipUrlSync: true, replace: true });
+    else openOlabid({ skipUrlSync: true, replace: true });
+  }, [olabidFlagKnown, olabidEnabled]);
+
   useEffect(() => {
     if (token) {
       fetchPosts();
@@ -1034,7 +1155,10 @@ export default function App() {
       setMutedUserIds(new Set());
       setFollowRequests([]);
       setUserSettings(null);
-      setSystemSettings(null);
+      setSystemSettings(prev => ({
+        ...DEFAULT_SYSTEM_SETTINGS,
+        olabidEnabled: prev?.olabidEnabled ?? DEFAULT_SYSTEM_SETTINGS.olabidEnabled,
+      }));
       setUnreadNotifsCount(0);
       setUnreadMessagesCount(0);
       setIntroWalkthroughCompleted(null);
@@ -1186,11 +1310,31 @@ export default function App() {
               const showToast = (type: Toast['type']) =>
                 !settings || shouldShowNotificationToast(settings, type);
               if (notif.type === 'like' && showToast('like')) {
-                const target = notificationPostTarget(notif);
-                addToast(notif.content, 'like', target ? { postId: target.postId, commentId: target.commentId } : undefined, { skipPrefCheck: true });
+                const itemTarget = notificationItemTarget(notif);
+                const postTarget = notificationPostTarget(notif);
+                addToast(
+                  notif.content,
+                  'like',
+                  itemTarget
+                    ? { olabidItemId: itemTarget.olabidItemId, commentId: itemTarget.commentId }
+                    : postTarget
+                      ? { postId: postTarget.postId, commentId: postTarget.commentId }
+                      : undefined,
+                  { skipPrefCheck: true },
+                );
               } else if (notif.type === 'comment' && showToast('comment')) {
-                const target = notificationPostTarget(notif);
-                addToast(notif.content, 'comment', target ? { postId: target.postId, commentId: target.commentId } : undefined, { skipPrefCheck: true });
+                const itemTarget = notificationItemTarget(notif);
+                const postTarget = notificationPostTarget(notif);
+                addToast(
+                  notif.content,
+                  'comment',
+                  itemTarget
+                    ? { olabidItemId: itemTarget.olabidItemId, commentId: itemTarget.commentId }
+                    : postTarget
+                      ? { postId: postTarget.postId, commentId: postTarget.commentId }
+                      : undefined,
+                  { skipPrefCheck: true },
+                );
               } else if (notif.type === 'mention' && showToast('mention')) {
                 const target = notificationPostTarget(notif);
                 addToast(notif.content, 'mention', target ? { postId: target.postId, commentId: target.commentId } : undefined, { skipPrefCheck: true });
@@ -1265,6 +1409,12 @@ export default function App() {
                 setMyGamification(null);
                 setProfileGamification(null);
               }
+              break;
+            }
+            case 'system_settings_changed': {
+              const { settings } = message.payload as { settings: SystemSettings };
+              setSystemSettings(settings);
+              setOlabidFlagKnown(true);
               break;
             }
             case 'post_created': {
@@ -1402,6 +1552,64 @@ export default function App() {
               }));
               break;
             }
+            case 'item_comment_like_update': {
+              const { commentId, olabidItemId, likesCount, userId, liked } = message.payload;
+              setItemComments(prev => ({
+                ...prev,
+                [olabidItemId]: (prev[olabidItemId] || []).map(c =>
+                  c.id === commentId
+                    ? {
+                        ...c,
+                        likesCount,
+                        hasLiked: userId === currentUser!.id ? liked : c.hasLiked,
+                      }
+                    : c
+                ),
+              }));
+              break;
+            }
+            case 'item_comment_created': {
+              const { comment } = message.payload;
+              if (appliedItemCommentCreatesRef.current.has(comment.id)) break;
+              appliedItemCommentCreatesRef.current.add(comment.id);
+              setItemComments(prev => {
+                const list = prev[comment.olabidItemId] || [];
+                if (list.some(c => c.id === comment.id)) return prev;
+                return { ...prev, [comment.olabidItemId]: [comment, ...list] };
+              });
+              break;
+            }
+            case 'item_comment_deleted': {
+              const { commentId, olabidItemId } = message.payload;
+              if (appliedItemCommentDeletesRef.current.has(commentId)) break;
+              appliedItemCommentDeletesRef.current.add(commentId);
+              setItemComments(prev => ({
+                ...prev,
+                [olabidItemId]: (prev[olabidItemId] || []).map(c =>
+                  c.id === commentId
+                    ? { ...c, deletedAt: new Date().toISOString(), username: 'deleted', content: '[Comment deleted]' }
+                    : c
+                ),
+              }));
+              break;
+            }
+            case 'item_comment_updated': {
+              const { comment } = message.payload;
+              setItemComments(prev => ({
+                ...prev,
+                [comment.olabidItemId]: (prev[comment.olabidItemId] || []).map(c =>
+                  c.id === comment.id
+                    ? {
+                        ...c,
+                        ...comment,
+                        likesCount: comment.likesCount ?? c.likesCount ?? 0,
+                        hasLiked: comment.hasLiked ?? c.hasLiked,
+                      }
+                    : c
+                ),
+              }));
+              break;
+            }
           }
         } catch (e) {
           console.error('Error parsing WS message:', e);
@@ -1447,11 +1655,7 @@ export default function App() {
     } else if (route.view === 'search') {
       openSearch({ skipUrlSync: true });
     } else if (route.view === 'olabid') {
-      if (route.itemId) {
-        openOlabidItem(route.itemId, { skipUrlSync: true });
-      } else {
-        openOlabid({ skipUrlSync: true });
-      }
+      // Deferred until olabidFlagKnown — see effect that resolves /olabid deep links.
     }
   }, []);
 
@@ -2004,12 +2208,117 @@ export default function App() {
     }
   };
 
-  const startChat = (user: UserType | ChatRecipient) => {
+  const handleCreateItemComment = async (olabidItemId: number, e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    const text = newItemCommentText[olabidItemId] || '';
+    if (!text.trim()) return;
+    const parent = replyingToItemComment[olabidItemId];
+    try {
+      const res = await fetch(`${API_URL}/api/olabid/items/${olabidItemId}/comments`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ content: text, parentId: parent ? parent.id : null }),
+      });
+      if (res.ok) {
+        const newComment = await res.json();
+        if (!appliedItemCommentCreatesRef.current.has(newComment.id)) {
+          appliedItemCommentCreatesRef.current.add(newComment.id);
+          setItemComments(prev => {
+            const list = prev[olabidItemId] || [];
+            if (list.some(c => c.id === newComment.id)) return prev;
+            return { ...prev, [olabidItemId]: [newComment, ...list] };
+          });
+        }
+        setNewItemCommentText(prev => ({ ...prev, [olabidItemId]: '' }));
+        setReplyingToItemComment(prev => ({ ...prev, [olabidItemId]: null }));
+        if (newComment.g) {
+          void fetchMyGamification();
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleSaveItemCommentEdit = async (olabidItemId: number, commentId: number) => {
+    if (!editingItemCommentContent.trim()) return;
+    try {
+      const res = await fetch(`${API_URL}/api/item-comments/${commentId}`, {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify({ content: editingItemCommentContent }),
+      });
+      if (res.ok) {
+        const updatedComment = await res.json();
+        setItemComments(prev => ({
+          ...prev,
+          [olabidItemId]: (prev[olabidItemId] || []).map(c => (c.id === commentId ? updatedComment : c)),
+        }));
+        setEditingItemCommentId(null);
+        addToast('Comment updated successfully', 'system', undefined, { skipPrefCheck: true });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeleteItemComment = async (olabidItemId: number, commentId: number) => {
+    if (!currentUser || !confirm('Are you sure you want to delete this comment?')) return;
+    try {
+      const res = await fetch(`${API_URL}/api/item-comments/${commentId}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        if (!appliedItemCommentDeletesRef.current.has(commentId)) {
+          appliedItemCommentDeletesRef.current.add(commentId);
+          setItemComments(prev => ({
+            ...prev,
+            [olabidItemId]: (prev[olabidItemId] || []).map(c =>
+              c.id === commentId
+                ? { ...c, deletedAt: new Date().toISOString(), username: 'deleted', content: '[Comment deleted]' }
+                : c
+            ),
+          }));
+        }
+        addToast('Comment deleted', 'system', undefined, { skipPrefCheck: true });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleToggleItemCommentLike = async (olabidItemId: number, commentId: number) => {
+    if (!currentUser) return;
+    try {
+      const res = await fetch(`${API_URL}/api/item-comments/${commentId}/like`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setItemComments(prev => ({
+          ...prev,
+          [olabidItemId]: (prev[olabidItemId] || []).map(c =>
+            c.id === commentId ? { ...c, hasLiked: data.liked, likesCount: data.likesCount } : c
+          ),
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const startChat = (user: UserType | ChatRecipient, opts?: { prefillText?: string }) => {
     const recipient: ChatRecipient = { id: user.id, username: user.username, role: user.role, avatarUrl: user.avatarUrl };
     setShowNotifications(false);
     setShowMessagesDropdown(true);
     setMessagesPanelExpanded(false);
     openChatInPanel(recipient);
+    if (opts?.prefillText) {
+      setNewMsgText(opts.prefillText);
+    }
     fetchThreads();
   };
 
@@ -2029,6 +2338,7 @@ export default function App() {
           content,
           createdAt: new Date().toISOString(),
           read: false,
+          linkPreview: draftLinkPreview,
         },
       ]);
       ws.current.send(
@@ -2041,6 +2351,7 @@ export default function App() {
       ws.current.send(JSON.stringify({ type: 'typing', payload: { receiverId: chatRecipient.id, isTyping: false } }));
       lastTypingSentRef.current[chatRecipient.id] = 0;
       setNewMsgText('');
+      setDraftLinkPreview(null);
     } else {
       alert('Real-time connection is not ready yet. Please wait a moment and try again.');
     }
@@ -2109,6 +2420,11 @@ export default function App() {
     } else if (n.type === 'follow' || n.type === 'follow_accepted') {
       openProfile(n.senderId);
     } else if (n.type === 'like' || n.type === 'comment' || n.type === 'mention') {
+      const itemTarget = notificationItemTarget(n);
+      if (itemTarget) {
+        if (olabidEnabled) openOlabidItem(itemTarget.olabidItemId);
+        return;
+      }
       const target = notificationPostTarget(n);
       if (target) openPost(target.postId, { commentId: target.commentId });
       else goHome();
@@ -2346,11 +2662,7 @@ export default function App() {
     } else if (route.view === 'search') {
       openSearch({ replace: true, skipUrlSync: true });
     } else if (route.view === 'olabid') {
-      if (route.itemId) {
-        openOlabidItem(route.itemId, { replace: true, skipUrlSync: true });
-      } else {
-        openOlabid({ replace: true, skipUrlSync: true });
-      }
+      // Deferred until olabidFlagKnown — see effect that resolves /olabid deep links.
     } else if (route.view === 'admin') {
       if (currentUser?.role === 'admin') {
         openAdmin(route.section, { replace: true, skipUrlSync: true });
@@ -2368,11 +2680,13 @@ export default function App() {
       } else if (r.view === 'search') {
         openSearch({ skipUrlSync: true });
       } else if (r.view === 'olabid') {
-        if (r.itemId) {
-          openOlabidItem(r.itemId, { skipUrlSync: true });
-        } else {
-          openOlabid({ skipUrlSync: true });
+        if (!olabidFlagKnownRef.current) return;
+        if (!olabidEnabledRef.current) {
+          goHome();
+          return;
         }
+        if (r.itemId) openOlabidItem(r.itemId, { skipUrlSync: true });
+        else openOlabid({ skipUrlSync: true });
       } else if (r.view === 'admin' && currentUser?.role === 'admin') {
         openAdmin(r.section, { skipUrlSync: true });
       } else {
@@ -2683,7 +2997,7 @@ export default function App() {
             isOlabidTab={activeTab === 'olabid'}
             onGoHome={goHome}
             onOpenAdmin={currentUser?.role === 'admin' ? () => openAdmin('dashboard') : undefined}
-            onOpenOlabid={openOlabid}
+            onOpenOlabid={olabidEnabled ? openOlabid : undefined}
             onToggleNotifications={() => {
               setShowNotifications(prev => {
                 const next = !prev;
@@ -3008,11 +3322,38 @@ export default function App() {
             gamificationEnabled={gamificationEnabled}
             onGamificationRefresh={() => { void fetchMyGamification(); }}
           />
-        ) : activeTab === 'olabid' ? (
+        ) : activeTab === 'olabid' && olabidEnabled ? (
           olabidItemId ? (
             <OlabidItemPage
               itemId={olabidItemId}
               onBack={() => openOlabid()}
+              currentUser={currentUser}
+              gamificationEnabled={gamificationEnabled}
+              threads={threads}
+              token={token}
+              comments={itemComments[olabidItemId] || []}
+              newCommentText={newItemCommentText[olabidItemId] || ''}
+              replyingTo={replyingToItemComment[olabidItemId] || null}
+              editingCommentId={editingItemCommentId}
+              editingCommentContent={editingItemCommentContent}
+              onFetchComments={fetchItemComments}
+              onCommentTextChange={text => setNewItemCommentText(prev => ({ ...prev, [olabidItemId]: text }))}
+              onCreateComment={e => handleCreateItemComment(olabidItemId, e)}
+              onCancelReply={() => setReplyingToItemComment(prev => ({ ...prev, [olabidItemId]: null }))}
+              onReply={(id, comment) => setReplyingToItemComment(prev => ({ ...prev, [id]: comment }))}
+              onDeleteComment={handleDeleteItemComment}
+              onStartEdit={(commentId, content) => {
+                setEditingItemCommentId(commentId);
+                setEditingItemCommentContent(content);
+              }}
+              onCancelEdit={() => setEditingItemCommentId(null)}
+              onSaveEdit={handleSaveItemCommentEdit}
+              onEditContentChange={setEditingItemCommentContent}
+              onToggleCommentLike={handleToggleItemCommentLike}
+              onViewProfile={handleViewProfile}
+              onViewHashtag={handleViewHashtag}
+              onSignInRequired={handleGuestSignIn}
+              onShareToChat={(recipient, prefillText) => startChat(recipient, { prefillText })}
             />
           ) : (
             <OlabidPage onOpenItem={(id) => openOlabidItem(id)} />
@@ -3067,6 +3408,7 @@ export default function App() {
             chatRecipient={chatRecipient}
             chatMessages={chatMessages}
             newMsgText={newMsgText}
+            draftLinkPreview={draftLinkPreview}
             typingUsers={typingUsers}
             onlineUserIds={onlineUserIds}
             chatBottomRef={chatBottomRef}
@@ -3077,6 +3419,8 @@ export default function App() {
             onSendDM={handleSendDM}
             onTyping={handleUserTyping}
             onOpenProfile={openProfile}
+            onOpenOlabidItem={olabidEnabled ? openOlabidItem : undefined}
+            olabidEnabled={olabidEnabled}
           />
         )}
 

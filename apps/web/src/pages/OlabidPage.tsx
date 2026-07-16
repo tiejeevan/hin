@@ -14,6 +14,7 @@ import {
   ChevronDown,
   Flame,
   Sparkles,
+  MessageSquare,
 } from 'lucide-react';
 import { API_URL } from '../config';
 
@@ -85,6 +86,7 @@ interface OlabidPageProps {
 
 export function OlabidPage({ onOpenItem }: OlabidPageProps) {
   const [items, setItems] = useState<OlabidItem[]>([]);
+  const [commentCounts, setCommentCounts] = useState<Record<number, number>>({});
   const [categories, setCategories] = useState<OlabidCategory[]>([]);
   const [warehouses, setWarehouses] = useState<OlabidWarehouse[]>([]);
   const [selectedWarehouseIds, setSelectedWarehouseIds] = useState<number[]>([]);
@@ -186,6 +188,23 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
       setItems(data.items);
       setPage(data.pageContext.page);
       setHasLoaded(true);
+
+      const ids = data.items.map(i => i.id);
+      if (ids.length > 0) {
+        try {
+          const countsRes = await fetch(
+            `${API_URL}/api/olabid/items/comment-counts?ids=${ids.join(',')}`,
+            { cache: 'no-store' },
+          );
+          if (countsRes.ok) {
+            setCommentCounts(await countsRes.json());
+          }
+        } catch {
+          // Non-critical — badges just won't show
+        }
+      } else {
+        setCommentCounts({});
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -625,6 +644,7 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
               {items.map((item) => {
                 const savings = calculateSavings(item.retailPrice, item.currentBidAmount);
                 const hasBids = item.currentBidAmount > 0;
+                const discussionCount = commentCounts[item.id] || 0;
 
                 return (
                   <button
@@ -665,17 +685,25 @@ export function OlabidPage({ onOpenItem }: OlabidPageProps) {
                       </div>
 
                       {/* Bottom Badges */}
-                      <div className="absolute bottom-2 left-2 right-2 flex gap-1.5">
-                        {item.shippingIsFree && (
-                          <div className="bg-emerald-600/90 text-white px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1">
-                            <Truck className="h-3 w-3" />
-                            Free Ship
-                          </div>
-                        )}
-                        {item.shippingIsUnavailable && (
-                          <div className="bg-black/80 text-white px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1">
-                            <Truck className="h-3 w-3" />
-                            Pickup Only
+                      <div className="absolute bottom-2 left-2 right-2 flex gap-1.5 items-end justify-between">
+                        <div className="flex gap-1.5 flex-wrap">
+                          {item.shippingIsFree && (
+                            <div className="bg-emerald-600/90 text-white px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1">
+                              <Truck className="h-3 w-3" />
+                              Free Ship
+                            </div>
+                          )}
+                          {item.shippingIsUnavailable && (
+                            <div className="bg-black/80 text-white px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1">
+                              <Truck className="h-3 w-3" />
+                              Pickup Only
+                            </div>
+                          )}
+                        </div>
+                        {discussionCount > 0 && (
+                          <div className="bg-black/75 text-white px-2 py-1 rounded-md text-[10px] font-semibold flex items-center gap-1 shrink-0">
+                            <MessageSquare className="h-3 w-3" />
+                            {discussionCount}
                           </div>
                         )}
                       </div>

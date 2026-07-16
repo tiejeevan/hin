@@ -1,9 +1,12 @@
-import { Comment } from '@hin/types';
-import { CommentNode } from '../types/ui';
+import { Comment, ItemComment } from '@hin/types';
+import { CommentNode, ItemCommentNode } from '../types/ui';
 
-export const buildCommentTree = (flatComments: Comment[]): CommentNode[] => {
-  const map: Record<number, CommentNode> = {};
-  const roots: CommentNode[] = [];
+function buildTree<TComment extends { id: number; parentId: number | null; deletedAt?: string | null; username: string }>(
+  flatComments: TComment[],
+): Array<TComment & { replies: Array<TComment & { replies: unknown[] }> }> {
+  type Node = TComment & { replies: Node[] };
+  const map: Record<number, Node> = {};
+  const roots: Node[] = [];
 
   flatComments.forEach(comment => {
     map[comment.id] = { ...comment, replies: [] };
@@ -23,7 +26,7 @@ export const buildCommentTree = (flatComments: Comment[]): CommentNode[] => {
     }
   });
 
-  const pruneTree = (nodes: CommentNode[]): CommentNode[] => {
+  const pruneTree = (nodes: Node[]): Node[] => {
     return nodes.filter(node => {
       node.replies = pruneTree(node.replies);
       const isDeleted = !!node.deletedAt || node.username === 'deleted';
@@ -32,4 +35,10 @@ export const buildCommentTree = (flatComments: Comment[]): CommentNode[] => {
   };
 
   return pruneTree(roots);
-};
+}
+
+export const buildCommentTree = (flatComments: Comment[]): CommentNode[] =>
+  buildTree(flatComments) as CommentNode[];
+
+export const buildItemCommentTree = (flatComments: ItemComment[]): ItemCommentNode[] =>
+  buildTree(flatComments) as ItemCommentNode[];

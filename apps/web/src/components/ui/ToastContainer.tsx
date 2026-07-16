@@ -12,20 +12,20 @@ export function ToastContainer({ toasts, onToastClick }: ToastContainerProps) {
       {toasts.map(t => (
         <div
           key={t.id}
-          role={onToastClick && t.postId ? 'button' : undefined}
-          tabIndex={onToastClick && t.postId ? 0 : undefined}
+          role={onToastClick && (t.postId || t.olabidItemId) ? 'button' : undefined}
+          tabIndex={onToastClick && (t.postId || t.olabidItemId) ? 0 : undefined}
           onClick={() => {
-            if (onToastClick && t.postId) onToastClick(t);
+            if (onToastClick && (t.postId || t.olabidItemId)) onToastClick(t);
           }}
           onKeyDown={e => {
-            if (onToastClick && t.postId && (e.key === 'Enter' || e.key === ' ')) {
+            if (onToastClick && (t.postId || t.olabidItemId) && (e.key === 'Enter' || e.key === ' ')) {
               e.preventDefault();
               onToastClick(t);
             }
           }}
           className={`bg-bg-secondary/90 text-text-primary border rounded-xl p-3.5 shadow-2xl flex items-center gap-3 animate-pulse-ring max-w-sm pointer-events-auto backdrop-blur-md ${
             t.type === 'system' ? 'border-violet-500/30' : 'border-border-custom'
-          } ${onToastClick && t.postId ? 'cursor-pointer hover:border-indigo-500/40' : ''}`}
+          } ${onToastClick && (t.postId || t.olabidItemId) ? 'cursor-pointer hover:border-indigo-500/40' : ''}`}
         >
           <div className="shrink-0">
             {t.type === 'like' && (

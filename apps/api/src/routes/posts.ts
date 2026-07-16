@@ -461,7 +461,7 @@ posts.post('/', async (c) => {
 
   const firstUrl = parseFirstUrl(inserted.content);
   if (firstUrl) {
-    const linkPreviewId = await getOrFetchLinkPreview(db, firstUrl);
+    const linkPreviewId = await getOrFetchLinkPreview(db, firstUrl, { olabidApiKey: c.env.OLABID_API_KEY });
     if (linkPreviewId !== null) {
       await db.update(schema.posts).set({ linkPreviewId }).where(eq(schema.posts.id, inserted.id)).run();
       inserted.linkPreviewId = linkPreviewId;
@@ -577,7 +577,7 @@ posts.put('/:id', async (c) => {
     await syncPostHashtags(db, updated.id, updated.content);
 
     const firstUrl = parseFirstUrl(updated.content);
-    const linkPreviewId = firstUrl ? await getOrFetchLinkPreview(db, firstUrl) : null;
+    const linkPreviewId = firstUrl ? await getOrFetchLinkPreview(db, firstUrl, { olabidApiKey: c.env.OLABID_API_KEY }) : null;
     if (linkPreviewId !== updated.linkPreviewId) {
       [updated] = await db.update(schema.posts)
         .set({ linkPreviewId })

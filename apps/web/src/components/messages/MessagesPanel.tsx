@@ -1,10 +1,12 @@
 import { useEffect, useMemo } from 'react';
 import { X, Shield, SquarePen, ChevronLeft, Maximize2, Minimize2, Send, MessageCircle } from 'lucide-react';
-import { ChatThread, Message, User as UserType } from '@hin/types';
+import { ChatThread, LinkPreview, Message, User as UserType } from '@hin/types';
 import { ChatRecipient } from '../../types/ui';
 import { UserAvatar } from '../profile/UserAvatar';
 import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
 import { useOverscrollBounce } from '../../hooks/useOverscrollBounce';
+import { LinkPreviewCard } from '../feed/LinkPreviewCard';
+import { getOlabidItemIdFromUrl } from '../../lib/appRoutes';
 
 interface MessagesPanelProps {
   isOpen: boolean;
@@ -15,6 +17,7 @@ interface MessagesPanelProps {
   chatRecipient: ChatRecipient | null;
   chatMessages: Message[];
   newMsgText: string;
+  draftLinkPreview?: LinkPreview | null;
   typingUsers: Record<number, boolean>;
   onlineUserIds: Set<number>;
   chatBottomRef: React.RefObject<HTMLDivElement>;
@@ -25,6 +28,8 @@ interface MessagesPanelProps {
   onSendDM: (e: React.FormEvent) => void;
   onTyping: (recipientId: number) => void;
   onOpenProfile: (userId: number, opts?: { username?: string }) => void;
+  onOpenOlabidItem?: (itemId: number) => void;
+  olabidEnabled?: boolean;
 }
 
 export function MessagesPanel({
@@ -36,6 +41,7 @@ export function MessagesPanel({
   chatRecipient,
   chatMessages,
   newMsgText,
+  draftLinkPreview = null,
   typingUsers,
   onlineUserIds,
   chatBottomRef,
@@ -46,6 +52,8 @@ export function MessagesPanel({
   onSendDM,
   onTyping,
   onOpenProfile,
+  onOpenOlabidItem,
+  olabidEnabled = true,
 }: MessagesPanelProps) {
   const sorted = useMemo(() => {
     return [...threads].sort((a, b) => {
@@ -162,6 +170,22 @@ export function MessagesPanel({
                           }`}
                         >
                           <p className="break-words text-left">{msg.content}</p>
+                          {msg.linkPreview && (
+                            <div className="mt-2">
+                              <LinkPreviewCard
+                                preview={msg.linkPreview}
+                                inAppOlabidLinks={olabidEnabled}
+                                onClick={e => {
+                                  const itemId = getOlabidItemIdFromUrl(msg.linkPreview!.url);
+                                  if (itemId !== null && onOpenOlabidItem) {
+                                    e.preventDefault();
+                                    onOpenOlabidItem(itemId);
+                                    onClose();
+                                  }
+                                }}
+                              />
+                            </div>
+                          )}
                         </div>
                       </div>
                       {isLast && isMe && (
@@ -176,9 +200,15 @@ export function MessagesPanel({
               <div ref={chatBottomRef} />
             </div>
 
+            {draftLinkPreview && (
+              <div className="px-2.5 pt-2 bg-chat-input border-t border-border-custom">
+                <LinkPreviewCard preview={draftLinkPreview} inAppOlabidLinks={olabidEnabled} />
+              </div>
+            )}
+
             <form
               onSubmit={onSendDM}
-              className="p-2.5 bg-chat-input border-t border-border-custom flex items-center gap-2 shrink-0 pb-safe"
+              className={`p-2.5 bg-chat-input flex items-center gap-2 shrink-0 pb-safe ${draftLinkPreview ? '' : 'border-t border-border-custom'}`}
             >
               <input
                 type="text"

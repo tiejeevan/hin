@@ -6,6 +6,7 @@ import { verify } from 'hono/jwt';
 import type { Env } from '../types';
 import { JWT_SECRET } from '../lib/auth';
 import { isBlocked } from '../lib/blocks';
+import { parseFirstUrl, getOrFetchLinkPreview } from '../lib/linkPreview';
 
 export class RealtimeDO implements DurableObject {
   state: DurableObjectState;
@@ -261,14 +262,23 @@ export class RealtimeDO implements DurableObject {
         }
       }
 
+      const firstUrl = parseFirstUrl(content);
+      const linkPreviewId = firstUrl
+        ? await getOrFetchLinkPreview(db, firstUrl, { olabidApiKey: this.env.OLABID_API_KEY })
+        : null;
+
       const [inserted] = await db.insert(schema.messages).values({
         senderId: session.userId,
         receiverId,
         content,
         read: receiverIsViewingChat ? 1 : 0,
+        linkPreviewId,
       }).returning();
 
       const receiverUser = await db.select().from(schema.users).where(eq(schema.users.id, receiverId)).get();
+      const linkPreviewRow = linkPreviewId
+        ? await db.select().from(schema.linkPreviews).where(eq(schema.linkPreviews.id, linkPreviewId)).get()
+        : null;
 
       const messagePayload: Message = {
         id: inserted.id,
@@ -279,6 +289,9 @@ export class RealtimeDO implements DurableObject {
         content,
         createdAt: inserted.createdAt,
         read: inserted.read === 1,
+        linkPreview: linkPreviewRow
+          ? { url: linkPreviewRow.url, title: linkPreviewRow.title, description: linkPreviewRow.description, imageUrl: linkPreviewRow.imageUrl, siteName: linkPreviewRow.siteName }
+          : null,
       };
 
       try {
