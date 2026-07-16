@@ -20,6 +20,7 @@ import searchRoutes from './routes/search';
 import adminGamificationRoutes from './routes/admin-gamification';
 import eventsRoutes from './routes/events';
 import auditLogsRoutes from './routes/audit-logs';
+import olabidRoutes from './routes/olabid';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -74,6 +75,7 @@ app.route('/api/search', searchRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/admin/gamification', adminGamificationRoutes);
 app.route('/api/events', eventsRoutes);
+app.route('/api/olabid', olabidRoutes);
 // Audit logs: admin full view at /api/admin/audit-logs, user partial at /api/me/audit-logs
 app.route('/api', auditLogsRoutes);
 

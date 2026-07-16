@@ -1,6 +1,7 @@
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
 import * as schema from '@hin/db';
+import { parseOlabidItemId, fetchOlabidItem } from './olabidApi';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -133,10 +134,46 @@ function extractMetadata(html: Uint8Array): Promise<ExtractedMetadata> {
 }
 
 /**
+ * Fetch Olabid item preview using their API.
+ */
+async function fetchOlabidPreview(
+  db: Db,
+  normalized: string,
+  itemId: string
+): Promise<ExtractedMetadata> {
+  const itemData = await fetchOlabidItem(itemId);
+
+  if (!itemData) {
+    throw new Error('Item not found');
+  }
+
+  // Format description with key auction details
+  const description = [
+    itemData.name,
+    `Current Bid: $${itemData.currentBidAmount}`,
+    `Retail: $${itemData.retailPrice}`,
+    `Condition: ${itemData.condition}`,
+    itemData.conditionNote || '',
+  ].filter(Boolean).join(' • ');
+
+  return {
+    title: `${itemData.name} - Olabid Auction`,
+    description,
+    imageUrl: itemData.images?.[0]?.largeUrl || itemData.images?.[0]?.url || null,
+    siteName: 'Olabid',
+  };
+}
+
+/**
  * Look up (or fetch + cache) an Open Graph preview for a URL.
  * Never throws — any failure is recorded and `null` is returned so post creation is unaffected.
+ * 
+ * Supports special handling for Olabid auction links.
  */
-export async function getOrFetchLinkPreview(db: Db, rawUrl: string): Promise<number | null> {
+export async function getOrFetchLinkPreview(
+  db: Db,
+  rawUrl: string
+): Promise<number | null> {
   const normalized = normalizeUrl(rawUrl);
   if (!normalized) return null;
 
@@ -158,26 +195,58 @@ export async function getOrFetchLinkPreview(db: Db, rawUrl: string): Promise<num
   }
 
   try {
-    const res = await fetch(normalized, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      redirect: 'follow',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; HinLinkPreviewBot/1.0; +https://hin.app)',
-        'Accept': 'text/html,application/xhtml+xml',
-      },
-    });
+    let meta: ExtractedMetadata;
 
-    // Redirects can land somewhere blocked even if the original URL was fine.
-    const finalHostname = new URL(res.url || normalized).hostname;
-    if (isBlockedHostname(finalHostname)) throw new Error('Blocked host after redirect');
+    // Check if this is an Olabid link
+    const olabidItemId = parseOlabidItemId(normalized);
+    if (olabidItemId) {
+      try {
+        meta = await fetchOlabidPreview(db, normalized, olabidItemId);
+      } catch (olabidError) {
+        console.warn(`Olabid preview failed, falling back to Open Graph: ${olabidError}`);
+        // Fall back to regular Open Graph scraping
+        const res = await fetch(normalized, {
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+          redirect: 'follow',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; HinLinkPreviewBot/1.0; +https://hin.app)',
+            'Accept': 'text/html,application/xhtml+xml',
+          },
+        });
 
-    const contentType = (res.headers.get('content-type') || '').toLowerCase();
-    if (!res.ok || !contentType.includes('text/html') || !res.body) {
-      throw new Error(`Unsupported response: ${res.status} ${contentType}`);
+        const finalHostname = new URL(res.url || normalized).hostname;
+        if (isBlockedHostname(finalHostname)) throw new Error('Blocked host after redirect');
+
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
+        if (!res.ok || !contentType.includes('text/html') || !res.body) {
+          throw new Error(`Unsupported response: ${res.status} ${contentType}`);
+        }
+
+        const bytes = await readCapped(res.body, MAX_HTML_BYTES);
+        meta = await extractMetadata(bytes);
+      }
+    } else {
+      // Regular Open Graph scraping
+      const res = await fetch(normalized, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        redirect: 'follow',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; HinLinkPreviewBot/1.0; +https://hin.app)',
+          'Accept': 'text/html,application/xhtml+xml',
+        },
+      });
+
+      const finalHostname = new URL(res.url || normalized).hostname;
+      if (isBlockedHostname(finalHostname)) throw new Error('Blocked host after redirect');
+
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      if (!res.ok || !contentType.includes('text/html') || !res.body) {
+        throw new Error(`Unsupported response: ${res.status} ${contentType}`);
+      }
+
+      const bytes = await readCapped(res.body, MAX_HTML_BYTES);
+      meta = await extractMetadata(bytes);
     }
-
-    const bytes = await readCapped(res.body, MAX_HTML_BYTES);
-    const meta = await extractMetadata(bytes);
 
     if (existing) {
       await db.update(schema.linkPreviews).set({

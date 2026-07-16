@@ -25,7 +25,7 @@ export interface CommentNode extends Comment {
 
 export type FeedMode = 'all' | 'following' | 'bookmarks' | 'explore' | 'search';
 
-export type ActiveTab = 'feed' | 'admin' | 'profile' | 'post';
+export type ActiveTab = 'feed' | 'admin' | 'profile' | 'post' | 'olabid';
 
 export interface ChatRecipient {
   id: number;

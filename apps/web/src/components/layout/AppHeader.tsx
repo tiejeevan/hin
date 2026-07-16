@@ -1,4 +1,4 @@
-import { LogOut, Search, Shield, User } from 'lucide-react';
+import { LogOut, Search, Shield, User, Gavel } from 'lucide-react';
 import { User as UserType, Notification, type GamificationPublic } from '@hin/types';
 import { NotificationBell } from '../notifications/NotificationBell';
 import { NotificationPanel } from '../notifications/NotificationPanel';
@@ -13,8 +13,10 @@ interface AppHeaderProps {
   unreadNotifsCount: number;
   notifications: Notification[];
   isAdminTab?: boolean;
+  isOlabidTab?: boolean;
   onGoHome: () => void;
   onOpenAdmin?: () => void;
+  onOpenOlabid?: () => void;
   onToggleNotifications: () => void;
   onCloseNotifications: () => void;
   onNotificationClick: (notification: Notification) => void;
@@ -33,8 +35,10 @@ export function AppHeader({
   unreadNotifsCount,
   notifications,
   isAdminTab,
+  isOlabidTab,
   onGoHome,
   onOpenAdmin,
+  onOpenOlabid,
   onToggleNotifications,
   onCloseNotifications,
   onNotificationClick,
@@ -95,6 +99,21 @@ export function AppHeader({
               aria-label="Admin"
             >
               <Shield className="h-5 w-5" />
+            </button>
+          )}
+          {onOpenOlabid && (
+            <button
+              type="button"
+              onClick={onOpenOlabid}
+              className={`min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+                isOlabidTab
+                  ? 'text-amber-500 bg-amber-500/10'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
+              }`}
+              title="Olabid Auctions"
+              aria-label="Olabid Auctions"
+            >
+              <Gavel className="h-5 w-5" />
             </button>
           )}
 

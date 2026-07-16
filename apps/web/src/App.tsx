@@ -42,6 +42,8 @@ import { FeedView } from './components/feed/FeedView';
 import { PostView } from './components/feed/PostView';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { ProfileView } from './components/profile/ProfileView';
+import { OlabidPage } from './pages/OlabidPage';
+import { OlabidItemPage } from './pages/OlabidItemPage';
 import { MessagesPanel } from './components/messages/MessagesPanel';
 import { ToastContainer } from './components/ui/ToastContainer';
 import { FloatingActionStack } from './components/ui/FloatingActionStack';
@@ -132,6 +134,7 @@ export default function App() {
   const feedLoadingRef = useRef(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('feed');
   const [adminSection, setAdminSection] = useState<AdminSection>('dashboard');
+  const [olabidItemId, setOlabidItemId] = useState<number | null>(null);
 
   const FEED_PAGE_SIZE = 10;
 
@@ -319,6 +322,7 @@ export default function App() {
     setPostViewPost(null);
     setPostViewError(null);
     setHighlightCommentId(null);
+    setOlabidItemId(null);
     setShowGuestAuth(false);
     setShowNotifications(false);
     setShowMessagesDropdown(false);
@@ -642,6 +646,33 @@ export default function App() {
       localStorage.setItem('hin_user', JSON.stringify(updated));
     }
     addToast('Profile updated successfully', 'system', undefined, { skipPrefCheck: true });
+  };
+
+  const openOlabid = (opts?: { skipUrlSync?: boolean; replace?: boolean }) => {
+    setIsSearchOpen(false);
+    setActiveTab('olabid');
+    setOlabidItemId(null);
+    setShowNotifications(false);
+    setShowMessagesDropdown(false);
+    setProfileUserId(null);
+    if (!opts?.skipUrlSync) {
+      syncUrl({ view: 'olabid' }, opts?.replace);
+    }
+  };
+
+  const openOlabidItem = (
+    itemId: number,
+    opts?: { skipUrlSync?: boolean; replace?: boolean },
+  ) => {
+    setIsSearchOpen(false);
+    setActiveTab('olabid');
+    setOlabidItemId(itemId);
+    setShowNotifications(false);
+    setShowMessagesDropdown(false);
+    setProfileUserId(null);
+    if (!opts?.skipUrlSync) {
+      syncUrl({ view: 'olabid', itemId }, opts?.replace);
+    }
   };
 
   const openAdmin = (
@@ -1399,6 +1430,12 @@ export default function App() {
       openProfileByUsername(route.username, { skipUrlSync: true });
     } else if (route.view === 'search') {
       openSearch({ skipUrlSync: true });
+    } else if (route.view === 'olabid') {
+      if (route.itemId) {
+        openOlabidItem(route.itemId, { skipUrlSync: true });
+      } else {
+        openOlabid({ skipUrlSync: true });
+      }
     }
   }, []);
 
@@ -2292,6 +2329,12 @@ export default function App() {
       openProfileByUsername(route.username, { replace: true, skipUrlSync: true });
     } else if (route.view === 'search') {
       openSearch({ replace: true, skipUrlSync: true });
+    } else if (route.view === 'olabid') {
+      if (route.itemId) {
+        openOlabidItem(route.itemId, { replace: true, skipUrlSync: true });
+      } else {
+        openOlabid({ replace: true, skipUrlSync: true });
+      }
     } else if (route.view === 'admin') {
       if (currentUser?.role === 'admin') {
         openAdmin(route.section, { replace: true, skipUrlSync: true });
@@ -2308,6 +2351,12 @@ export default function App() {
         openProfileByUsername(r.username, { skipUrlSync: true });
       } else if (r.view === 'search') {
         openSearch({ skipUrlSync: true });
+      } else if (r.view === 'olabid') {
+        if (r.itemId) {
+          openOlabidItem(r.itemId, { skipUrlSync: true });
+        } else {
+          openOlabid({ skipUrlSync: true });
+        }
       } else if (r.view === 'admin' && currentUser?.role === 'admin') {
         openAdmin(r.section, { skipUrlSync: true });
       } else {
@@ -2615,8 +2664,10 @@ export default function App() {
             unreadNotifsCount={unreadNotifsCount}
             notifications={notifications}
             isAdminTab={activeTab === 'admin'}
+            isOlabidTab={activeTab === 'olabid'}
             onGoHome={goHome}
             onOpenAdmin={currentUser?.role === 'admin' ? () => openAdmin('dashboard') : undefined}
+            onOpenOlabid={openOlabid}
             onToggleNotifications={() => {
               setShowNotifications(prev => {
                 const next = !prev;
@@ -2941,6 +2992,15 @@ export default function App() {
             gamificationEnabled={gamificationEnabled}
             onGamificationRefresh={() => { void fetchMyGamification(); }}
           />
+        ) : activeTab === 'olabid' ? (
+          olabidItemId ? (
+            <OlabidItemPage
+              itemId={olabidItemId}
+              onBack={() => openOlabid()}
+            />
+          ) : (
+            <OlabidPage onOpenItem={(id) => openOlabidItem(id)} />
+          )
         ) : currentUser && activeTab === 'admin' ? (
           <AdminDashboard
             section={adminSection}

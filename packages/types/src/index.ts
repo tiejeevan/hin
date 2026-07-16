@@ -448,7 +448,7 @@ export const UpdateProfileSchema = z.object({
 });
 
 export type ChatIconMode = 'global' | 'selected_pages';
-export type ChatIconPage = 'feed' | 'profile' | 'post';
+export type ChatIconPage = 'feed' | 'profile' | 'post' | 'olabid';
 
 export type NotificationPrefType = 'like' | 'comment' | 'mention' | 'message' | 'system';
 
@@ -524,7 +524,7 @@ export function shouldShowNotificationToast(
 
 export function shouldShowChatIcon(
   settings: UserSettings,
-  activeTab: ChatIconPage | 'admin',
+  activeTab: ChatIconPage | 'admin' | 'olabid',
 ): boolean {
   if (activeTab === 'admin') return false;
   if (settings.chatIconMode === 'global') return true;

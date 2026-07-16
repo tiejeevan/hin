@@ -5,7 +5,8 @@ export type AppRoute =
   | { view: 'search' }
   | { view: 'post'; postId: number; commentId?: number }
   | { view: 'profile'; username: string }
-  | { view: 'admin'; section: AdminSection };
+  | { view: 'admin'; section: AdminSection }
+  | { view: 'olabid'; itemId?: number };
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,30}$/;
 
@@ -16,6 +17,15 @@ export function isValidUsername(username: string): boolean {
 export function parseLocation(pathname: string, hash: string): AppRoute {
   if (/^\/search\/?$/.test(pathname)) {
     return { view: 'search' };
+  }
+
+  const olabidItemMatch = pathname.match(/^\/olabid\/(\d+)\/?$/);
+  if (olabidItemMatch) {
+    return { view: 'olabid', itemId: Number(olabidItemMatch[1]) };
+  }
+
+  if (/^\/olabid\/?$/.test(pathname)) {
+    return { view: 'olabid' };
   }
 
   const postMatch = pathname.match(/^\/post\/(\d+)\/?$/);
@@ -60,9 +70,16 @@ export function profilePath(username: string): string {
   return `/profile/${encodeURIComponent(username)}`;
 }
 
+export function olabidPath(itemId?: number): string {
+  return itemId ? `/olabid/${itemId}` : '/olabid';
+}
+
 export function routeToPath(route: AppRoute): string {
   if (route.view === 'search') {
     return '/search';
+  }
+  if (route.view === 'olabid') {
+    return olabidPath(route.itemId);
   }
   if (route.view === 'post') {
     return postPath(route.postId, route.commentId);
@@ -93,4 +110,8 @@ export function postPermalinkUrl(postId: number, commentId?: number): string {
 
 export function profilePermalinkUrl(username: string): string {
   return `${window.location.origin}${profilePath(username)}`;
+}
+
+export function olabidItemPermalinkUrl(itemId: number): string {
+  return `${window.location.origin}${olabidPath(itemId)}`;
 }

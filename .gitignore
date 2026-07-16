@@ -22,3 +22,17 @@ package-lock.json
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Olabid APK / reverse-engineering artifacts
+/olabid-apk/
+/olabid_apk/
+/olabid_decompiled/
+/olabid_resources/
+*.apk
+
+# Olabid scratch / investigation docs
+*OLABID*.md
+*olabid*.md
+GET_OLABID_TOKEN.md
+TEST_OLABID_POST.md
+scripts/extract-olabid-config.md
