@@ -18,7 +18,7 @@ function deliveryBadgeClass(delivery: BroadcastDelivery): string {
 
 export function BroadcastAuditLog({ history }: BroadcastAuditLogProps) {
   if (history.length === 0) {
-    return <div className="p-6 text-center text-xs text-text-muted">No broadcasts sent yet.</div>;
+    return <div className="p-3 text-center text-xs text-text-muted">No broadcasts sent yet.</div>;
   }
 
   return (

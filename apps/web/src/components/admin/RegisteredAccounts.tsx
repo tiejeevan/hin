@@ -318,7 +318,7 @@ export function RegisteredAccounts({
   }, [totalPages, currentPage]);
 
   return (
-    <div className="space-y-4 p-3 md:p-4">
+    <div className="space-y-3">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-2 md:gap-3">
         <div className="bg-bg-primary/30 border border-border-custom p-3 rounded-xl text-left">
           <p className="text-[10px] text-text-muted font-semibold uppercase">Active Users</p>
@@ -489,7 +489,7 @@ export function RegisteredAccounts({
           </div>
 
           {pageUsers.length === 0 && (
-            <div className="p-8 text-center text-xs text-text-muted border border-border-custom rounded-xl">
+            <div className="p-4 text-center text-xs text-text-muted border border-border-custom rounded-xl">
               No accounts match the current search and filters.
             </div>
           )}

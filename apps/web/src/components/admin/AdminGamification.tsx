@@ -540,7 +540,7 @@ export function AdminGamification({ token }: AdminGamificationProps) {
   const deactivatedBadges = badges.filter(b => b.deletedAt);
 
   return (
-    <div className="space-y-6 p-4">
+    <div className="space-y-4 p-3">
       <div className="flex items-center gap-2">
         <Award className="h-4 w-4 text-amber-400" />
         <h3 className="text-sm font-semibold text-text-primary">Platform Reviver</h3>
@@ -549,7 +549,7 @@ export function AdminGamification({ token }: AdminGamificationProps) {
       {error && <p className="text-xs text-rose-400">{error}</p>}
       {success && <p className="text-xs text-emerald-400">{success}</p>}
 
-      <section className="rounded-xl border border-border-custom bg-bg-tertiary/30 p-4 space-y-4">
+      <section className="rounded-xl border border-border-custom bg-bg-tertiary/30 p-3 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-xs font-medium text-text-primary">Gamification master toggle</p>
@@ -769,7 +769,7 @@ export function AdminGamification({ token }: AdminGamificationProps) {
 
         <div className="space-y-2">
           {activeBadges.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border-custom p-6 text-center space-y-3">
+            <div className="rounded-xl border border-dashed border-border-custom p-4 text-center space-y-3">
               <p className="text-xs text-text-muted">No active badges configured.</p>
               <button
                 type="button"

@@ -274,7 +274,7 @@ export function AdminEvents({ token }: AdminEventsProps) {
   if (loading) return <p className="text-sm text-text-muted p-4">Loading events…</p>;
 
   return (
-    <div className="space-y-4 p-4">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-text-primary flex items-center gap-2">
           <Calendar className="w-4 h-4" />
@@ -294,7 +294,7 @@ export function AdminEvents({ token }: AdminEventsProps) {
       {success && <p className="text-sm text-emerald-500">{success}</p>}
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="rounded-xl border border-border-custom p-4 space-y-3 bg-bg-primary/30">
+        <form onSubmit={handleSubmit} className="rounded-xl border border-border-custom p-3 space-y-3 bg-bg-primary/30">
           <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
             {editingId != null ? 'Edit event' : 'Create event'}
           </p>

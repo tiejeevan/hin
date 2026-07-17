@@ -32,7 +32,8 @@ const PRESETS: Record<ImageCompressKind, { maxWidthOrHeight: number; maxSizeMB: 
   post: { maxWidthOrHeight: 1920, maxSizeMB: 0.5, initialQuality: 0.75 },
   badge: { maxWidthOrHeight: 256, maxSizeMB: 0.15, initialQuality: 0.8 },
   event_banner: { maxWidthOrHeight: 1200, maxSizeMB: 0.5, initialQuality: 0.85 },
-  chat: { maxWidthOrHeight: 1600, maxSizeMB: 0.45, initialQuality: 0.75 },
+  // Chat bubbles are small — prefer tiny payloads over fidelity.
+  chat: { maxWidthOrHeight: 1080, maxSizeMB: 0.15, initialQuality: 0.6 },
 };
 
 /**

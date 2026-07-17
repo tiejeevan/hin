@@ -45,8 +45,8 @@ export function ResetDataPanel({ token, onResetComplete }: ResetDataPanelProps) 
   };
 
   return (
-    <div className="space-y-4 p-4">
-      <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 space-y-3">
+    <div className="space-y-3">
+      <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 space-y-3">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 h-9 w-9 shrink-0 rounded-xl border border-rose-500/30 bg-rose-500/15 text-rose-400 flex items-center justify-center">
             <AlertTriangle className="h-5 w-5" />

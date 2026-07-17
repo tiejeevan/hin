@@ -256,7 +256,7 @@ export function AuditLogsPanel({ token }: AuditLogsPanelProps) {
   };
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-3">
       {/* Filter bar */}
       <form onSubmit={handleSearch} className="flex flex-col gap-3">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -396,7 +396,7 @@ export function AuditLogsPanel({ token }: AuditLogsPanelProps) {
           )}
 
           {!error && logs.length === 0 && !loading && (
-            <div className="py-8 text-center text-xs text-text-muted">
+            <div className="py-4 text-center text-xs text-text-muted">
               No audit log entries found.
             </div>
           )}
@@ -449,7 +449,7 @@ export function AuditLogsPanel({ token }: AuditLogsPanelProps) {
           )}
 
           {loading && logs.length === 0 && (
-            <div className="py-8 text-center">
+            <div className="py-4 text-center">
               <RefreshCw className="h-5 w-5 animate-spin text-text-muted mx-auto" />
             </div>
           )}

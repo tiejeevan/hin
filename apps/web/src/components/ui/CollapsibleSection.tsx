@@ -7,6 +7,8 @@ interface CollapsibleSectionProps {
   icon?: ReactNode;
   iconClassName?: string;
   headerClassName?: string;
+  headerPaddingClassName?: string;
+  contentClassName?: string;
   badge?: ReactNode;
   open: boolean;
   loading?: boolean;
@@ -20,6 +22,8 @@ export function CollapsibleSection({
   icon,
   iconClassName = 'bg-bg-tertiary text-text-muted border-border-custom',
   headerClassName = 'bg-bg-primary/20',
+  headerPaddingClassName = 'p-4',
+  contentClassName = 'p-4',
   badge,
   open,
   loading = false,
@@ -32,7 +36,7 @@ export function CollapsibleSection({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className={`w-full p-4 text-left flex items-start gap-3 cursor-pointer transition-colors hover:bg-bg-tertiary/30 ${headerClassName} ${
+        className={`w-full ${headerPaddingClassName} text-left flex items-start gap-3 cursor-pointer transition-colors hover:bg-bg-tertiary/30 ${headerClassName} ${
           open ? 'border-b border-border-custom' : ''
         }`}
       >
@@ -58,9 +62,9 @@ export function CollapsibleSection({
       </button>
 
       {open && (
-        <div className="p-4">
+        <div className={contentClassName}>
           {loading ? (
-            <div className="py-6 text-center text-xs text-text-muted">Loading…</div>
+            <div className="py-4 text-center text-xs text-text-muted">Loading…</div>
           ) : (
             children
           )}

@@ -84,7 +84,7 @@ export function SystemBroadcast({ onBroadcast }: SystemBroadcastProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="p-4 md:p-5 space-y-5 text-left">
+    <form onSubmit={handleSubmit} className="space-y-3 text-left">
       <div>
         <label htmlFor="broadcast-message" className="block text-xs font-semibold text-text-secondary mb-2">
           Message

@@ -130,10 +130,10 @@ export function AdminDashboard({
   };
 
   return (
-    <div className="flex-grow overflow-y-auto p-4 md:p-6 space-y-4">
-      <div className="flex items-center gap-3 border-b border-border-custom pb-4">
-        <div className="h-10 w-10 bg-amber-600/10 border border-amber-600/20 text-amber-500 flex items-center justify-center rounded-xl">
-          <Shield className="h-6 w-6" />
+    <div className="flex-grow overflow-y-auto p-2 md:p-3 space-y-2">
+      <div className="flex items-center gap-2.5 border-b border-border-custom pb-2">
+        <div className="h-8 w-8 bg-amber-600/10 border border-amber-600/20 text-amber-500 flex items-center justify-center rounded-lg">
+          <Shield className="h-4 w-4" />
         </div>
         <div className="text-left">
           <h2 className="text-lg font-bold text-text-primary">Admin Dashboard</h2>
@@ -175,7 +175,7 @@ export function AdminDashboard({
       </div>
 
       {section === 'platform-reviver' ? (
-        <div className="space-y-4">
+        <div className="space-y-2">
           <div className="bg-bg-secondary border border-border-custom rounded-2xl overflow-hidden shadow-sm">
             <AdminGamification token={token} />
           </div>
@@ -290,7 +290,7 @@ export function AdminDashboard({
             onReinstateUser={onReinstateUser}
           />
         ) : (
-          <div className="p-6 text-center text-xs text-text-muted">Unable to load accounts.</div>
+          <div className="p-3 text-center text-xs text-text-muted">Unable to load accounts.</div>
         )}
       </AdminCollapsibleSection>
       </>
