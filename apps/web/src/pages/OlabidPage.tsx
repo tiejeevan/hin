@@ -65,12 +65,17 @@ interface OlabidWarehouse {
   zipCode: string;
 }
 
-type SectionFilter = '' | 'topDeals' | 'trending' | 'freeShipping' | 'noFees';
+type SectionFilter = '' | 'topDeals' | 'trending' | 'watchlist' | 'freeShipping' | 'noFees';
 
-const SECTIONS: { id: SectionFilter; label: string; icon?: 'flame' | 'sparkles' | 'truck' | 'award' }[] = [
+const SECTIONS: {
+  id: SectionFilter;
+  label: string;
+  icon?: 'flame' | 'sparkles' | 'bookmark' | 'truck' | 'award';
+}[] = [
   { id: '', label: 'All' },
   { id: 'topDeals', label: 'Top Deals', icon: 'flame' },
   { id: 'trending', label: 'Trending', icon: 'sparkles' },
+  { id: 'watchlist', label: 'Watchlist', icon: 'bookmark' },
   { id: 'freeShipping', label: 'Free Shipping', icon: 'truck' },
   { id: 'noFees', label: 'No Fees', icon: 'award' },
 ];
@@ -168,6 +173,9 @@ export function OlabidPage({
     }
     const prev = !!bookmarks[itemId];
     setBookmarks(b => ({ ...b, [itemId]: !prev }));
+    if (section === 'watchlist' && prev) {
+      setItems(list => list.filter(i => i.id !== itemId));
+    }
     try {
       const res = await fetch(`${API_URL}/api/olabid/items/${itemId}/bookmark`, {
         method: 'POST',
@@ -176,11 +184,21 @@ export function OlabidPage({
       if (res.ok) {
         const data = await res.json();
         setBookmarks(b => ({ ...b, [itemId]: data.bookmarked }));
+        if (section === 'watchlist' && !data.bookmarked) {
+          setItems(list => list.filter(i => i.id !== itemId));
+        }
       } else {
         setBookmarks(b => ({ ...b, [itemId]: prev }));
+        if (section === 'watchlist' && prev) {
+          // Restore list by refetching if optimistic remove failed
+          void fetchItems(page, { section: 'watchlist' });
+        }
       }
     } catch {
       setBookmarks(b => ({ ...b, [itemId]: prev }));
+      if (section === 'watchlist' && prev) {
+        void fetchItems(page, { section: 'watchlist' });
+      }
     }
   };
 
@@ -240,34 +258,64 @@ export function OlabidPage({
     setError(null);
 
     try {
-      const params = new URLSearchParams({
-        page: String(pageNum),
-        size: '20',
-        _: String(Date.now()),
-      });
+      let data: OlabidListResponse;
 
-      const wh = warehouseIdsParam(nextWarehouseIds);
-      if (wh) params.set('warehouseIds', wh);
+      if (nextSection === 'watchlist') {
+        if (!token) {
+          setItems([]);
+          setCommentCounts({});
+          setBookmarks({});
+          setPage(1);
+          setHasLoaded(true);
+          setError('Sign in to view your watchlist');
+          return;
+        }
 
-      if (nextSection) {
-        params.set('filterBy', nextSection);
+        const params = new URLSearchParams({
+          page: String(pageNum),
+          size: '20',
+        });
+        const response = await fetch(`${API_URL}/api/olabid/items/bookmarks?${params}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        if (!response.ok) {
+          throw new Error(
+            response.status === 401 ? 'Sign in to view your watchlist' : 'Failed to load watchlist',
+          );
+        }
+        data = await response.json();
       } else {
-        params.set('orderBy', nextSortBy);
-        if (nextSearch) params.set('searchPattern', nextSearch);
-        if (nextCategoryId) params.set('categoryIds', nextCategoryId);
-        if (nextMinPrice) params.set('minRetailPrice', nextMinPrice);
-        if (nextMaxPrice) params.set('maxRetailPrice', nextMaxPrice);
+        const params = new URLSearchParams({
+          page: String(pageNum),
+          size: '20',
+          _: String(Date.now()),
+        });
+
+        const wh = warehouseIdsParam(nextWarehouseIds);
+        if (wh) params.set('warehouseIds', wh);
+
+        if (nextSection) {
+          params.set('filterBy', nextSection);
+        } else {
+          params.set('orderBy', nextSortBy);
+          if (nextSearch) params.set('searchPattern', nextSearch);
+          if (nextCategoryId) params.set('categoryIds', nextCategoryId);
+          if (nextMinPrice) params.set('minRetailPrice', nextMinPrice);
+          if (nextMaxPrice) params.set('maxRetailPrice', nextMaxPrice);
+        }
+
+        const response = await fetch(`${API_URL}/api/olabid/items?${params.toString()}`, {
+          cache: 'no-store',
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch auction items');
+        }
+
+        data = await response.json();
       }
 
-      const response = await fetch(`${API_URL}/api/olabid/items?${params.toString()}`, {
-        cache: 'no-store',
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch auction items');
-      }
-
-      const data: OlabidListResponse = await response.json();
       setItems(data.items);
       setPage(data.pageContext.page);
       setHasLoaded(true);
@@ -285,7 +333,13 @@ export function OlabidPage({
         } catch {
           // Non-critical
         }
-        void fetchBookmarkStatus(ids);
+        if (nextSection === 'watchlist') {
+          const allBookmarked: Record<number, boolean> = {};
+          for (const id of ids) allBookmarked[id] = true;
+          setBookmarks(allBookmarked);
+        } else {
+          void fetchBookmarkStatus(ids);
+        }
       } else {
         setCommentCounts({});
         setBookmarks({});
@@ -316,6 +370,10 @@ export function OlabidPage({
   };
 
   const handleSectionChange = (next: SectionFilter) => {
+    if (next === 'watchlist' && !currentUser) {
+      onSignInRequired?.();
+      return;
+    }
     setSection(next);
     setPage(1);
     if (next) {
@@ -412,6 +470,8 @@ export function OlabidPage({
         return <Flame className="h-3.5 w-3.5" />;
       case 'sparkles':
         return <Sparkles className="h-3.5 w-3.5" />;
+      case 'bookmark':
+        return <Bookmark className="h-3.5 w-3.5" />;
       case 'truck':
         return <Truck className="h-3.5 w-3.5" />;
       case 'award':
@@ -702,8 +762,14 @@ export function OlabidPage({
         ) : items.length === 0 ? (
           <div className="text-center py-16 text-text-secondary">
             <Package className="h-12 w-12 mx-auto mb-3 opacity-40" />
-            <p className="font-medium text-text-primary">No auctions found</p>
-            <p className="text-sm mt-1">Try a different section, category, or search.</p>
+            <p className="font-medium text-text-primary">
+              {section === 'watchlist' ? 'Your watchlist is empty' : 'No auctions found'}
+            </p>
+            <p className="text-sm mt-1">
+              {section === 'watchlist'
+                ? 'Tap the bookmark on any auction to save it here.'
+                : 'Try a different section, category, or search.'}
+            </p>
           </div>
         ) : (
           <>

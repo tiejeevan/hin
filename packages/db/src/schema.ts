@@ -631,7 +631,7 @@ export const auditLogs = sqliteTable('audit_logs', {
   /**
    * 'login' | 'register' | 'logout' | 'failed_login' |
    * 'password_change' | 'account_delete' |
-   * 'admin_impersonate' | 'role_change'
+   * 'admin_impersonate' | 'role_change' | 'platform_reset'
    */
   eventType: text('event_type').notNull(),
   /** 1 = success, 0 = failure */

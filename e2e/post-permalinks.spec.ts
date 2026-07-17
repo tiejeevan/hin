@@ -292,7 +292,7 @@ test.describe('Post permalinks UI — navigation', () => {
 
     await expect(page).toHaveURL(new RegExp(`/post/${post.id}$`));
     await expect(page.getByText(content)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Account menu' })).toBeVisible();
     await expect(page.getByPlaceholder('Write a comment...')).toBeVisible();
   });
 

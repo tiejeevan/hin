@@ -3145,6 +3145,69 @@ export default function App() {
     }
   };
 
+  const handleResetDataComplete = async () => {
+    setPosts([]);
+    setFeedNextCursor(null);
+    setActiveHashtag(null);
+    activeHashtagRef.current = null;
+    setFollowedUserIds(new Set());
+    followedUserIdsRef.current = new Set();
+    setBlockedUserIds(new Set());
+    blockedUserIdsRef.current = new Set();
+    setMutedUserIds(new Set());
+    mutedUserIdsRef.current = new Set();
+    setFollowRequests([]);
+    setExpandedComments({});
+    setPostComments({});
+    setNewCommentText({});
+    setReplyingTo({});
+    setEditingPostId(null);
+    setEditingPostContent('');
+    setEditingCommentId(null);
+    setEditingCommentContent('');
+    setItemComments({});
+    setNewItemCommentText({});
+    setReplyingToItemComment({});
+    setEditingItemCommentId(null);
+    setEditingItemCommentContent('');
+    setChatRecipient(null);
+    setChatMessages([]);
+    setChatDrafts({});
+    setNewMsgText('');
+    setDraftLinkPreview(null);
+    setPendingChatMedia(null);
+    setThreads([]);
+    setTypingUsers({});
+    setNotifications([]);
+    setUnreadNotifsCount(0);
+    setUnreadMessagesCount(0);
+    setShowNotifications(false);
+    setShowMessagesDropdown(false);
+    setMessagesPanelExpanded(false);
+    setAdminData(null);
+    setBroadcastHistory(null);
+    setAdminReports(null);
+    setReportTarget(null);
+    setProfileUserId(null);
+    profileUserIdRef.current = null;
+    setProfileUser(null);
+    setProfilePosts([]);
+    setProfilePostsError(null);
+    setProfileGamification(null);
+    setPostViewId(null);
+    setPostViewPost(null);
+    setPostViewThreadReplies([]);
+    setPostViewError(null);
+    setHighlightCommentId(null);
+    setThreadReplyTargetId(null);
+    setThreadReplyContent('');
+    setMyGamification(null);
+    setIntroWalkthroughCompleted(false);
+    clearChatState();
+    await fetchAdminStats();
+    addToast('Data reset complete. Admin accounts remain.', 'system', undefined, { skipPrefCheck: true });
+  };
+
   const isGuestPostView = !currentUser && activeTab === 'post';
   const isGuestProfileView = !currentUser && activeTab === 'profile';
   const showAuthOnly = !currentUser && !isGuestPostView && !isGuestProfileView;
@@ -3717,6 +3780,7 @@ export default function App() {
             onLoadAdminData={fetchAdminStats}
             onLoadBroadcastHistory={fetchBroadcastHistory}
             onLoadReports={fetchAdminReports}
+            onResetDataComplete={handleResetDataComplete}
             onReviewReport={handleReviewReport}
             onBroadcast={handleSystemBroadcast}
             onOpenProfile={openProfileByUsername}

@@ -155,6 +155,108 @@ olabid.get('/items', async (c) => {
 });
 
 /**
+ * GET /api/olabid/items/bookmarks?page=&size=
+ * List the current user's Hin-side watchlist (bookmarked auction items).
+ * Uses local snapshots so items stay visible after auctions end.
+ * Registered before /items/:id so "bookmarks" isn't swallowed by :id.
+ */
+olabid.get('/items/bookmarks', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return noStoreJson(c, { error: 'Unauthorized' }, 401);
+
+  const page = Math.max(1, parseInt(c.req.query('page') || '1', 10) || 1);
+  const size = Math.min(50, Math.max(1, parseInt(c.req.query('size') || '20', 10) || 20));
+  const offset = (page - 1) * size;
+
+  const db = drizzle(c.env.DB, { schema });
+  const rows = await db
+    .select({
+      externalId: schema.olabidItems.externalId,
+      name: schema.olabidItems.name,
+      currentBidAmount: schema.olabidItems.currentBidAmount,
+      retailPrice: schema.olabidItems.retailPrice,
+      imageUrl: schema.olabidItems.imageUrl,
+      snapshotJson: schema.olabidItems.snapshotJson,
+      bookmarkedAt: schema.itemBookmarks.createdAt,
+    })
+    .from(schema.itemBookmarks)
+    .innerJoin(
+      schema.olabidItems,
+      eq(schema.itemBookmarks.olabidItemId, schema.olabidItems.externalId),
+    )
+    .where(
+      and(
+        eq(schema.itemBookmarks.userId, authUser.id),
+        isNull(schema.itemBookmarks.deletedAt),
+      ),
+    )
+    .orderBy(desc(schema.itemBookmarks.createdAt))
+    .limit(size)
+    .offset(offset)
+    .all();
+
+  const items = rows.map((row) => {
+    if (row.snapshotJson) {
+      try {
+        const full = JSON.parse(row.snapshotJson) as Record<string, unknown>;
+        const images = full.images as Array<{ largeUrl?: string; url?: string }> | undefined;
+        const currentBid =
+          typeof full.currentBidAmount === 'number'
+            ? full.currentBidAmount
+            : (row.currentBidAmount ?? 0);
+        return {
+          id: typeof full.id === 'number' ? full.id : row.externalId,
+          name: typeof full.name === 'string' ? full.name : row.name,
+          retailPrice:
+            typeof full.retailPrice === 'number' ? full.retailPrice : (row.retailPrice ?? 0),
+          currentBidderId:
+            typeof full.currentBidderId === 'number' ? full.currentBidderId : undefined,
+          currentBidAmount: currentBid,
+          nextBidAmount:
+            typeof full.nextBidAmount === 'number' ? full.nextBidAmount : currentBid + 1,
+          inWatchlist: true,
+          auctionEndsAt: typeof full.auctionEndsAt === 'string' ? full.auctionEndsAt : '',
+          auctionFinishesInMs:
+            typeof full.auctionFinishesInMs === 'number' ? full.auctionFinishesInMs : 0,
+          previewBlobUrl:
+            (typeof full.previewBlobUrl === 'string' ? full.previewBlobUrl : undefined) ||
+            images?.[0]?.largeUrl ||
+            images?.[0]?.url ||
+            row.imageUrl ||
+            undefined,
+          status: typeof full.status === 'string' ? full.status : 'Unknown',
+          shippingIsUnavailable: !!full.shippingIsUnavailable,
+          shippingIsFree: !!full.shippingIsFree,
+          pickupIsUnavailable: !!full.pickupIsUnavailable,
+          isWithoutFees: !!full.isWithoutFees,
+        };
+      } catch {
+        // Fall through to stub fields below.
+      }
+    }
+
+    const currentBid = row.currentBidAmount ?? 0;
+    return {
+      id: row.externalId,
+      name: row.name,
+      retailPrice: row.retailPrice ?? 0,
+      currentBidAmount: currentBid,
+      nextBidAmount: currentBid + 1,
+      inWatchlist: true,
+      auctionEndsAt: '',
+      auctionFinishesInMs: 0,
+      previewBlobUrl: row.imageUrl || undefined,
+      status: 'Unknown',
+    };
+  });
+
+  return noStoreJson(c, {
+    pageContext: { page, size },
+    items,
+  });
+});
+
+/**
  * GET /api/olabid/items/bookmark-status?ids=1,2,3
  * Returns a map of itemId → true for items the current user has bookmarked.
  * Registered before /items/:id so "bookmark-status" isn't swallowed by :id.

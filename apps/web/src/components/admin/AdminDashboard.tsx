@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { History, Megaphone, Shield, Users, Flag, Settings, Award, LayoutDashboard, ShieldAlert } from 'lucide-react';
+import { History, Megaphone, Shield, Users, Flag, Settings, Award, LayoutDashboard, ShieldAlert, AlertTriangle } from 'lucide-react';
 import { BroadcastDelivery, ContentReport, ReviewReportAction, SystemBroadcast as SystemBroadcastRecord, User as UserType } from '@hin/types';
 import type { AdminSection } from '../../lib/appRoutes';
 import { AdminData } from '../../types/ui';
@@ -12,6 +12,7 @@ import { AdminUserSettings } from './AdminUserSettings';
 import { AdminGamification } from './AdminGamification';
 import { AdminEvents } from './AdminEvents';
 import { AuditLogsPanel } from './AuditLogsPanel';
+import { ResetDataPanel } from './ResetDataPanel';
 
 interface AdminDashboardProps {
   section: AdminSection;
@@ -28,6 +29,7 @@ interface AdminDashboardProps {
   onLoadAdminData: () => Promise<void>;
   onLoadBroadcastHistory: () => Promise<void>;
   onLoadReports: () => Promise<void>;
+  onResetDataComplete: () => Promise<void> | void;
   onReviewReport: (reportId: number, action: ReviewReportAction) => Promise<{ success: boolean; error?: string }>;
   onBroadcast: (message: string, delivery: BroadcastDelivery) => Promise<{
     success: boolean;
@@ -53,6 +55,7 @@ export function AdminDashboard({
   onLoadAdminData,
   onLoadBroadcastHistory,
   onLoadReports,
+  onResetDataComplete,
   onReviewReport,
   onBroadcast,
   onOpenProfile,
@@ -69,6 +72,7 @@ export function AdminDashboard({
   const [reportsLoading, setReportsLoading] = useState(false);
   const [securityAuditOpen, setSecurityAuditOpen] = useState(false);
   const [securityAuditMounted, setSecurityAuditMounted] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
 
   const toggleBroadcast = () => {
     setBroadcastOpen(prev => !prev);
@@ -253,6 +257,18 @@ export function AdminDashboard({
         onToggle={() => setUserSettingsOpen(prev => !prev)}
       >
         <AdminUserSettings token={token} />
+      </AdminCollapsibleSection>
+
+      <AdminCollapsibleSection
+        title="Reset Data"
+        description="Wipe customer data for a fresh start while preserving admin accounts."
+        icon={<AlertTriangle className="h-5 w-5" />}
+        iconClassName="bg-rose-600/15 border-rose-500/25 text-rose-400"
+        headerClassName="bg-gradient-to-r from-rose-500/10 via-rose-500/5 to-transparent"
+        open={resetOpen}
+        onToggle={() => setResetOpen(prev => !prev)}
+      >
+        <ResetDataPanel token={token} onResetComplete={onResetDataComplete} />
       </AdminCollapsibleSection>
 
       <AdminCollapsibleSection

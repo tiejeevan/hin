@@ -14,7 +14,8 @@
     "db:migrate:prod": "npm run db:migrate:prod --workspace=packages/db",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:polls": "playwright test e2e/polls.spec.ts"
+    "test:e2e:polls": "playwright test e2e/polls.spec.ts",
+    "test:e2e:notifications": "playwright test e2e/notifications.spec.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

@@ -16,6 +16,7 @@ const EVENT_LABELS: Record<AuditEventType, string> = {
   account_delete: 'Account Delete',
   admin_impersonate: 'Admin Impersonate',
   role_change: 'Role Change',
+  platform_reset: 'Platform Reset',
 };
 
 const EVENT_COLORS: Record<AuditEventType, string> = {
@@ -27,6 +28,7 @@ const EVENT_COLORS: Record<AuditEventType, string> = {
   account_delete: 'bg-rose-600/15 text-rose-300 border-rose-600/25',
   admin_impersonate: 'bg-violet-500/15 text-violet-400 border-violet-500/25',
   role_change: 'bg-orange-500/15 text-orange-400 border-orange-500/25',
+  platform_reset: 'bg-rose-700/20 text-rose-300 border-rose-700/30',
 };
 
 function EventBadge({ type }: { type: AuditEventType }) {

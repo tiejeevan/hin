@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, count, sql, isNull, desc } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { BroadcastDelivery, BroadcastSystemMessageSchema, Notification, ReportStatus, ReviewReportSchema, SystemBroadcast, SystemSettings, UpdateSystemSettingsSchema } from '@hin/types';
+import { BroadcastDelivery, BroadcastSystemMessageSchema, Notification, ReportStatus, ResetPlatformDataSchema, ReviewReportSchema, SystemBroadcast, SystemSettings, UpdateSystemSettingsSchema } from '@hin/types';
 import { sign } from 'hono/jwt';
 import type { Env } from '../types';
 import { getAuthUser, JWT_SECRET } from '../lib/auth';
@@ -37,6 +37,8 @@ admin.get('/stats', async (c) => {
     createdAt: schema.users.createdAt,
     deletedAt: schema.users.deletedAt,
     deletionSource: schema.users.deletionSource,
+    country: schema.users.country,
+    postCount: sql<number>`(SELECT COUNT(*) FROM posts WHERE posts.user_id = ${schema.users.id} AND posts.deleted_at IS NULL)`,
   })
   .from(schema.users)
   .all();
@@ -56,6 +58,8 @@ admin.get('/stats', async (c) => {
       createdAt: u.createdAt,
       deletedAt: u.deletedAt,
       deletionSource: u.deletionSource,
+      country: u.country,
+      postCount: u.postCount ?? 0,
       accountStatus: computeAccountStatus(u.deletedAt, u.deletionSource),
     })),
   });
@@ -381,6 +385,95 @@ admin.post('/users/:id/reinstate', async (c) => {
   }
 
   return c.json({ success: true });
+});
+
+admin.post('/reset-data', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = ResetPlatformDataSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Type RESET DATA to confirm this action' }, 400);
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const customerCountRow = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(schema.users)
+    .where(sql`${schema.users.role} != 'admin'`)
+    .get();
+
+  const customersDeleted = customerCountRow?.count ?? 0;
+  const mediaRows = await db
+    .select({ r2Key: schema.mediaUploads.r2Key })
+    .from(schema.mediaUploads)
+    .where(sql`${schema.mediaUploads.type} IN ('post', 'chat') OR ${schema.mediaUploads.userId} IN (SELECT id FROM users WHERE role != 'admin')`)
+    .all();
+
+  for (const row of mediaRows) {
+    await c.env.MEDIA.delete(row.r2Key);
+  }
+
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM poll_votes'),
+    c.env.DB.prepare('DELETE FROM poll_options'),
+    c.env.DB.prepare('DELETE FROM polls'),
+    c.env.DB.prepare('DELETE FROM comment_likes'),
+    c.env.DB.prepare('DELETE FROM comments'),
+    c.env.DB.prepare('DELETE FROM post_hashtags'),
+    c.env.DB.prepare('DELETE FROM post_edit_history'),
+    c.env.DB.prepare('DELETE FROM likes'),
+    c.env.DB.prepare('DELETE FROM post_bookmarks'),
+    c.env.DB.prepare('DELETE FROM post_shares'),
+    c.env.DB.prepare("DELETE FROM media_uploads WHERE type IN ('post', 'chat') OR user_id IN (SELECT id FROM users WHERE role != 'admin')"),
+    c.env.DB.prepare('DELETE FROM posts'),
+    c.env.DB.prepare('DELETE FROM hashtags'),
+    c.env.DB.prepare('DELETE FROM messages'),
+    c.env.DB.prepare('DELETE FROM notifications'),
+    c.env.DB.prepare('DELETE FROM item_comment_likes'),
+    c.env.DB.prepare('DELETE FROM item_comments'),
+    c.env.DB.prepare('DELETE FROM item_bookmarks'),
+    c.env.DB.prepare('DELETE FROM olabid_items'),
+    c.env.DB.prepare('DELETE FROM user_follows'),
+    c.env.DB.prepare('DELETE FROM follow_requests'),
+    c.env.DB.prepare('DELETE FROM user_blocks'),
+    c.env.DB.prepare('DELETE FROM user_mutes'),
+    c.env.DB.prepare('DELETE FROM content_reports'),
+    c.env.DB.prepare('DELETE FROM points_ledger'),
+    c.env.DB.prepare('DELETE FROM points_ledger_archive'),
+    c.env.DB.prepare('DELETE FROM user_equipped_badges'),
+    c.env.DB.prepare('DELETE FROM user_badges'),
+    c.env.DB.prepare('DELETE FROM user_stat_counters'),
+    c.env.DB.prepare('DELETE FROM user_streaks'),
+    c.env.DB.prepare('DELETE FROM user_gamification'),
+    c.env.DB.prepare('DELETE FROM event_participants'),
+    c.env.DB.prepare('DELETE FROM event_wins'),
+    c.env.DB.prepare('DELETE FROM system_broadcasts'),
+    c.env.DB.prepare('DELETE FROM link_previews'),
+    c.env.DB.prepare('DELETE FROM audit_logs'),
+    c.env.DB.prepare('DELETE FROM intro_walkthrough'),
+    c.env.DB.prepare('DELETE FROM user_settings'),
+    c.env.DB.prepare("DELETE FROM users WHERE role != 'admin'"),
+  ]);
+
+  const adminCountRow = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(schema.users)
+    .where(eq(schema.users.role, 'admin'))
+    .get();
+
+  const adminsRemaining = adminCountRow?.count ?? 0;
+
+  await writeAuditLog(c, {
+    userId: authUser.id,
+    eventType: 'platform_reset',
+    success: true,
+  });
+
+  return c.json({ success: true, customersDeleted, adminsRemaining });
 });
 
 admin.get('/settings', async (c) => {

@@ -651,6 +651,17 @@ export const DeleteAccountSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+/** Requires the admin to type the literal phrase "RESET DATA" before wiping customer data. */
+export const ResetPlatformDataSchema = z.object({
+  confirm: z.literal('RESET DATA'),
+});
+
+export interface ResetPlatformDataResult {
+  success: true;
+  customersDeleted: number;
+  adminsRemaining: number;
+}
+
 export const UpdateSystemSettingsSchema = z.object({
   maxPinnedPostsPerUser: z.number().int().min(SYSTEM_SETTING_BOUNDS.maxPinnedPostsPerUser.min).max(SYSTEM_SETTING_BOUNDS.maxPinnedPostsPerUser.max).optional(),
   maxPostLength: z.number().int().min(SYSTEM_SETTING_BOUNDS.maxPostLength.min).max(SYSTEM_SETTING_BOUNDS.maxPostLength.max).optional(),
@@ -1035,7 +1046,8 @@ export type AuditEventType =
   | 'password_change'
   | 'account_delete'
   | 'admin_impersonate'
-  | 'role_change';
+  | 'role_change'
+  | 'platform_reset';
 
 export type AuditDeviceType = 'mobile' | 'tablet' | 'desktop' | 'bot' | 'unknown';
 
