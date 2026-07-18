@@ -7,6 +7,55 @@ const MIN_VISIBLE_MS = 250;
 
 const SILENT_URL_SUFFIXES = ['/api/me/session-tick'];
 
+/**
+ * Instant user-interaction mutations: like, bookmark, comment, follow, etc.
+ * These must not drive the full-screen overlay (Durable Object fan-out is separate).
+ * Heavy writes (create/delete post, auth, admin, profile save) are intentionally excluded.
+ */
+const SILENT_INTERACTION_RULES: Array<{ method: string; pattern: RegExp }> = [
+  // Posts: like / bookmark / share / pin / poll
+  { method: 'POST', pattern: /\/api\/posts\/\d+\/like(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/posts\/\d+\/bookmark(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/posts\/\d+\/share(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/posts\/\d+\/pin(?:\?|$)/ },
+  { method: 'DELETE', pattern: /\/api\/posts\/\d+\/pin(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/posts\/\d+\/poll\/vote(?:\?|$)/ },
+  { method: 'DELETE', pattern: /\/api\/posts\/\d+\/poll\/vote(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/posts\/\d+\/poll\/close(?:\?|$)/ },
+  // Comments
+  { method: 'POST', pattern: /\/api\/posts\/\d+\/comments(?:\?|$)/ },
+  { method: 'PUT', pattern: /\/api\/comments\/\d+(?:\?|$)/ },
+  { method: 'DELETE', pattern: /\/api\/comments\/\d+(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/comments\/\d+\/like(?:\?|$)/ },
+  // Olabid / item comments
+  { method: 'POST', pattern: /\/api\/olabid\/items\/\d+\/bookmark(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/olabid\/items\/\d+\/comments(?:\?|$)/ },
+  { method: 'PUT', pattern: /\/api\/item-comments\/\d+(?:\?|$)/ },
+  { method: 'DELETE', pattern: /\/api\/item-comments\/\d+(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/item-comments\/\d+\/like(?:\?|$)/ },
+  // Social graph
+  { method: 'POST', pattern: /\/api\/follows\/\d+(?:\?|$)/ },
+  { method: 'DELETE', pattern: /\/api\/follows\/\d+(?:\?|$)/ },
+  { method: 'DELETE', pattern: /\/api\/follows\/\d+\/request(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/follows\/requests\/\d+\/approve(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/follows\/requests\/\d+\/reject(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/blocks\/\d+(?:\?|$)/ },
+  { method: 'DELETE', pattern: /\/api\/blocks\/\d+(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/mutes\/\d+(?:\?|$)/ },
+  { method: 'DELETE', pattern: /\/api\/mutes\/\d+(?:\?|$)/ },
+  // Notifications / chat read receipts
+  { method: 'POST', pattern: /\/api\/notifications\/\d+\/read(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/notifications\/read-all(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/messages\/read\/\d+(?:\?|$)/ },
+  // Light taps
+  { method: 'POST', pattern: /\/api\/events\/\d+\/join(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/me\/bio-walkthrough\/complete(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/me\/intro-walkthrough\/complete(?:\?|$)/ },
+  { method: 'PATCH', pattern: /\/api\/me\/gamification\/equipped(?:\?|$)/ },
+  { method: 'PATCH', pattern: /\/api\/users\/me\/settings(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/reports(?:\?|$)/ },
+];
+
 type Listener = (visible: boolean) => void;
 
 let pendingCount = 0;
@@ -94,18 +143,28 @@ export function isGlobalLoadingVisible(): boolean {
   return visible;
 }
 
+/** Headers that opt a single fetch out of the global overlay. */
+export function silentLoadingHeaders(extra?: Record<string, string>): Record<string, string> {
+  return {
+    ...extra,
+    [SILENT_LOADING_HEADER]: SILENT_LOADING_VALUE,
+  };
+}
+
 function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === 'string') return input;
   if (input instanceof URL) return input.href;
   return input.url;
 }
 
-function isSilentRequest(input: RequestInfo | URL, init?: RequestInit): boolean {
-  const url = requestUrl(input);
-  if (SILENT_URL_SUFFIXES.some((suffix) => url.includes(suffix))) {
-    return true;
-  }
+function requestMethod(input: RequestInfo | URL, init?: RequestInit): string {
+  const fromInit = init?.method;
+  if (fromInit) return fromInit.toUpperCase();
+  if (input instanceof Request && input.method) return input.method.toUpperCase();
+  return 'GET';
+}
 
+function hasSilentHeader(input: RequestInfo | URL, init?: RequestInit): boolean {
   const headerFromInit = init?.headers;
   if (headerFromInit) {
     if (headerFromInit instanceof Headers) {
@@ -114,7 +173,10 @@ function isSilentRequest(input: RequestInfo | URL, init?: RequestInit): boolean 
       }
     } else if (Array.isArray(headerFromInit)) {
       for (const [key, value] of headerFromInit) {
-        if (key.toLowerCase() === SILENT_LOADING_HEADER.toLowerCase() && value.toLowerCase() === SILENT_LOADING_VALUE) {
+        if (
+          key.toLowerCase() === SILENT_LOADING_HEADER.toLowerCase() &&
+          value.toLowerCase() === SILENT_LOADING_VALUE
+        ) {
           return true;
         }
       }
@@ -133,6 +195,30 @@ function isSilentRequest(input: RequestInfo | URL, init?: RequestInit): boolean 
   if (input instanceof Request) {
     const value = input.headers.get(SILENT_LOADING_HEADER);
     if (value?.toLowerCase() === SILENT_LOADING_VALUE) return true;
+  }
+
+  return false;
+}
+
+function isSilentInteraction(url: string, method: string): boolean {
+  return SILENT_INTERACTION_RULES.some(
+    (rule) => rule.method === method && rule.pattern.test(url),
+  );
+}
+
+export function isSilentRequest(input: RequestInfo | URL, init?: RequestInit): boolean {
+  const url = requestUrl(input);
+  if (SILENT_URL_SUFFIXES.some((suffix) => url.includes(suffix))) {
+    return true;
+  }
+
+  if (hasSilentHeader(input, init)) {
+    return true;
+  }
+
+  const method = requestMethod(input, init);
+  if (isSilentInteraction(url, method)) {
+    return true;
   }
 
   return false;

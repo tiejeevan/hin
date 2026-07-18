@@ -41,6 +41,8 @@ interface OlabidItem {
   shippingIsFree?: boolean;
   pickupIsUnavailable?: boolean;
   isWithoutFees?: boolean;
+  commentCount?: number;
+  isBookmarked?: boolean;
 }
 
 interface OlabidListResponse {
@@ -147,24 +149,6 @@ export function OlabidPage({
     action();
   };
 
-  const fetchBookmarkStatus = async (ids: number[]) => {
-    if (!token || ids.length === 0) {
-      setBookmarks({});
-      return;
-    }
-    try {
-      const res = await fetch(
-        `${API_URL}/api/olabid/items/bookmark-status?ids=${ids.join(',')}`,
-        { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' },
-      );
-      if (res.ok) {
-        setBookmarks(await res.json());
-      }
-    } catch {
-      // Non-critical
-    }
-  };
-
   const toggleBookmark = async (itemId: number, e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (!currentUser || !token) {
@@ -215,8 +199,8 @@ export function OlabidPage({
 
   const fetchMeta = async (): Promise<number[]> => {
     const [catRes, whRes] = await Promise.all([
-      fetch(`${API_URL}/api/olabid/categories`, { cache: 'no-store' }),
-      fetch(`${API_URL}/api/olabid/warehouses`, { cache: 'no-store' }),
+      fetch(`${API_URL}/api/olabid/categories`),
+      fetch(`${API_URL}/api/olabid/warehouses`),
     ]);
 
     if (catRes.ok) {
@@ -307,6 +291,8 @@ export function OlabidPage({
 
         const response = await fetch(`${API_URL}/api/olabid/items?${params.toString()}`, {
           cache: 'no-store',
+          // Auth lets the API attach isBookmarked for the signed-in user.
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         });
 
         if (!response.ok) {
@@ -320,30 +306,16 @@ export function OlabidPage({
       setPage(data.pageContext.page);
       setHasLoaded(true);
 
-      const ids = data.items.map(i => i.id);
-      if (ids.length > 0) {
-        try {
-          const countsRes = await fetch(
-            `${API_URL}/api/olabid/items/comment-counts?ids=${ids.join(',')}`,
-            { cache: 'no-store' },
-          );
-          if (countsRes.ok) {
-            setCommentCounts(await countsRes.json());
-          }
-        } catch {
-          // Non-critical
-        }
-        if (nextSection === 'watchlist') {
-          const allBookmarked: Record<number, boolean> = {};
-          for (const id of ids) allBookmarked[id] = true;
-          setBookmarks(allBookmarked);
-        } else {
-          void fetchBookmarkStatus(ids);
-        }
-      } else {
-        setCommentCounts({});
-        setBookmarks({});
+      const nextCommentCounts: Record<number, number> = {};
+      const nextBookmarks: Record<number, boolean> = {};
+
+      for (const item of data.items) {
+        nextCommentCounts[item.id] = item.commentCount ?? 0;
+        nextBookmarks[item.id] = item.isBookmarked ?? nextSection === 'watchlist';
       }
+
+      setCommentCounts(nextCommentCounts);
+      setBookmarks(nextBookmarks);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {

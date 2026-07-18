@@ -12,6 +12,7 @@ interface AppHeaderProps {
   showNotifications: boolean;
   unreadNotifsCount: number;
   notifications: Notification[];
+  onlineCount?: number;
   isAdminTab?: boolean;
   isOlabidTab?: boolean;
   onGoHome: () => void;
@@ -34,6 +35,7 @@ export function AppHeader({
   showNotifications,
   unreadNotifsCount,
   notifications,
+  onlineCount = 0,
   isAdminTab,
   isOlabidTab,
   onGoHome,
@@ -67,16 +69,31 @@ export function AppHeader({
 
   return (
     <header className="sticky top-0 z-40 bg-bg-secondary/85 backdrop-blur-md border-b border-border-custom px-4 py-3 flex items-center justify-between transition-colors duration-200 shrink-0">
-      <button
-        type="button"
-        onClick={onGoHome}
-        className="cursor-pointer rounded-xl hover:opacity-90 transition-opacity"
-        aria-label="Go home"
-      >
-        <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary via-text-secondary to-text-muted">
-          Hin
-        </span>
-      </button>
+      <div className="flex items-center gap-2.5 min-w-0">
+        <button
+          type="button"
+          onClick={onGoHome}
+          className="cursor-pointer rounded-xl hover:opacity-90 transition-opacity"
+          aria-label="Go home"
+        >
+          <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary via-text-secondary to-text-muted">
+            Hin
+          </span>
+        </button>
+        {currentUser && onlineCount > 0 && (
+          <span
+            className="inline-flex items-center gap-1.5 text-[11px] text-text-muted tabular-nums"
+            title={`${onlineCount} ${onlineCount === 1 ? 'person' : 'people'} online`}
+            aria-label={`${onlineCount} ${onlineCount === 1 ? 'person' : 'people'} online`}
+          >
+            <span className="relative flex h-1.5 w-1.5 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            </span>
+            {onlineCount} online
+          </span>
+        )}
+      </div>
 
       {currentUser && (
         <div className="flex items-center gap-3">

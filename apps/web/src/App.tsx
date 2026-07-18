@@ -2215,27 +2215,77 @@ export default function App() {
 
   const handleToggleLike = async (postId: number) => {
     if (!currentUser) return;
+    const source =
+      posts.find((p) => p.id === postId) ||
+      profilePosts.find((p) => p.id === postId) ||
+      (postViewPost?.id === postId ? postViewPost : null);
+    if (!source) return;
+
+    const prevLiked = !!source.hasLiked;
+    const prevCount = source.likesCount ?? 0;
+    const nextLiked = !prevLiked;
+    const nextCount = Math.max(0, prevCount + (nextLiked ? 1 : -1));
+
+    const applyLike = (liked: boolean, likesCount: number) => {
+      setPosts((prev) =>
+        prev.map((p) => (p.id === postId ? { ...p, hasLiked: liked, likesCount } : p)),
+      );
+      setProfilePosts((prev) =>
+        prev.map((p) => (p.id === postId ? { ...p, hasLiked: liked, likesCount } : p)),
+      );
+      setPostViewPost((prev) =>
+        prev?.id === postId ? { ...prev, hasLiked: liked, likesCount } : prev,
+      );
+    };
+
+    applyLike(nextLiked, nextCount);
     try {
-      const res = await fetch(`${API_URL}/api/posts/${postId}/like`, { method: 'POST', headers: getHeaders() });
+      const res = await fetch(`${API_URL}/api/posts/${postId}/like`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
-        setPosts(prev =>
-          prev.map(p => (p.id === postId ? { ...p, hasLiked: data.liked, likesCount: data.likesCount } : p))
-        );
-        setProfilePosts(prev =>
-          prev.map(p => (p.id === postId ? { ...p, hasLiked: data.liked, likesCount: data.likesCount } : p))
-        );
-        setPostViewPost(prev =>
-          prev?.id === postId ? { ...prev, hasLiked: data.liked, likesCount: data.likesCount } : prev
-        );
+        applyLike(data.liked, data.likesCount);
+      } else {
+        applyLike(prevLiked, prevCount);
       }
     } catch (e) {
+      applyLike(prevLiked, prevCount);
       console.error(e);
     }
   };
 
   const handleToggleBookmark = async (postId: number) => {
     if (!currentUser) return;
+    const source =
+      (postViewPost?.id === postId ? postViewPost : null) ||
+      posts.find((p) => p.id === postId) ||
+      profilePosts.find((p) => p.id === postId);
+    const prevBookmarked = !!source?.hasBookmarked;
+    const prevCount = source?.bookmarksCount ?? 0;
+    const nextBookmarked = !prevBookmarked;
+    const nextCount = Math.max(0, prevCount + (nextBookmarked ? 1 : -1));
+    const removedFromBookmarksFeed = feedModeRef.current === 'bookmarks' && prevBookmarked;
+    const removedPost = removedFromBookmarksFeed ? posts.find((p) => p.id === postId) : null;
+
+    const applyBookmark = (bookmarked: boolean, bookmarksCount: number) => {
+      setPostViewPost((prev) =>
+        prev?.id === postId ? { ...prev, hasBookmarked: bookmarked, bookmarksCount } : prev,
+      );
+      setPosts((prev) =>
+        prev.map((p) => (p.id === postId ? { ...p, hasBookmarked: bookmarked, bookmarksCount } : p)),
+      );
+      setProfilePosts((prev) =>
+        prev.map((p) => (p.id === postId ? { ...p, hasBookmarked: bookmarked, bookmarksCount } : p)),
+      );
+    };
+
+    applyBookmark(nextBookmarked, nextCount);
+    if (removedFromBookmarksFeed) {
+      setPosts((prev) => prev.filter((p) => p.id !== postId));
+    }
+
     try {
       const res = await fetch(`${API_URL}/api/posts/${postId}/bookmark`, {
         method: 'POST',
@@ -2243,17 +2293,30 @@ export default function App() {
       });
       if (res.ok) {
         const data = await res.json();
-        setPostViewPost(prev =>
-          prev?.id === postId
-            ? { ...prev, hasBookmarked: data.bookmarked, bookmarksCount: data.bookmarksCount }
-            : prev
-        );
+        applyBookmark(data.bookmarked, data.bookmarksCount);
         if (feedModeRef.current === 'bookmarks' && !data.bookmarked) {
-          setPosts(prev => prev.filter(p => p.id !== postId));
+          setPosts((prev) => prev.filter((p) => p.id !== postId));
+        } else if (removedFromBookmarksFeed && data.bookmarked && removedPost) {
+          setPosts((prev) =>
+            prev.some((p) => p.id === postId)
+              ? prev
+              : [{ ...removedPost, hasBookmarked: true, bookmarksCount: data.bookmarksCount }, ...prev],
+          );
         }
-        addToast(data.bookmarked ? 'Post bookmarked' : 'Bookmark removed', 'system', undefined, { skipPrefCheck: true });
+        addToast(data.bookmarked ? 'Post bookmarked' : 'Bookmark removed', 'system', undefined, {
+          skipPrefCheck: true,
+        });
+      } else {
+        applyBookmark(prevBookmarked, prevCount);
+        if (removedFromBookmarksFeed && removedPost) {
+          setPosts((prev) => (prev.some((p) => p.id === postId) ? prev : [removedPost, ...prev]));
+        }
       }
     } catch (e) {
+      applyBookmark(prevBookmarked, prevCount);
+      if (removedFromBookmarksFeed && removedPost) {
+        setPosts((prev) => (prev.some((p) => p.id === postId) ? prev : [removedPost, ...prev]));
+      }
       console.error(e);
     }
   };
@@ -2299,6 +2362,24 @@ export default function App() {
 
   const handleToggleCommentLike = async (postId: number, commentId: number) => {
     if (!currentUser) return;
+    const comment = (postComments[postId] || []).find((c) => c.id === commentId);
+    if (!comment) return;
+
+    const prevLiked = !!comment.hasLiked;
+    const prevCount = comment.likesCount ?? 0;
+    const nextLiked = !prevLiked;
+    const nextCount = Math.max(0, prevCount + (nextLiked ? 1 : -1));
+
+    const applyCommentLike = (liked: boolean, likesCount: number) => {
+      setPostComments((prev) => ({
+        ...prev,
+        [postId]: (prev[postId] || []).map((c) =>
+          c.id === commentId ? { ...c, hasLiked: liked, likesCount } : c,
+        ),
+      }));
+    };
+
+    applyCommentLike(nextLiked, nextCount);
     try {
       const res = await fetch(`${API_URL}/api/comments/${commentId}/like`, {
         method: 'POST',
@@ -2306,14 +2387,12 @@ export default function App() {
       });
       if (res.ok) {
         const data = await res.json();
-        setPostComments(prev => ({
-          ...prev,
-          [postId]: (prev[postId] || []).map(c =>
-            c.id === commentId ? { ...c, hasLiked: data.liked, likesCount: data.likesCount } : c
-          ),
-        }));
+        applyCommentLike(data.liked, data.likesCount);
+      } else {
+        applyCommentLike(prevLiked, prevCount);
       }
     } catch (e) {
+      applyCommentLike(prevLiked, prevCount);
       console.error(e);
     }
   };
@@ -2530,25 +2609,42 @@ export default function App() {
 
   const handleToggleItemCommentLike = async (olabidItemId: number, commentId: number) => {
     if (!currentUser) return;
+    const comment = (itemComments[olabidItemId] || []).find((c) => c.id === commentId);
+    if (!comment) return;
+
+    const prevLiked = !!comment.hasLiked;
+    const prevCount = comment.likesCount ?? 0;
+    const nextLiked = !prevLiked;
+    const nextCount = Math.max(0, prevCount + (nextLiked ? 1 : -1));
+
+    const applyItemCommentLike = (liked: boolean, likesCount: number) => {
+      setItemComments((prev) => ({
+        ...prev,
+        [olabidItemId]: (prev[olabidItemId] || []).map((c) =>
+          c.id === commentId ? { ...c, hasLiked: liked, likesCount } : c,
+        ),
+      }));
+    };
+
+    applyItemCommentLike(nextLiked, nextCount);
     try {
       const res = await fetch(`${API_URL}/api/item-comments/${commentId}/like`, {
         method: 'POST',
         headers: getHeaders(),
       });
       if (res.status === 401) {
+        applyItemCommentLike(prevLiked, prevCount);
         handleSessionExpired();
         return;
       }
       if (res.ok) {
         const data = await res.json();
-        setItemComments(prev => ({
-          ...prev,
-          [olabidItemId]: (prev[olabidItemId] || []).map(c =>
-            c.id === commentId ? { ...c, hasLiked: data.liked, likesCount: data.likesCount } : c
-          ),
-        }));
+        applyItemCommentLike(data.liked, data.likesCount);
+      } else {
+        applyItemCommentLike(prevLiked, prevCount);
       }
     } catch (e) {
+      applyItemCommentLike(prevLiked, prevCount);
       console.error(e);
     }
   };
@@ -3379,6 +3475,7 @@ export default function App() {
             showNotifications={showNotifications}
             unreadNotifsCount={unreadNotifsCount}
             notifications={notifications}
+            onlineCount={onlineUserIds.size}
             isAdminTab={activeTab === 'admin'}
             isOlabidTab={activeTab === 'olabid'}
             onGoHome={goHome}

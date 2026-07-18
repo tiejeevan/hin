@@ -115,13 +115,18 @@ export async function isOlabidEnabled(db: Db): Promise<boolean> {
 
 export async function getSystemSettings(db: Db): Promise<SystemSettings> {
   const now = Date.now();
-  const epoch = (await getSystemSetting(db, SYSTEM_SETTINGS_EPOCH_KEY)) ?? '0';
 
   if (
     cachedSystemSettings
-    && cachedSystemSettings.epoch === epoch
     && now - cachedSystemSettings.fetchedAt < FLAG_CACHE_TTL_MS
   ) {
+    return cachedSystemSettings.value;
+  }
+
+  const epoch = (await getSystemSetting(db, SYSTEM_SETTINGS_EPOCH_KEY)) ?? '0';
+
+  if (cachedSystemSettings && cachedSystemSettings.epoch === epoch) {
+    cachedSystemSettings.fetchedAt = now;
     return cachedSystemSettings.value;
   }
 

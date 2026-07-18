@@ -55,12 +55,26 @@ export interface OlabidListItem {
   isWithoutFees?: boolean;
 }
 
+/** List item after Hin-side enrichment (comment counts + bookmark state). */
+export interface EnrichedOlabidListItem extends OlabidListItem {
+  commentCount: number;
+  isBookmarked: boolean;
+}
+
 export interface OlabidListResponse {
   pageContext: {
     page: number;
     size: number;
   };
   items: OlabidListItem[];
+}
+
+export interface EnrichedOlabidListResponse {
+  pageContext: {
+    page: number;
+    size: number;
+  };
+  items: EnrichedOlabidListItem[];
 }
 
 export interface OlabidCategory {

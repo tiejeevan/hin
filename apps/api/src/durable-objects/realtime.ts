@@ -8,38 +8,119 @@ import { JWT_SECRET } from '../lib/auth';
 import { isBlocked } from '../lib/blocks';
 import { parseFirstUrl, getOrFetchLinkPreview } from '../lib/linkPreview';
 
+export interface RealtimeSession {
+  userId: number;
+  username: string;
+  activeChatId: number | null;
+}
+
+/** Application close code used when JWT join fails. */
+export const AUTH_FAILURE_CLOSE_CODE = 4001;
+
+export function parseSessionAttachment(raw: unknown): RealtimeSession | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.userId !== 'number' || !Number.isFinite(obj.userId)) return null;
+  if (typeof obj.username !== 'string' || !obj.username) return null;
+
+  if (obj.activeChatId === null || obj.activeChatId === undefined) {
+    return { userId: obj.userId, username: obj.username, activeChatId: null };
+  }
+  if (typeof obj.activeChatId !== 'number' || !Number.isFinite(obj.activeChatId)) {
+    return null;
+  }
+  return {
+    userId: obj.userId,
+    username: obj.username,
+    activeChatId: obj.activeChatId,
+  };
+}
+
 export class RealtimeDO implements DurableObject {
   state: DurableObjectState;
   env: Env;
-  sessions = new Map<WebSocket, { userId: number; username: string; activeChatId?: number | null }>();
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.env = env;
   }
 
-  getOnlineUserIds(): number[] {
+  /** Overridable for unit tests that inject mock sockets. */
+  getConnectedWebSockets(): WebSocket[] {
+    return this.state.getWebSockets();
+  }
+
+  getSession(ws: WebSocket): RealtimeSession | null {
+    try {
+      return parseSessionAttachment(ws.deserializeAttachment());
+    } catch (e) {
+      console.error('Invalid websocket attachment:', e);
+      return null;
+    }
+  }
+
+  setSession(ws: WebSocket, session: RealtimeSession): void {
+    ws.serializeAttachment({
+      userId: session.userId,
+      username: session.username,
+      activeChatId: session.activeChatId,
+    });
+  }
+
+  clearSession(ws: WebSocket): void {
+    try {
+      ws.serializeAttachment(null);
+    } catch (e) {
+      console.error('Failed to clear websocket attachment:', e);
+    }
+  }
+
+  getAuthenticatedSockets(excludingSocket?: WebSocket): WebSocket[] {
+    const result: WebSocket[] = [];
+    for (const ws of this.getConnectedWebSockets()) {
+      if (excludingSocket && ws === excludingSocket) continue;
+      if (this.getSession(ws)) result.push(ws);
+    }
+    return result;
+  }
+
+  getOnlineUserIds(excludingSocket?: WebSocket): number[] {
     const ids = new Set<number>();
-    for (const session of this.sessions.values()) {
-      ids.add(session.userId);
+    for (const ws of this.getAuthenticatedSockets(excludingSocket)) {
+      const session = this.getSession(ws);
+      if (session) ids.add(session.userId);
     }
     return Array.from(ids);
   }
 
-  isUserOnline(userId: number): boolean {
-    for (const session of this.sessions.values()) {
-      if (session.userId === userId) return true;
+  isUserOnline(userId: number, excludingSocket?: WebSocket): boolean {
+    for (const ws of this.getAuthenticatedSockets(excludingSocket)) {
+      const session = this.getSession(ws);
+      if (session?.userId === userId) return true;
     }
     return false;
   }
 
-  broadcastPresence(message: object, excludeWs?: WebSocket) {
-    const msg = JSON.stringify(message);
-    for (const [ws] of this.sessions.entries()) {
-      if (excludeWs && ws === excludeWs) continue;
-      try {
-        ws.send(msg);
-      } catch (e) {}
+  sendSafely(ws: WebSocket, event: object): void {
+    try {
+      ws.send(JSON.stringify(event));
+    } catch (e) {
+      console.error('Failed to send websocket message:', e);
+    }
+  }
+
+  broadcastToAll(event: object, excludingSocket?: WebSocket): void {
+    for (const ws of this.getAuthenticatedSockets(excludingSocket)) {
+      this.sendSafely(ws, event);
+    }
+  }
+
+  broadcastToUser(userId: number, event: object, excludingSocket?: WebSocket): void {
+    for (const ws of this.getAuthenticatedSockets(excludingSocket)) {
+      const session = this.getSession(ws);
+      if (session?.userId === userId) {
+        this.sendSafely(ws, event);
+      }
     }
   }
 
@@ -50,15 +131,11 @@ export class RealtimeDO implements DurableObject {
       if (request.method !== 'POST') {
         return new Response('Method Not Allowed', { status: 405 });
       }
-      const { recipientId, notification } = await request.json() as { recipientId: number; notification: Notification };
-      
-      for (const [ws, session] of this.sessions.entries()) {
-        if (session.userId === recipientId) {
-          try {
-            ws.send(JSON.stringify({ type: 'notification', payload: notification }));
-          } catch (e) {}
-        }
-      }
+      const { recipientId, notification } = await request.json() as {
+        recipientId: number;
+        notification: Notification;
+      };
+      this.broadcastToUser(recipientId, { type: 'notification', payload: notification });
       return new Response('OK');
     }
 
@@ -72,12 +149,12 @@ export class RealtimeDO implements DurableObject {
         byUserId.set(notification.userId, notification);
       }
 
-      for (const [ws, session] of this.sessions.entries()) {
+      for (const ws of this.getAuthenticatedSockets()) {
+        const session = this.getSession(ws);
+        if (!session) continue;
         const notification = byUserId.get(session.userId);
         if (!notification) continue;
-        try {
-          ws.send(JSON.stringify({ type: 'notification', payload: notification }));
-        } catch (e) {}
+        this.sendSafely(ws, { type: 'notification', payload: notification });
       }
       return new Response('OK');
     }
@@ -87,12 +164,7 @@ export class RealtimeDO implements DurableObject {
         return new Response('Method Not Allowed', { status: 405 });
       }
       const { content } = await request.json() as { content: string };
-      const msg = JSON.stringify({ type: 'system_toast', payload: { content } });
-      for (const ws of this.sessions.keys()) {
-        try {
-          ws.send(msg);
-        } catch (e) {}
-      }
+      this.broadcastToAll({ type: 'system_toast', payload: { content } });
       return new Response('OK');
     }
 
@@ -100,15 +172,14 @@ export class RealtimeDO implements DurableObject {
       if (request.method !== 'POST') {
         return new Response('Method Not Allowed', { status: 405 });
       }
-      const { senderId, receiverId } = await request.json() as { senderId: number; receiverId: number };
-      
-      for (const [ws, session] of this.sessions.entries()) {
-        if (session.userId === senderId) {
-          try {
-            ws.send(JSON.stringify({ type: 'messages_read', payload: { senderId, receiverId } }));
-          } catch (e) {}
-        }
-      }
+      const { senderId, receiverId } = await request.json() as {
+        senderId: number;
+        receiverId: number;
+      };
+      this.broadcastToUser(senderId, {
+        type: 'messages_read',
+        payload: { senderId, receiverId },
+      });
       return new Response('OK');
     }
 
@@ -117,12 +188,7 @@ export class RealtimeDO implements DurableObject {
         return new Response('Method Not Allowed', { status: 405 });
       }
       const payload = await request.json();
-      const msg = JSON.stringify(payload);
-      for (const ws of this.sessions.keys()) {
-        try {
-          ws.send(msg);
-        } catch (e) {}
-      }
+      this.broadcastToAll(payload as object);
       return new Response('OK');
     }
 
@@ -130,15 +196,10 @@ export class RealtimeDO implements DurableObject {
       if (request.method !== 'POST') {
         return new Response('Method Not Allowed', { status: 405 });
       }
-      const { recipientId, ...event } = await request.json() as { recipientId: number } & Record<string, unknown>;
-
-      for (const [ws, session] of this.sessions.entries()) {
-        if (session.userId === recipientId) {
-          try {
-            ws.send(JSON.stringify(event));
-          } catch (e) {}
-        }
-      }
+      const { recipientId, ...event } = await request.json() as {
+        recipientId: number;
+      } & Record<string, unknown>;
+      this.broadcastToUser(recipientId, event);
       return new Response('OK');
     }
 
@@ -150,24 +211,7 @@ export class RealtimeDO implements DurableObject {
     const webSocketPair = new WebSocketPair();
     const [client, server] = Object.values(webSocketPair);
 
-    server.accept();
-
-    server.addEventListener('message', async (event) => {
-      try {
-        const data = JSON.parse(event.data as string);
-        await this.handleClientMessage(server, data);
-      } catch (e) {
-        console.error('Error handling websocket message:', e);
-      }
-    });
-
-    server.addEventListener('close', () => {
-      this.handleClose(server);
-    });
-
-    server.addEventListener('error', () => {
-      this.handleClose(server);
-    });
+    this.state.acceptWebSocket(server);
 
     return new Response(null, {
       status: 101,
@@ -175,73 +219,95 @@ export class RealtimeDO implements DurableObject {
     });
   }
 
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    if (typeof message !== 'string') {
+      console.error('Unsupported binary websocket message');
+      this.sendSafely(ws, { type: 'error', payload: { message: 'Unsupported message format' } });
+      return;
+    }
+
+    try {
+      const data = JSON.parse(message);
+      await this.handleClientMessage(ws, data);
+    } catch (e) {
+      console.error('Error handling websocket message:', e);
+    }
+  }
+
+  webSocketClose(ws: WebSocket, code: number, _reason: string, _wasClean: boolean): void {
+    // 1000/1001 = normal; 1005 = no status (common when client drops without close frame).
+    if (code !== 1000 && code !== 1001 && code !== 1005) {
+      console.error('WebSocket closed abnormally:', code);
+    }
+    this.handleClose(ws);
+  }
+
+  webSocketError(ws: WebSocket, error: unknown): void {
+    console.error('WebSocket error:', error);
+    this.handleClose(ws);
+  }
+
   async handleClientMessage(ws: WebSocket, message: any) {
     const db = drizzle(this.env.DB, { schema });
 
     if (message.type === 'join') {
-      const { token } = message.payload;
+      const { token } = message.payload ?? {};
       try {
         const payload = await verify(token, JWT_SECRET, 'HS256');
         const userId = payload.id as number;
         const username = payload.username as string;
 
         const wasOnline = this.isUserOnline(userId);
-        this.sessions.set(ws, { userId, username });
-        try {
-          ws.send(JSON.stringify({ type: 'joined', payload: { userId } }));
-          ws.send(JSON.stringify({
-            type: 'presence_snapshot',
-            payload: { onlineUserIds: this.getOnlineUserIds() },
-          }));
-        } catch (e) {}
+        this.setSession(ws, { userId, username, activeChatId: null });
+
+        this.sendSafely(ws, { type: 'joined', payload: { userId } });
+        this.sendSafely(ws, {
+          type: 'presence_snapshot',
+          payload: { onlineUserIds: this.getOnlineUserIds() },
+        });
 
         if (!wasOnline) {
-          this.broadcastPresence({ type: 'user_online', payload: { userId } }, ws);
+          this.broadcastToAll({ type: 'user_online', payload: { userId } }, ws);
         }
       } catch (e) {
         console.error('WebSocket token authentication failed:', e);
+        this.sendSafely(ws, { type: 'error', payload: { message: 'Authentication failed' } });
         try {
-          ws.send(JSON.stringify({ type: 'error', payload: { message: 'Authentication failed' } }));
+          ws.close(AUTH_FAILURE_CLOSE_CODE, 'Authentication failed');
         } catch (_) {}
       }
-    } 
-    
+    }
+
     else if (message.type === 'active_chat') {
-      const session = this.sessions.get(ws);
-      if (session) {
-        const recipientId = message.payload.recipientId;
-        session.activeChatId = recipientId;
+      const session = this.getSession(ws);
+      if (!session) return;
 
-        if (recipientId) {
-          // Mark all messages from recipientId to user as read in the DB
-          await db.update(schema.messages)
-            .set({ read: 1 })
-            .where(
-              and(
-                eq(schema.messages.senderId, recipientId),
-                eq(schema.messages.receiverId, session.userId),
-                eq(schema.messages.read, 0)
-              )
+      const recipientId = message.payload?.recipientId;
+      const activeChatId = typeof recipientId === 'number' ? recipientId : null;
+      // Always re-serialize the full session; never mutate a deserialized attachment in place.
+      this.setSession(ws, { ...session, activeChatId });
+
+      if (activeChatId) {
+        await db.update(schema.messages)
+          .set({ read: 1 })
+          .where(
+            and(
+              eq(schema.messages.senderId, activeChatId),
+              eq(schema.messages.receiverId, session.userId),
+              eq(schema.messages.read, 0)
             )
-            .run();
+          )
+          .run();
 
-          // Broadcast to sender (recipientId) that their messages were read
-          for (const [targetWs, targetSession] of this.sessions.entries()) {
-            if (targetSession.userId === recipientId) {
-              try {
-                targetWs.send(JSON.stringify({ 
-                  type: 'messages_read', 
-                  payload: { senderId: recipientId, receiverId: session.userId } 
-                }));
-              } catch (e) {}
-            }
-          }
-        }
+        this.broadcastToUser(activeChatId, {
+          type: 'messages_read',
+          payload: { senderId: activeChatId, receiverId: session.userId },
+        });
       }
     }
-    
+
     else if (message.type === 'send_message') {
-      const session = this.sessions.get(ws);
+      const session = this.getSession(ws);
       if (!session) return;
 
       const {
@@ -265,15 +331,11 @@ export class RealtimeDO implements DurableObject {
         typeof rawMediaType === 'string' && allowedMediaTypes.has(rawMediaType) ? rawMediaType : null;
 
       if (!content && !mediaUrl) {
-        try {
-          ws.send(JSON.stringify({ type: 'error', payload: { message: 'Message cannot be empty' } }));
-        } catch (e) {}
+        this.sendSafely(ws, { type: 'error', payload: { message: 'Message cannot be empty' } });
         return;
       }
       if (content.length > 1000) {
-        try {
-          ws.send(JSON.stringify({ type: 'error', payload: { message: 'Message is too long' } }));
-        } catch (e) {}
+        this.sendSafely(ws, { type: 'error', payload: { message: 'Message is too long' } });
         return;
       }
 
@@ -291,25 +353,21 @@ export class RealtimeDO implements DurableObject {
           )
           .get();
         if (!owned) {
-          try {
-            ws.send(JSON.stringify({ type: 'error', payload: { message: 'Invalid image attachment' } }));
-          } catch (e) {}
+          this.sendSafely(ws, { type: 'error', payload: { message: 'Invalid image attachment' } });
           return;
         }
         resolvedMediaType = mediaType || owned.mimeType || 'image/jpeg';
       }
 
       if (await isBlocked(db, session.userId, receiverId)) {
-        try {
-          ws.send(JSON.stringify({ type: 'error', payload: { message: 'Cannot message this user' } }));
-        } catch (e) {}
+        this.sendSafely(ws, { type: 'error', payload: { message: 'Cannot message this user' } });
         return;
       }
-      
-      // Determine if receiver has active chat open with sender
+
       let receiverIsViewingChat = false;
-      for (const [_, targetSession] of this.sessions.entries()) {
-        if (targetSession.userId === receiverId && targetSession.activeChatId === session.userId) {
+      for (const targetWs of this.getAuthenticatedSockets()) {
+        const targetSession = this.getSession(targetWs);
+        if (targetSession?.userId === receiverId && targetSession.activeChatId === session.userId) {
           receiverIsViewingChat = true;
           break;
         }
@@ -345,53 +403,42 @@ export class RealtimeDO implements DurableObject {
         createdAt: inserted.createdAt,
         read: inserted.read === 1,
         linkPreview: linkPreviewRow
-          ? { url: linkPreviewRow.url, title: linkPreviewRow.title, description: linkPreviewRow.description, imageUrl: linkPreviewRow.imageUrl, siteName: linkPreviewRow.siteName }
+          ? {
+              url: linkPreviewRow.url,
+              title: linkPreviewRow.title,
+              description: linkPreviewRow.description,
+              imageUrl: linkPreviewRow.imageUrl,
+              siteName: linkPreviewRow.siteName,
+            }
           : null,
         mediaUrl: inserted.mediaUrl,
         mediaType: inserted.mediaType,
       };
 
-      try {
-        ws.send(JSON.stringify({ type: 'message', payload: messagePayload }));
-      } catch (e) {}
-
-      for (const [targetWs, targetSession] of this.sessions.entries()) {
-        if (targetSession.userId === receiverId) {
-          try {
-            targetWs.send(JSON.stringify({ type: 'message', payload: messagePayload }));
-          } catch (e) {}
-        }
-      }
+      this.sendSafely(ws, { type: 'message', payload: messagePayload });
+      this.broadcastToUser(receiverId, { type: 'message', payload: messagePayload });
     }
 
     else if (message.type === 'typing') {
-      const session = this.sessions.get(ws);
-      if (session) {
-        const { receiverId, isTyping } = message.payload;
-        // Forward typing event to the receiver
-        for (const [targetWs, targetSession] of this.sessions.entries()) {
-          if (targetSession.userId === receiverId) {
-            try {
-              targetWs.send(JSON.stringify({
-                type: 'typing',
-                payload: { senderId: session.userId, isTyping }
-              }));
-            } catch (e) {}
-          }
-        }
-      }
+      const session = this.getSession(ws);
+      if (!session) return;
+
+      const { receiverId, isTyping } = message.payload;
+      this.broadcastToUser(receiverId, {
+        type: 'typing',
+        payload: { senderId: session.userId, isTyping },
+      });
     }
   }
 
-  handleClose(ws: WebSocket) {
-    const session = this.sessions.get(ws);
+  handleClose(ws: WebSocket): void {
+    const session = this.getSession(ws);
     if (!session) return;
 
     const userId = session.userId;
-    this.sessions.delete(ws);
-
-    if (!this.isUserOnline(userId)) {
-      this.broadcastPresence({ type: 'user_offline', payload: { userId } });
+    // Closing socket may still appear in getWebSockets(); exclude it explicitly.
+    if (!this.isUserOnline(userId, ws)) {
+      this.broadcastToAll({ type: 'user_offline', payload: { userId } }, ws);
     }
   }
 }

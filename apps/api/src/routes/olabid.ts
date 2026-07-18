@@ -10,6 +10,8 @@ import {
   fetchOlabidCategories,
   fetchOlabidWarehouses,
   fetchOlabidBySection,
+  type EnrichedOlabidListItem,
+  type OlabidListItem,
   type OlabidSectionFilter,
 } from '../lib/olabidApi';
 import {
@@ -26,8 +28,12 @@ import { isGamificationEnabled, getGamificationVisibility } from '../lib/gamific
 import { toGamificationBlock } from '../lib/gamification/public';
 import { loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
 import { isOlabidEnabled } from '../lib/system-settings';
+import type { Context } from 'hono';
 
 const olabid = new Hono<{ Bindings: Env }>();
+
+type OlabidContext = Context<{ Bindings: Env }>;
+type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 const SECTION_FILTERS = new Set<OlabidSectionFilter>([
   'topDeals',
@@ -40,6 +46,51 @@ function noStoreJson<T>(c: { header: (name: string, value: string) => void; json
   c.header('Cache-Control', 'no-store, no-cache, must-revalidate');
   c.header('Pragma', 'no-cache');
   return c.json(data, status);
+}
+
+/** Browser-cacheable responses for relatively static Olabid metadata. */
+function cachedJson<T>(c: { header: (name: string, value: string) => void; json: (data: T, status?: number) => Response }, data: T, maxAge = 3600) {
+  c.header('Cache-Control', `public, max-age=${maxAge}`);
+  return c.json(data);
+}
+
+async function enrichOlabidItems(
+  c: OlabidContext,
+  db: Db,
+  items: OlabidListItem[],
+  opts?: { allBookmarked?: boolean },
+): Promise<EnrichedOlabidListItem[]> {
+  if (items.length === 0) return [];
+
+  const ids = items.map((i) => i.id);
+  const counts = await getItemCommentCounts(db, ids);
+
+  let bookmarkedIds = new Set<number>();
+  if (opts?.allBookmarked) {
+    bookmarkedIds = new Set(ids);
+  } else {
+    const authUser = await getAuthUser(c);
+    if (authUser) {
+      const bookmarkedRows = await db
+        .select({ olabidItemId: schema.itemBookmarks.olabidItemId })
+        .from(schema.itemBookmarks)
+        .where(
+          and(
+            eq(schema.itemBookmarks.userId, authUser.id),
+            isNull(schema.itemBookmarks.deletedAt),
+            inArray(schema.itemBookmarks.olabidItemId, ids),
+          ),
+        )
+        .all();
+      bookmarkedIds = new Set(bookmarkedRows.map((r) => r.olabidItemId));
+    }
+  }
+
+  return items.map((i) => ({
+    ...i,
+    commentCount: counts[i.id] ?? 0,
+    isBookmarked: bookmarkedIds.has(i.id),
+  }));
 }
 
 /** Kill-switch: every public and authenticated Olabid route returns 404 when off — no upstream calls. */
@@ -68,7 +119,7 @@ olabid.get('/categories', async (c) => {
     return noStoreJson(c, { error: 'Unable to retrieve categories at this time' }, 500);
   }
 
-  return noStoreJson(c, categories);
+  return cachedJson(c, categories);
 });
 
 /**
@@ -88,7 +139,7 @@ olabid.get('/warehouses', async (c) => {
     return noStoreJson(c, { error: 'Unable to retrieve warehouses at this time' }, 500);
   }
 
-  return noStoreJson(c, warehouses);
+  return cachedJson(c, warehouses);
 });
 
 /**
@@ -133,6 +184,9 @@ olabid.get('/items', async (c) => {
       return noStoreJson(c, { error: 'Unable to retrieve auction items at this time' }, 500);
     }
 
+    const db = drizzle(c.env.DB, { schema });
+    result.items = await enrichOlabidItems(c, db, result.items);
+
     return noStoreJson(c, result);
   }
 
@@ -150,6 +204,9 @@ olabid.get('/items', async (c) => {
   if (!result) {
     return noStoreJson(c, { error: 'Unable to retrieve auction items at this time' }, 500);
   }
+
+  const db = drizzle(c.env.DB, { schema });
+  result.items = await enrichOlabidItems(c, db, result.items);
 
   return noStoreJson(c, result);
 });
@@ -250,9 +307,12 @@ olabid.get('/items/bookmarks', async (c) => {
     };
   });
 
+  // Watchlist rows are already the user's bookmarks — skip a redundant D1 query.
+  const enrichedItems = await enrichOlabidItems(c, db, items, { allBookmarked: true });
+
   return noStoreJson(c, {
     pageContext: { page, size },
-    items,
+    items: enrichedItems,
   });
 });
 
