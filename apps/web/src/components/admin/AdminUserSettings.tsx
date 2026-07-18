@@ -13,9 +13,10 @@ type FormState = {
   maxMediaPerPost: string;
   turnstileEnabled: boolean;
   olabidEnabled: boolean;
+  presenceEnabled: boolean;
 };
 
-type ConfirmKind = 'turnstile' | 'olabid';
+type ConfirmKind = 'turnstile' | 'olabid' | 'presence';
 
 function settingsToForm(settings: SystemSettings): FormState {
   return {
@@ -24,6 +25,7 @@ function settingsToForm(settings: SystemSettings): FormState {
     maxMediaPerPost: String(settings.maxMediaPerPost),
     turnstileEnabled: !!settings.turnstileEnabled,
     olabidEnabled: !!settings.olabidEnabled,
+    presenceEnabled: !!settings.presenceEnabled,
   };
 }
 
@@ -47,6 +49,8 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
       setForm(prev => ({ ...prev, turnstileEnabled: pendingBoolValue }));
     } else if (confirmKind === 'olabid') {
       setForm(prev => ({ ...prev, olabidEnabled: pendingBoolValue }));
+    } else if (confirmKind === 'presence') {
+      setForm(prev => ({ ...prev, presenceEnabled: pendingBoolValue }));
     }
     setConfirmKind(null);
   };
@@ -79,6 +83,7 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
     const maxMediaPerPost = parseInt(form.maxMediaPerPost, 10);
     const turnstileEnabled = form.turnstileEnabled;
     const olabidEnabled = form.olabidEnabled;
+    const presenceEnabled = form.presenceEnabled;
 
     if (
       Number.isNaN(maxPinnedPostsPerUser)
@@ -121,6 +126,7 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
           maxMediaPerPost,
           turnstileEnabled,
           olabidEnabled,
+          presenceEnabled,
         }),
       });
       const data = await res.json();
@@ -142,16 +148,22 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
   const confirmTitle =
     confirmKind === 'olabid'
       ? (pendingBoolValue ? 'Enable Olabid panel?' : 'Disable Olabid panel?')
-      : (pendingBoolValue ? 'Enable bot protection?' : 'Disable bot protection?');
+      : confirmKind === 'presence'
+        ? (pendingBoolValue ? 'Enable users online presence?' : 'Disable users online presence?')
+        : (pendingBoolValue ? 'Enable bot protection?' : 'Disable bot protection?');
 
   const confirmBody =
     confirmKind === 'olabid'
       ? (pendingBoolValue
         ? 'Enabling Olabid shows the auctions tab, item pages, discussion, and share-to-chat flows for all users. The app will resume calling Olabid-related APIs.'
         : 'Disabling Olabid hides the auctions tab and all Olabid UI for every user. No Olabid API calls will be made. Existing discussion data remains stored but inaccessible until re-enabled.')
-      : (pendingBoolValue
-        ? 'Enabling Cloudflare Turnstile adds a secure, non-intrusive bot verification challenge to the login and registration pages. Please ensure that VITE_TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY are correctly configured.'
-        : 'Disabling Cloudflare Turnstile removes the bot verification challenge on the login and registration pages. This makes the platform more vulnerable to automated spam registrations and brute-force attempts.');
+      : confirmKind === 'presence'
+        ? (pendingBoolValue
+          ? 'Enabling presence shows who is online in the header and in messages, and starts broadcasting online/offline events to connected clients.'
+          : 'Disabling presence hides the online count and all online/offline indicators. The server will stop sending presence events entirely—no snapshots, online, or offline broadcasts.')
+        : (pendingBoolValue
+          ? 'Enabling Cloudflare Turnstile adds a secure, non-intrusive bot verification challenge to the login and registration pages. Please ensure that VITE_TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY are correctly configured.'
+          : 'Disabling Cloudflare Turnstile removes the bot verification challenge on the login and registration pages. This makes the platform more vulnerable to automated spam registrations and brute-force attempts.');
 
   return (
     <div className="space-y-4">
@@ -233,6 +245,29 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
             />
           </button>
         </div>
+        <div className="flex items-center justify-between max-w-md p-3.5 rounded-xl border border-border-custom bg-bg-primary">
+          <div className="space-y-0.5 pr-3">
+            <span className="text-xs font-medium text-text-secondary block">Users online presence</span>
+            <span className="text-[10px] text-text-muted block">
+              Show who is online in the header and messages. Off by default.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => openConfirm('presence', !form.presenceEnabled)}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              form.presenceEnabled ? 'bg-indigo-600' : 'bg-zinc-700'
+            }`}
+            aria-pressed={form.presenceEnabled}
+            aria-label="Toggle users online presence"
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                form.presenceEnabled ? 'translate-x-4' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
       </section>
 
       <section className="space-y-3">
@@ -275,6 +310,7 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
           {' '}{settings.maxPostLength} characters,
           {' '}{settings.maxMediaPerPost} media file{settings.maxMediaPerPost === 1 ? '' : 's'} per post.
           {' '}Olabid is {settings.olabidEnabled ? 'enabled' : 'disabled'}.
+          {' '}Presence is {settings.presenceEnabled ? 'enabled' : 'disabled'}.
           {' '}Cloudflare Turnstile is {settings.turnstileEnabled ? 'enabled' : 'disabled'}.
         </p>
       )}

@@ -144,6 +144,23 @@ async function main() {
   const bobAuth = await register(bobName);
   assert('register two users', aliceAuth.user.id && bobAuth.user.id, `${aliceName}=${aliceAuth.user.id}, ${bobName}=${bobAuth.user.id}`);
 
+  // --- Enable presence for smoke (feature defaults OFF) ---
+  const adminLogin = await api('/api/auth/login', {
+    method: 'POST',
+    body: { username: 'admin', password: '087425' },
+  });
+  assert('admin login', adminLogin.status === 200 && !!adminLogin.json?.token, JSON.stringify(adminLogin.json));
+  if (adminLogin.status === 200 && adminLogin.json?.token) {
+    const enablePresence = await api('/api/admin/settings', {
+      method: 'PATCH',
+      token: adminLogin.json.token,
+      body: { presenceEnabled: true },
+    });
+    assert('enable presence for smoke', enablePresence.status === 200 && enablePresence.json?.presenceEnabled === true, JSON.stringify(enablePresence.json));
+    // Let wrangler/DO pick up settings epoch before WS joins.
+    await sleep(500);
+  }
+
   // --- Invalid token ---
   {
     const bad = new Client('bad', 'not-a-jwt', -1);
@@ -178,9 +195,12 @@ async function main() {
   // --- Join + presence ---
   const alice = await new Client('alice', aliceAuth.token, aliceAuth.user.id).connect();
   assert('alice receives joined', alice.ofType('joined').length === 1);
+  await alice.waitFor((e) => e.type === 'presence_snapshot', 4000, 'presence_snapshot').catch(() => null);
+  const aliceSnap = alice.ofType('presence_snapshot')[0]?.payload?.onlineUserIds || [];
   assert(
     'alice presence_snapshot includes self',
-    alice.ofType('presence_snapshot')[0]?.payload?.onlineUserIds?.includes(alice.userId),
+    aliceSnap.includes(alice.userId),
+    `events=${alice.events.map((e) => e.type).join(',')} snap=${JSON.stringify(aliceSnap)}`,
   );
 
   const bob = await new Client('bob', bobAuth.token, bobAuth.user.id).connect();
@@ -255,11 +275,7 @@ async function main() {
     assert('post_created broadcast reaches bob', !(postEvt instanceof Error), postEvt instanceof Error ? postEvt.message : `id=${postEvt.payload?.id ?? postEvt.payload?.post?.id}`);
   }
 
-  // --- Admin toast (login as admin) ---
-  const adminLogin = await api('/api/auth/login', {
-    method: 'POST',
-    body: { username: 'admin', password: '087425' },
-  });
+  // --- Admin toast ---
   if (adminLogin.status === 200 && adminLogin.json?.token) {
     alice.events.length = 0;
     bob.events.length = 0;
@@ -310,6 +326,16 @@ async function main() {
 
   bob.close();
 
+  // Restore presence default OFF after smoke
+  if (adminLogin.status === 200 && adminLogin.json?.token) {
+    const disablePresence = await api('/api/admin/settings', {
+      method: 'PATCH',
+      token: adminLogin.json.token,
+      body: { presenceEnabled: false },
+    });
+    assert('restore presence default off', disablePresence.status === 200 && disablePresence.json?.presenceEnabled === false, JSON.stringify(disablePresence.json));
+  }
+
   const failed = results.filter((r) => !r.pass);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   if (failed.length) {
@@ -318,6 +344,7 @@ async function main() {
     process.exit(1);
   }
   console.log('\nAll smoke checks passed.');
+  process.exit(0);
 }
 
 main().catch((err) => {

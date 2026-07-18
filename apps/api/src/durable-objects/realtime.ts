@@ -7,6 +7,7 @@ import type { Env } from '../types';
 import { JWT_SECRET } from '../lib/auth';
 import { isBlocked } from '../lib/blocks';
 import { parseFirstUrl, getOrFetchLinkPreview } from '../lib/linkPreview';
+import { isPresenceEnabled } from '../lib/system-settings';
 
 export interface RealtimeSession {
   userId: number;
@@ -235,16 +236,16 @@ export class RealtimeDO implements DurableObject {
   }
 
   webSocketClose(ws: WebSocket, code: number, _reason: string, _wasClean: boolean): void {
-    // 1000/1001 = normal; 1005 = no status (common when client drops without close frame).
-    if (code !== 1000 && code !== 1001 && code !== 1005) {
+    // 1000/1001 = normal; 1005 = no status; 4001 = auth failure close we initiated.
+    if (code !== 1000 && code !== 1001 && code !== 1005 && code !== AUTH_FAILURE_CLOSE_CODE) {
       console.error('WebSocket closed abnormally:', code);
     }
-    this.handleClose(ws);
+    void this.handleClose(ws);
   }
 
   webSocketError(ws: WebSocket, error: unknown): void {
     console.error('WebSocket error:', error);
-    this.handleClose(ws);
+    void this.handleClose(ws);
   }
 
   async handleClientMessage(ws: WebSocket, message: any) {
@@ -257,17 +258,22 @@ export class RealtimeDO implements DurableObject {
         const userId = payload.id as number;
         const username = payload.username as string;
 
-        const wasOnline = this.isUserOnline(userId);
+        const presenceOn = await isPresenceEnabled(db);
+        const wasOnline = presenceOn ? this.isUserOnline(userId) : true;
         this.setSession(ws, { userId, username, activeChatId: null });
 
         this.sendSafely(ws, { type: 'joined', payload: { userId } });
-        this.sendSafely(ws, {
-          type: 'presence_snapshot',
-          payload: { onlineUserIds: this.getOnlineUserIds() },
-        });
 
-        if (!wasOnline) {
-          this.broadcastToAll({ type: 'user_online', payload: { userId } }, ws);
+        // Presence is fully gated: no snapshot / online events when disabled.
+        if (presenceOn) {
+          this.sendSafely(ws, {
+            type: 'presence_snapshot',
+            payload: { onlineUserIds: this.getOnlineUserIds() },
+          });
+
+          if (!wasOnline) {
+            this.broadcastToAll({ type: 'user_online', payload: { userId } }, ws);
+          }
         }
       } catch (e) {
         console.error('WebSocket token authentication failed:', e);
@@ -431,14 +437,17 @@ export class RealtimeDO implements DurableObject {
     }
   }
 
-  handleClose(ws: WebSocket): void {
+  async handleClose(ws: WebSocket): Promise<void> {
     const session = this.getSession(ws);
     if (!session) return;
 
     const userId = session.userId;
     // Closing socket may still appear in getWebSockets(); exclude it explicitly.
     if (!this.isUserOnline(userId, ws)) {
-      this.broadcastToAll({ type: 'user_offline', payload: { userId } }, ws);
+      const db = drizzle(this.env.DB, { schema });
+      if (await isPresenceEnabled(db)) {
+        this.broadcastToAll({ type: 'user_offline', payload: { userId } }, ws);
+      }
     }
   }
 }

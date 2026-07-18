@@ -210,6 +210,11 @@ export interface SystemSettings {
   turnstileEnabled: boolean;
   /** When false, Olabid UI is hidden and Olabid/item-discussion APIs reject requests. */
   olabidEnabled: boolean;
+  /**
+   * When false (default), online presence is fully disabled:
+   * no presence WS events, no header online count, no chat online/offline indicators.
+   */
+  presenceEnabled: boolean;
 }
 
 export interface MeBootstrapCounts {
@@ -238,6 +243,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   maxMediaPerPost: 5,
   turnstileEnabled: false,
   olabidEnabled: true,
+  presenceEnabled: false,
 };
 
 export function validatePostLimits(
@@ -668,12 +674,14 @@ export const UpdateSystemSettingsSchema = z.object({
   maxMediaPerPost: z.number().int().min(SYSTEM_SETTING_BOUNDS.maxMediaPerPost.min).max(SYSTEM_SETTING_BOUNDS.maxMediaPerPost.max).optional(),
   turnstileEnabled: z.boolean().optional(),
   olabidEnabled: z.boolean().optional(),
+  presenceEnabled: z.boolean().optional(),
 }).refine(
   data => data.maxPinnedPostsPerUser !== undefined
     || data.maxPostLength !== undefined
     || data.maxMediaPerPost !== undefined
     || data.turnstileEnabled !== undefined
-    || data.olabidEnabled !== undefined,
+    || data.olabidEnabled !== undefined
+    || data.presenceEnabled !== undefined,
   { message: 'At least one setting must be provided' },
 );
 

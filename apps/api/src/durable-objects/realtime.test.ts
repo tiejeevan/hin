@@ -19,6 +19,12 @@ vi.mock('../lib/linkPreview', () => ({
   getOrFetchLinkPreview: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock('../lib/system-settings', () => ({
+  isPresenceEnabled: vi.fn().mockResolvedValue(true),
+}));
+
+import { isPresenceEnabled } from '../lib/system-settings';
+
 class MockWebSocket {
   attachment: unknown = null;
   sent: string[] = [];
@@ -159,6 +165,7 @@ describe('RealtimeDO hibernation session routing', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    (isPresenceEnabled as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(true);
     socketsRef = { current: [] };
     state = createMockState(socketsRef);
     env = { DB: {} as D1Database, OLABID_API_KEY: '' } as Env;
@@ -216,7 +223,7 @@ describe('RealtimeDO hibernation session routing', () => {
     expect(dob.getOnlineUserIds().sort()).toEqual([1, 2]);
   });
 
-  it('emits user_offline only when the final socket closes', () => {
+  it('emits user_offline only when the final socket closes', async () => {
     const a1 = dob.addSocket();
     const a2 = dob.addSocket();
     const bob = dob.addSocket();
@@ -225,15 +232,35 @@ describe('RealtimeDO hibernation session routing', () => {
     bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
 
     // During close, the closing socket may still be listed; exclude it in handleClose.
-    dob.handleClose(a1 as unknown as WebSocket);
+    await dob.handleClose(a1 as unknown as WebSocket);
     expect(bob.eventsOfType('user_offline')).toHaveLength(0);
     // After close completes, Cloudflare drops the socket from getWebSockets().
     dob.sockets = dob.sockets.filter((s) => s !== a1);
 
-    dob.handleClose(a2 as unknown as WebSocket);
+    await dob.handleClose(a2 as unknown as WebSocket);
     expect(bob.eventsOfType('user_offline')).toEqual([
       { type: 'user_offline', payload: { userId: 1 } },
     ]);
+  });
+
+  it('emits no presence events when presenceEnabled is false', async () => {
+    (isPresenceEnabled as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+
+    const other = dob.addSocket();
+    other.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+
+    const alice = dob.addSocket();
+    await dob.webSocketMessage(alice as unknown as WebSocket, JSON.stringify({
+      type: 'join',
+      payload: { token: await makeToken(1, 'alice') },
+    }));
+
+    expect(alice.eventsOfType('joined')).toHaveLength(1);
+    expect(alice.eventsOfType('presence_snapshot')).toHaveLength(0);
+    expect(other.eventsOfType('user_online')).toHaveLength(0);
+
+    await dob.handleClose(alice as unknown as WebSocket);
+    expect(other.eventsOfType('user_offline')).toHaveLength(0);
   });
 
   it('routes broadcast-notification only to the recipient', async () => {

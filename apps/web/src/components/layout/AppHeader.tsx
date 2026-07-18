@@ -80,7 +80,7 @@ export function AppHeader({
             Hin
           </span>
         </button>
-        {currentUser && onlineCount > 0 && (
+        {currentUser && typeof onlineCount === 'number' && onlineCount > 0 && (
           <span
             className="inline-flex items-center gap-1.5 text-[11px] text-text-muted tabular-nums"
             title={`${onlineCount} ${onlineCount === 1 ? 'person' : 'people'} online`}

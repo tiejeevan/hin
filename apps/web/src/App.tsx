@@ -249,6 +249,7 @@ export default function App() {
   const [olabidFlagKnown, setOlabidFlagKnown] = useState(false);
   const olabidFlagKnownRef = useRef(false);
   const olabidEnabledRef = useRef(false);
+  const presenceEnabledRef = useRef(false);
   const [gamificationEnabled, setGamificationEnabled] = useState(false);
   const [introWalkthroughCompleted, setIntroWalkthroughCompleted] = useState<boolean | null>(null);
   const [myGamification, setMyGamification] = useState<GamificationPublic | null>(null);
@@ -839,8 +840,14 @@ export default function App() {
 
   // Treat as OFF until the public/bootstrap flag is known so /olabid never fetches early.
   const olabidEnabled = olabidFlagKnown && systemSettings?.olabidEnabled === true;
+  const presenceEnabled = systemSettings?.presenceEnabled === true;
   olabidFlagKnownRef.current = olabidFlagKnown;
   olabidEnabledRef.current = olabidEnabled;
+  presenceEnabledRef.current = presenceEnabled;
+
+  useEffect(() => {
+    if (!presenceEnabled) setOnlineUserIds(new Set());
+  }, [presenceEnabled]);
 
   const openOlabid = (opts?: { skipUrlSync?: boolean; replace?: boolean }) => {
     if (!olabidEnabled) {
@@ -1277,11 +1284,12 @@ export default function App() {
       try {
         const res = await fetch(`${API_URL}/api/settings/public`, { cache: 'no-store' });
         if (!res.ok || cancelled) return;
-        const data = await res.json() as { olabidEnabled?: boolean };
+        const data = await res.json() as { olabidEnabled?: boolean; presenceEnabled?: boolean };
         if (cancelled) return;
         setSystemSettings(prev => ({
           ...(prev ?? DEFAULT_SYSTEM_SETTINGS),
           olabidEnabled: data.olabidEnabled === true,
+          presenceEnabled: data.presenceEnabled === true,
         }));
         setOlabidFlagKnown(true);
       } catch {
@@ -1290,6 +1298,7 @@ export default function App() {
           setSystemSettings(prev => ({
             ...(prev ?? DEFAULT_SYSTEM_SETTINGS),
             olabidEnabled: false,
+            presenceEnabled: false,
           }));
           setOlabidFlagKnown(true);
         }
@@ -1333,7 +1342,9 @@ export default function App() {
       setSystemSettings(prev => ({
         ...DEFAULT_SYSTEM_SETTINGS,
         olabidEnabled: prev?.olabidEnabled ?? DEFAULT_SYSTEM_SETTINGS.olabidEnabled,
+        presenceEnabled: prev?.presenceEnabled ?? DEFAULT_SYSTEM_SETTINGS.presenceEnabled,
       }));
+      setOnlineUserIds(new Set());
       setUnreadNotifsCount(0);
       setUnreadMessagesCount(0);
       setIntroWalkthroughCompleted(null);
@@ -1392,11 +1403,13 @@ export default function App() {
               sendActiveChat();
               break;
             case 'presence_snapshot': {
+              if (!presenceEnabledRef.current) break;
               const ids: number[] = message.payload.onlineUserIds || [];
               setOnlineUserIds(new Set(ids));
               break;
             }
             case 'user_online':
+              if (!presenceEnabledRef.current) break;
               setOnlineUserIds(prev => {
                 const next = new Set(prev);
                 next.add(message.payload.userId);
@@ -1404,6 +1417,7 @@ export default function App() {
               });
               break;
             case 'user_offline':
+              if (!presenceEnabledRef.current) break;
               setOnlineUserIds(prev => {
                 const next = new Set(prev);
                 next.delete(message.payload.userId);
@@ -1608,6 +1622,9 @@ export default function App() {
               const { settings } = message.payload as { settings: SystemSettings };
               setSystemSettings(settings);
               setOlabidFlagKnown(true);
+              if (settings.presenceEnabled !== true) {
+                setOnlineUserIds(new Set());
+              }
               break;
             }
             case 'post_created': {
@@ -3475,7 +3492,7 @@ export default function App() {
             showNotifications={showNotifications}
             unreadNotifsCount={unreadNotifsCount}
             notifications={notifications}
-            onlineCount={onlineUserIds.size}
+            onlineCount={presenceEnabled ? onlineUserIds.size : undefined}
             isAdminTab={activeTab === 'admin'}
             isOlabidTab={activeTab === 'olabid'}
             onGoHome={goHome}
@@ -3931,6 +3948,7 @@ export default function App() {
             onPickChatImage={pickChatImage}
             onClearDraftMedia={clearDraftMedia}
             olabidEnabled={olabidEnabled}
+            presenceEnabled={presenceEnabled}
           />
         )}
 

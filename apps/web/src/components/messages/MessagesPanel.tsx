@@ -42,6 +42,8 @@ interface MessagesPanelProps {
   onPickChatImage?: (file: File) => void;
   onClearDraftMedia?: () => void;
   olabidEnabled?: boolean;
+  /** When false, hide all online/offline indicators (no presence feature). */
+  presenceEnabled?: boolean;
 }
 
 export function MessagesPanel({
@@ -71,6 +73,7 @@ export function MessagesPanel({
   onPickChatImage,
   onClearDraftMedia,
   olabidEnabled = true,
+  presenceEnabled = false,
 }: MessagesPanelProps) {
   const sorted = useMemo(() => {
     return [...threads].sort((a, b) => {
@@ -253,7 +256,8 @@ export function MessagesPanel({
         <PanelHeader
           showingChat={showingChat}
           chatRecipient={chatRecipient}
-          isOnline={chatRecipient ? onlineUserIds.has(chatRecipient.id) : false}
+          isOnline={presenceEnabled && chatRecipient ? onlineUserIds.has(chatRecipient.id) : false}
+          showPresence={presenceEnabled}
           isTyping={peerIsTyping}
           isExpanded={isExpanded}
           onBack={onBackToList}
@@ -532,7 +536,7 @@ export function MessagesPanel({
             ) : (
               sorted.map(t => {
                 const hasUnread = t.unreadCount > 0;
-                const isOnline = onlineUserIds.has(t.id);
+                const isOnline = presenceEnabled && onlineUserIds.has(t.id);
                 return (
                   <button
                     key={t.id}
@@ -550,13 +554,15 @@ export function MessagesPanel({
                         size="md"
                         className={hasUnread ? 'ring-2 ring-indigo-500/60' : ''}
                       />
-                      <span
-                        className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-bg-secondary ${
-                          isOnline ? 'bg-emerald-500' : 'bg-text-muted/60'
-                        }`}
-                        title={isOnline ? 'Online' : 'Offline'}
-                        aria-label={isOnline ? 'Online' : 'Offline'}
-                      />
+                      {presenceEnabled && (
+                        <span
+                          className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-bg-secondary ${
+                            isOnline ? 'bg-emerald-500' : 'bg-text-muted/60'
+                          }`}
+                          title={isOnline ? 'Online' : 'Offline'}
+                          aria-label={isOnline ? 'Online' : 'Offline'}
+                        />
+                      )}
                       {hasUnread && (
                         <span className="absolute -top-0.5 -right-0.5 h-[18px] min-w-[18px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center border-2 border-bg-secondary">
                           {t.unreadCount > 9 ? '9+' : t.unreadCount}
@@ -621,6 +627,7 @@ function PanelHeader({
   showingChat,
   chatRecipient,
   isOnline,
+  showPresence,
   isTyping,
   isExpanded,
   onBack,
@@ -631,6 +638,7 @@ function PanelHeader({
   showingChat: boolean;
   chatRecipient: ChatRecipient | null;
   isOnline: boolean;
+  showPresence: boolean;
   isTyping: boolean;
   isExpanded: boolean;
   onBack: () => void;
@@ -662,13 +670,15 @@ function PanelHeader({
                   avatarUrl={chatRecipient.avatarUrl}
                   size="sm"
                 />
-                <span
-                  className={`absolute bottom-0 right-0 h-2 w-2 rounded-full border-2 border-bg-primary ${
-                    isOnline ? 'bg-emerald-500' : 'bg-text-muted/60'
-                  }`}
-                  title={isOnline ? 'Online' : 'Offline'}
-                  aria-label={isOnline ? 'Online' : 'Offline'}
-                />
+                {showPresence && (
+                  <span
+                    className={`absolute bottom-0 right-0 h-2 w-2 rounded-full border-2 border-bg-primary ${
+                      isOnline ? 'bg-emerald-500' : 'bg-text-muted/60'
+                    }`}
+                    title={isOnline ? 'Online' : 'Offline'}
+                    aria-label={isOnline ? 'Online' : 'Offline'}
+                  />
+                )}
               </div>
               <div className="min-w-0 leading-tight">
                 <span className="text-[11px] font-semibold text-text-primary truncate block hover:text-indigo-400 transition-colors">
@@ -676,11 +686,11 @@ function PanelHeader({
                 </span>
                 {isTyping ? (
                   <span className="text-[10px] font-medium text-indigo-400">Typing…</span>
-                ) : (
+                ) : showPresence ? (
                   <span className={`text-[10px] ${isOnline ? 'text-emerald-500' : 'text-text-muted'}`}>
                     {isOnline ? 'Online' : 'Offline'}
                   </span>
-                )}
+                ) : null}
               </div>
             </button>
           </>

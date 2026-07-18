@@ -44,6 +44,11 @@ const SETTING_REGISTRY = {
     defaultValue: DEFAULT_SYSTEM_SETTINGS.olabidEnabled,
     parse: (raw: string | null) => parseBooleanSetting(raw, DEFAULT_SYSTEM_SETTINGS.olabidEnabled),
   },
+  presenceEnabled: {
+    key: 'presence_enabled',
+    defaultValue: DEFAULT_SYSTEM_SETTINGS.presenceEnabled,
+    parse: (raw: string | null) => parseBooleanSetting(raw, DEFAULT_SYSTEM_SETTINGS.presenceEnabled),
+  },
 } as const satisfies Record<
   keyof SystemSettings,
   { key: string; defaultValue: number | boolean; parse: (raw: string | null) => number | boolean }
@@ -113,20 +118,20 @@ export async function isOlabidEnabled(db: Db): Promise<boolean> {
   return (await getSystemSettings(db)).olabidEnabled;
 }
 
+export async function isPresenceEnabled(db: Db): Promise<boolean> {
+  return (await getSystemSettings(db)).presenceEnabled;
+}
+
 export async function getSystemSettings(db: Db): Promise<SystemSettings> {
   const now = Date.now();
-
-  if (
-    cachedSystemSettings
-    && now - cachedSystemSettings.fetchedAt < FLAG_CACHE_TTL_MS
-  ) {
-    return cachedSystemSettings.value;
-  }
-
   const epoch = (await getSystemSetting(db, SYSTEM_SETTINGS_EPOCH_KEY)) ?? '0';
 
-  if (cachedSystemSettings && cachedSystemSettings.epoch === epoch) {
-    cachedSystemSettings.fetchedAt = now;
+  // Always honor epoch bumps (admin toggles) even within the TTL window.
+  if (
+    cachedSystemSettings
+    && cachedSystemSettings.epoch === epoch
+    && now - cachedSystemSettings.fetchedAt < FLAG_CACHE_TTL_MS
+  ) {
     return cachedSystemSettings.value;
   }
 

@@ -11,7 +11,10 @@ const settings = new Hono<{ Bindings: Env }>();
 settings.get('/public', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const systemSettings = await getSystemSettings(db);
-  return c.json({ olabidEnabled: systemSettings.olabidEnabled });
+  return c.json({
+    olabidEnabled: systemSettings.olabidEnabled,
+    presenceEnabled: systemSettings.presenceEnabled,
+  });
 });
 
 settings.get('/', async (c) => {
