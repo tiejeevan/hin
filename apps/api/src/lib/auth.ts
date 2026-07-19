@@ -5,7 +5,16 @@ import { verify } from 'hono/jwt';
 import type { Context } from 'hono';
 import type { Env } from '../types';
 
-export const JWT_SECRET = 'hin-super-secret-key-12345';
+/** Dev-only fallback — production must set JWT_SECRET as a Worker secret. */
+export const JWT_SECRET_DEV_FALLBACK = 'hin-super-secret-key-12345';
+
+export function getJwtSecret(env?: { JWT_SECRET?: string }): string {
+  if (env?.JWT_SECRET && env.JWT_SECRET.length > 0) return env.JWT_SECRET;
+  return JWT_SECRET_DEV_FALLBACK;
+}
+
+/** @deprecated Prefer getJwtSecret(env). Kept for tests that sign without env. */
+export const JWT_SECRET = JWT_SECRET_DEV_FALLBACK;
 
 // Helper to get authenticated user from JWT token
 export async function getAuthUser(c: Context<{ Bindings: Env }>): Promise<any | null> {
@@ -15,7 +24,7 @@ export async function getAuthUser(c: Context<{ Bindings: Env }>): Promise<any | 
   }
   const token = authHeader.substring(7);
   try {
-    const payload = await verify(token, JWT_SECRET, 'HS256');
+    const payload = await verify(token, getJwtSecret(c.env), 'HS256');
     const db = drizzle(c.env.DB, { schema });
     const user = await db.select().from(schema.users)
       .where(

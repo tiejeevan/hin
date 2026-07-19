@@ -57,6 +57,8 @@ export const userSettings = sqliteTable('user_settings', {
   notifyMentions: integer('notify_mentions').default(1).notNull(),
   notifyDms: integer('notify_dms').default(1).notNull(),
   notifySystem: integer('notify_system').default(1).notNull(),
+  /** Master switch for Web Push / OS alerts. */
+  notifyPushEnabled: integer('notify_push_enabled').default(1).notNull(),
   muteAllToasts: integer('mute_all_toasts').default(0).notNull(),
   /** 'global' | 'selected_pages' */
   chatIconMode: text('chat_icon_mode').default('global').notNull(),
@@ -630,7 +632,7 @@ export const auditLogs = sqliteTable('audit_logs', {
   userId: integer('user_id').references(() => users.id, { onDelete: 'set null' }),
   /**
    * 'login' | 'register' | 'logout' | 'failed_login' |
-   * 'password_change' | 'account_delete' |
+   * 'password_change' | 'password_reset' | 'account_delete' |
    * 'admin_impersonate' | 'role_change' | 'platform_reset'
    */
   eventType: text('event_type').notNull(),
@@ -679,4 +681,53 @@ export const auditLogs = sqliteTable('audit_logs', {
   ipAddressIdx: index('audit_logs_ip_address_idx').on(table.ipAddress),
   sessionIdIdx: index('audit_logs_session_id_idx').on(table.sessionId),
   deletedAtIdx: index('audit_logs_deleted_at_idx').on(table.deletedAt),
+}));
+
+/**
+ * One-time passcode challenges (email verify now; login/register/reset later).
+ * Never store the plaintext code — only `code_hash`.
+ */
+export const otpChallenges = sqliteTable('otp_challenges', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  /** 'email_verify' | 'email_login' | 'email_register' | 'password_reset' */
+  purpose: text('purpose').notNull(),
+  /** Required for email_verify; nullable for future unauthenticated flows. */
+  userId: integer('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  codeHash: text('code_hash').notNull(),
+  attempts: integer('attempts').default(0).notNull(),
+  expiresAt: text('expires_at').notNull(),
+  consumedAt: text('consumed_at'),
+  ipAddress: text('ip_address'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  userPurposeCreatedIdx: index('otp_challenges_user_purpose_created_idx').on(
+    table.userId,
+    table.purpose,
+    table.createdAt,
+  ),
+  emailPurposeIdx: index('otp_challenges_email_purpose_idx').on(table.email, table.purpose),
+  expiresAtIdx: index('otp_challenges_expires_at_idx').on(table.expiresAt),
+}));
+
+/** Reusable fixed-window rate limit counters (IP / user / email keys). */
+export const rateLimitBuckets = sqliteTable('rate_limit_buckets', {
+  bucketKey: text('bucket_key').primaryKey(),
+  count: integer('count').default(0).notNull(),
+  windowEndsAt: text('window_ends_at').notNull(),
+});
+
+/** Browser Web Push subscriptions (one row per endpoint). */
+export const pushSubscriptions = sqliteTable('push_subscriptions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  endpoint: text('endpoint').notNull(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  userAgent: text('user_agent'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  endpointIdx: uniqueIndex('push_subscriptions_endpoint_idx').on(table.endpoint),
+  userIdIdx: index('push_subscriptions_user_id_idx').on(table.userId),
 }));

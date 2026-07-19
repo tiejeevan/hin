@@ -3,15 +3,17 @@ import { User as UserType } from '@hin/types';
 import { API_URL } from '../../config';
 import { ImagePicker, PickedImage } from '../ui/ImagePicker';
 import { uploadAvatarWithThumbnail, uploadCompressedImage } from '../../lib/compressImage';
+import { EmailVerificationSection } from './EmailVerificationSection';
 
 interface ProfileEditFormProps {
   user: UserType;
   token: string;
   onSave: (updated: UserType) => void;
+  onEmailVerified?: (updated: UserType) => void;
   onCancel: () => void;
 }
 
-export function ProfileEditForm({ user, token, onSave, onCancel }: ProfileEditFormProps) {
+export function ProfileEditForm({ user, token, onSave, onEmailVerified, onCancel }: ProfileEditFormProps) {
   const [bio, setBio] = useState(user.bio || '');
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl || '');
   const [coverUrl, setCoverUrl] = useState(user.coverUrl || '');
@@ -179,6 +181,16 @@ export function ProfileEditForm({ user, token, onSave, onCancel }: ProfileEditFo
           value={dateOfBirth}
           onChange={e => setDateOfBirth(e.target.value)}
           className="w-full bg-bg-primary border border-border-custom rounded-xl p-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+        />
+      </div>
+
+      <div className="space-y-2 border-t border-border-custom pt-4">
+        <label className="text-xs text-text-muted font-medium">Email</label>
+        <EmailVerificationSection
+          token={token}
+          onVerified={(updated) => {
+            (onEmailVerified ?? onSave)(updated);
+          }}
         />
       </div>
 

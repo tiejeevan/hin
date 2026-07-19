@@ -68,6 +68,37 @@ export function toPublicUser(
   };
 }
 
+/** Authenticated self view — includes private email fields. Never use for public profiles. */
+export function toSelfUser(
+  user: {
+    id: number;
+    username: string;
+    role: string;
+    bio?: string | null;
+    avatarUrl?: string | null;
+    coverUrl?: string | null;
+    isPrivate?: number | boolean | null;
+    createdAt: string;
+    deletedAt?: string | null;
+    country?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    dateOfBirth?: string | null;
+    profileCompletedAt?: string | null;
+    email?: string | null;
+    emailVerifiedAt?: string | null;
+    passwordHash?: string | null;
+  },
+  extras?: Parameters<typeof toPublicUser>[1],
+): User {
+  return {
+    ...toPublicUser(user, extras),
+    email: user.email ?? null,
+    emailVerifiedAt: user.emailVerifiedAt ?? null,
+    hasPassword: !!(user.passwordHash && user.passwordHash.length > 0),
+  };
+}
+
 export const USER_PUBLIC_FIELDS = {
   id: schema.users.id,
   username: schema.users.username,
@@ -84,6 +115,13 @@ export const USER_PUBLIC_FIELDS = {
   profileCompletedAt: schema.users.profileCompletedAt,
 };
 
+/** Public fields plus private email — only select when viewer is self. */
+export const USER_SELF_FIELDS = {
+  ...USER_PUBLIC_FIELDS,
+  email: schema.users.email,
+  emailVerifiedAt: schema.users.emailVerifiedAt,
+};
+
 type UserRow = {
   id: number;
   username: string;
@@ -98,6 +136,8 @@ type UserRow = {
   lastName?: string | null;
   dateOfBirth?: string | null;
   profileCompletedAt?: string | null;
+  email?: string | null;
+  emailVerifiedAt?: string | null;
 };
 
 export async function buildProfileResponse(
@@ -106,6 +146,7 @@ export async function buildProfileResponse(
   user: UserRow,
 ): Promise<User | null> {
   const userId = user.id;
+  const isSelf = viewerId !== null && viewerId === userId;
 
   if (viewerId) {
     const blockStatus = await getBlockStatus(db, viewerId, userId);
@@ -133,7 +174,7 @@ export async function buildProfileResponse(
       .where(and(...postCountConditions))
       .get();
 
-    return toPublicUser(user, {
+    const extras = {
       postCount: postCountRes?.value || 0,
       followerCount,
       followingCount,
@@ -141,7 +182,9 @@ export async function buildProfileResponse(
       canViewPosts,
       blockStatus,
       muteStatus,
-    });
+    };
+
+    return isSelf ? toSelfUser(user, extras) : toPublicUser(user, extras);
   }
 
   // Guest viewer

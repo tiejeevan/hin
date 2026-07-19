@@ -32,6 +32,12 @@ export interface User {
   lastName?: string | null;
   dateOfBirth?: string | null;
   profileCompletedAt?: string | null;
+  /** Self-only — never present on public profiles. */
+  email?: string | null;
+  /** Self-only — never present on public profiles. */
+  emailVerifiedAt?: string | null;
+  /** Self-only — true when the account has a password (not Google-only). */
+  hasPassword?: boolean;
 }
 
 export interface FollowRequest {
@@ -522,6 +528,8 @@ export interface UserSettings {
   notifyMentions: boolean;
   notifyDms: boolean;
   notifySystem: boolean;
+  /** Master switch for OS / Web Push alerts (inbox + WS still apply). */
+  notifyPushEnabled: boolean;
   muteAllToasts: boolean;
   chatIconMode: ChatIconMode;
   chatIconPages: ChatIconPage[];
@@ -534,6 +542,7 @@ export const DEFAULT_USER_SETTINGS: Omit<UserSettings, 'isPrivate' | 'updatedAt'
   notifyMentions: true,
   notifyDms: true,
   notifySystem: true,
+  notifyPushEnabled: true,
   muteAllToasts: false,
   chatIconMode: 'global',
   chatIconPages: [],
@@ -546,6 +555,7 @@ export const UpdateUserSettingsSchema = z.object({
   notifyMentions: z.boolean().optional(),
   notifyDms: z.boolean().optional(),
   notifySystem: z.boolean().optional(),
+  notifyPushEnabled: z.boolean().optional(),
   muteAllToasts: z.boolean().optional(),
   chatIconMode: z.enum(['global', 'selected_pages']).optional(),
   chatIconPages: z.array(z.enum(['feed', 'profile', 'post'])).optional(),
@@ -655,6 +665,63 @@ export const ReviewReportSchema = z.object({
 
 export const DeleteAccountSchema = z.object({
   password: z.string().min(1, 'Password is required'),
+});
+
+export const ChangePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(6, 'Password must be at least 6 characters').max(50, 'Password is too long'),
+});
+
+export const PasswordResetRequestSchema = z.object({
+  username: z.string().min(1).max(40).optional(),
+  email: z.string().email().max(254).optional(),
+  turnstileToken: z.string().optional(),
+  clientLocalTime: z.string().optional(),
+  sessionId: z.string().optional(),
+}).refine(
+  (v) => !!(v.username?.trim() || v.email?.trim()),
+  { message: 'Username or email is required' },
+);
+
+export const PasswordResetVerifySchema = z.object({
+  username: z.string().min(1).max(40).optional(),
+  email: z.string().email().max(254).optional(),
+  code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
+  newPassword: z.string().min(6, 'Password must be at least 6 characters').max(50, 'Password is too long'),
+}).refine(
+  (v) => !!(v.username?.trim() || v.email?.trim()),
+  { message: 'Username or email is required' },
+);
+
+export const PushSubscribeSchema = z.object({
+  endpoint: z.string().url().max(2048),
+  keys: z.object({
+    p256dh: z.string().min(1).max(512),
+    auth: z.string().min(1).max(256),
+  }),
+  userAgent: z.string().max(512).optional(),
+});
+
+export const PushUnsubscribeSchema = z.object({
+  endpoint: z.string().url().max(2048),
+});
+
+/** Self-only email status returned by GET /api/users/me/email */
+export interface MeEmailStatus {
+  email: string | null;
+  emailVerifiedAt: string | null;
+  canChangeEmail: boolean;
+  nextChangeAt: string | null;
+  daysRemaining: number | null;
+}
+
+export const RequestEmailVerificationSchema = z.object({
+  email: z.string().email('Enter a valid email address').max(254),
+});
+
+export const VerifyEmailSchema = z.object({
+  email: z.string().email('Enter a valid email address').max(254),
+  code: z.string().regex(/^\d{4}$/, 'Enter the 4-digit code'),
 });
 
 /** Requires the admin to type the literal phrase "RESET DATA" before wiping customer data. */
@@ -1052,6 +1119,7 @@ export type AuditEventType =
   | 'logout'
   | 'failed_login'
   | 'password_change'
+  | 'password_reset'
   | 'account_delete'
   | 'admin_impersonate'
   | 'role_change'

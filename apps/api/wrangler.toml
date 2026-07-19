@@ -23,3 +23,6 @@ bucket_name = "gmart"
 
 [vars]
 GOOGLE_CLIENT_ID = "374278266123-6i29t1ve6t76cdb6vsvumvn4nghonpd8.apps.googleusercontent.com"
+# Add via `wrangler secret` / dashboard (do not commit real values):
+# RESEND_API_KEY, RESEND_FROM_EMAIL, OTP_PEPPER, JWT_SECRET,
+# VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT

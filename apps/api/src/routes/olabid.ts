@@ -28,6 +28,7 @@ import { isGamificationEnabled, getGamificationVisibility } from '../lib/gamific
 import { toGamificationBlock } from '../lib/gamification/public';
 import { loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
 import { isOlabidEnabled } from '../lib/system-settings';
+import { sendWebPushForNotification } from '../lib/push';
 import type { Context } from 'hono';
 
 const olabid = new Hono<{ Bindings: Env }>();
@@ -648,6 +649,7 @@ olabid.post('/items/:id/comments', async (c) => {
             body: JSON.stringify({ recipientId: parentComment.userId, notification: notifPayload }),
           }));
         } catch (e) {}
+        await sendWebPushForNotification(c.env, db, notifPayload);
       }
     }
   }

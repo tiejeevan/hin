@@ -4,18 +4,19 @@ import { eq, and, count, sql, or, like, isNull } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
-import { toPublicUser, USER_PUBLIC_FIELDS, buildProfileResponse } from '../lib/users';
+import { toPublicUser, toSelfUser, USER_PUBLIC_FIELDS, USER_SELF_FIELDS, buildProfileResponse } from '../lib/users';
 import {
   getOrCreateUserSettings,
   ensureUserSettingsRow,
   settingsRowUpdatesFromPatch,
 } from '../lib/user-settings';
-import { UpdateUserSettingsSchema, DeleteAccountSchema } from '@hin/types';
+import { UpdateUserSettingsSchema, DeleteAccountSchema, ChangePasswordSchema } from '@hin/types';
 import { softDeleteUser, verifyPassword } from '../lib/user-lifecycle';
 import { toGamificationPublic, emptyGamificationPublic } from '../lib/gamification/public';
 import { isGamificationEnabled } from '../lib/gamification/settings';
 import { loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
 import { writeAuditLog, softDeleteUserAuditLogs } from '../lib/audit';
+import bcrypt from 'bcryptjs';
 
 const users = new Hono<{ Bindings: Env }>();
 
@@ -100,7 +101,50 @@ users.patch('/me', async (c) => {
     .where(eq(schema.users.id, authUser.id))
     .returning();
 
-  return c.json(toPublicUser(updated));
+  return c.json(toSelfUser(updated));
+});
+
+users.post('/me/password', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = ChangePasswordSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' }, 400);
+  }
+
+  const { currentPassword, newPassword } = parsed.data;
+  const db = drizzle(c.env.DB, { schema });
+
+  if (!authUser.passwordHash) {
+    return c.json({
+      error: 'This account uses Google sign-in and has no password to change',
+    }, 403);
+  }
+
+  const ok = await verifyPassword(db, authUser.id, currentPassword);
+  if (!ok) {
+    return c.json({ error: 'Current password is incorrect' }, 400);
+  }
+
+  if (currentPassword === newPassword) {
+    return c.json({ error: 'New password must be different from the current password' }, 400);
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await db.update(schema.users)
+    .set({ passwordHash })
+    .where(eq(schema.users.id, authUser.id))
+    .run();
+
+  await writeAuditLog(c, {
+    userId: authUser.id,
+    eventType: 'password_change',
+    success: true,
+  });
+
+  return c.json({ ok: true });
 });
 
 users.get('/me/settings', async (c) => {
@@ -285,7 +329,7 @@ users.get('/username/:username', async (c) => {
   const username = c.req.param('username');
 
   try {
-    const user = await db.select(USER_PUBLIC_FIELDS)
+    const candidate = await db.select({ id: schema.users.id })
       .from(schema.users)
       .where(
         and(
@@ -293,6 +337,14 @@ users.get('/username/:username', async (c) => {
           isNull(schema.users.deletedAt)
         )
       )
+      .get();
+
+    if (!candidate) return c.json({ error: 'User not found' }, 404);
+
+    const isSelf = viewerId === candidate.id;
+    const user = await db.select(isSelf ? USER_SELF_FIELDS : USER_PUBLIC_FIELDS)
+      .from(schema.users)
+      .where(eq(schema.users.id, candidate.id))
       .get();
 
     if (!user) return c.json({ error: 'User not found' }, 404);
@@ -339,7 +391,8 @@ users.get('/:id', async (c) => {
   const userId = parseInt(c.req.param('id'));
   if (isNaN(userId)) return c.json({ error: 'Invalid user id' }, 400);
 
-  const user = await db.select(USER_PUBLIC_FIELDS)
+  const isSelf = viewerId === userId;
+  const user = await db.select(isSelf ? USER_SELF_FIELDS : USER_PUBLIC_FIELDS)
     .from(schema.users)
     .where(
       and(

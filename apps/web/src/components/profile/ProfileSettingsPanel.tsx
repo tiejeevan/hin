@@ -11,6 +11,8 @@ import { SettingsToggle } from '../settings/SettingsToggle';
 import { FollowRequestsPanel } from './FollowRequestsPanel';
 import { BlockedMutedList } from './BlockedMutedList';
 import { LoginHistory } from '../settings/LoginHistory';
+import { ChangePasswordSection } from './ChangePasswordSection';
+import { PushNotificationSection } from './PushNotificationSection';
 
 const CHAT_PAGE_OPTIONS: { value: ChatIconPage; label: string }[] = [
   { value: 'feed', label: 'Feed' },
@@ -22,6 +24,8 @@ interface ProfileSettingsPanelProps {
   settings: UserSettings;
   token: string;
   username: string;
+  /** False for Google-only accounts. */
+  hasPassword?: boolean;
   requests: FollowRequest[];
   highlighted?: boolean;
   onSettingsChange: (settings: UserSettings) => void;
@@ -38,6 +42,7 @@ export function ProfileSettingsPanel({
   settings,
   token,
   username,
+  hasPassword = true,
   requests,
   highlighted = false,
   onSettingsChange,
@@ -243,6 +248,23 @@ export function ProfileSettingsPanel({
               disabled={savingKey === 'notifySystem'}
               onChange={checked => void patchSettings({ notifySystem: checked }, 'notifySystem')}
             />
+            <SettingsToggle
+              label="Push notifications"
+              description="OS alerts when the app is closed (requires browser permission)."
+              checked={settings.notifyPushEnabled}
+              disabled={savingKey === 'notifyPushEnabled'}
+              onChange={checked => void patchSettings({ notifyPushEnabled: checked }, 'notifyPushEnabled')}
+            />
+
+            <div className="pt-2 border-t border-border-custom">
+              <PushNotificationSection
+                token={token}
+                notifyPushEnabled={settings.notifyPushEnabled}
+                onNotifyPushEnabledChange={(checked) =>
+                  void patchSettings({ notifyPushEnabled: checked }, 'notifyPushEnabled')
+                }
+              />
+            </div>
 
             <div className="pt-2 border-t border-border-custom">
               <SettingsToggle
@@ -353,7 +375,12 @@ export function ProfileSettingsPanel({
           open={openSection === 'security'}
           onToggle={() => toggleSection('security')}
         >
-          <LoginHistory token={token} />
+          <div className="space-y-6">
+            <ChangePasswordSection token={token} hasPassword={hasPassword} />
+            <div className="border-t border-border-custom pt-4">
+              <LoginHistory token={token} />
+            </div>
+          </div>
         </CollapsibleSection>
 
         <CollapsibleSection

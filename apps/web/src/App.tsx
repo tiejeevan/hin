@@ -1947,16 +1947,21 @@ export default function App() {
     // Fire-and-forget logout audit event
     const sessionId = sessionStorage.getItem('hin_session_id');
     const userId = currentUser?.id;
-    if (token) {
+    const logoutToken = token;
+    if (logoutToken) {
       fetch(`${API_URL}/api/auth/logout`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${logoutToken}` },
         body: JSON.stringify({
           userId,
           clientLocalTime: new Date().toISOString(),
           sessionId,
         }),
       }).catch(() => {}); // Never block logout on audit failure
+      // Drop this device's push subscription so shared devices don't get ghost alerts.
+      import('./lib/push-client')
+        .then(({ unregisterPushSubscription }) => unregisterPushSubscription(logoutToken))
+        .catch(() => {});
     }
     sessionStorage.removeItem('hin_session_id');
     setToken(null);

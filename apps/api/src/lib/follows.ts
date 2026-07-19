@@ -5,6 +5,7 @@ import type { FollowListUser, FollowRequest, FollowStatus, Notification } from '
 import type { Env } from '../types';
 import { isBlocked, shouldDeliverNotification } from './blocks';
 import { processUserActionSafe } from './gamification/hub';
+import { sendWebPushForNotification } from './push';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -125,7 +126,12 @@ async function getUserOrThrow(db: Db, userId: number) {
   return user;
 }
 
-async function broadcastFollowNotification(env: Env, recipientId: number, notification: Notification) {
+async function broadcastFollowNotification(
+  env: Env,
+  db: Db,
+  recipientId: number,
+  notification: Notification,
+) {
   try {
     const doId = env.REALTIME_DO.idFromName('global');
     const doStub = env.REALTIME_DO.get(doId);
@@ -135,6 +141,7 @@ async function broadcastFollowNotification(env: Env, recipientId: number, notifi
       body: JSON.stringify({ recipientId, notification }),
     }));
   } catch (_e) {}
+  await sendWebPushForNotification(env, db, notification);
 }
 
 async function broadcastFollowEvent(env: Env, recipientId: number, event: object) {
@@ -187,7 +194,7 @@ async function createFollowNotification(
     createdAt: notif.createdAt,
   };
 
-  await broadcastFollowNotification(env, opts.recipientId, payload);
+  await broadcastFollowNotification(env, db, opts.recipientId, payload);
 }
 
 async function upsertActiveFollow(db: Db, followerId: number, followingId: number) {

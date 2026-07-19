@@ -23,6 +23,8 @@ import auditLogsRoutes from './routes/audit-logs';
 import olabidRoutes from './routes/olabid';
 import itemCommentsRoutes from './routes/item-comments';
 import linkPreviewRoutes from './routes/link-preview';
+import emailRoutes from './routes/email';
+import pushRoutes from './routes/push';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -98,6 +100,8 @@ app.use('*', async (c, next) => {
 app.get('/', (c) => c.text('Hin API is running!'));
 
 app.route('/api/auth', authRoutes);
+app.route('/api/users/me/email', emailRoutes);
+app.route('/api/push', pushRoutes);
 app.route('/api/users', usersRoutes);
 app.route('/', mediaRoutes);
 app.route('/api/posts', postsRoutes);

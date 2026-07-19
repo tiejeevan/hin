@@ -4,7 +4,7 @@ import * as schema from '@hin/db';
 import { Message, Notification } from '@hin/types';
 import { verify } from 'hono/jwt';
 import type { Env } from '../types';
-import { JWT_SECRET } from '../lib/auth';
+import { getJwtSecret } from '../lib/auth';
 import { isBlocked } from '../lib/blocks';
 import { parseFirstUrl, getOrFetchLinkPreview } from '../lib/linkPreview';
 import { isPresenceEnabled } from '../lib/system-settings';
@@ -254,7 +254,7 @@ export class RealtimeDO implements DurableObject {
     if (message.type === 'join') {
       const { token } = message.payload ?? {};
       try {
-        const payload = await verify(token, JWT_SECRET, 'HS256');
+        const payload = await verify(token, getJwtSecret(this.env), 'HS256');
         const userId = payload.id as number;
         const username = payload.username as string;
 

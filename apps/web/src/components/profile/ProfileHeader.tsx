@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Shield, MessageCircle, Pencil, UserPlus, UserCheck, Clock, Settings, MoreHorizontal, VolumeX, Volume2, Ban, UserX, Link2, Flag, MapPin } from 'lucide-react';
+import { Shield, MessageCircle, Pencil, UserPlus, UserCheck, Clock, Settings, MoreHorizontal, VolumeX, Volume2, Ban, UserX, Link2, Flag, MapPin, CheckCircle2, Mail } from 'lucide-react';
 import { BlockStatus, FollowStatus, MuteStatus, User as UserType, type GamificationPublic } from '@hin/types';
 import { UserAvatar } from './UserAvatar';
 import { ProfileEditForm } from './ProfileEditForm';
@@ -108,6 +108,7 @@ export function ProfileHeader({
           onProfileSaved(updated);
           onCancelEdit();
         }}
+        onEmailVerified={onProfileSaved}
         onCancel={onCancelEdit}
       />
     );
@@ -367,6 +368,17 @@ export function ProfileHeader({
         </div>
 
         <div className="mt-4 text-left space-y-3">
+          {isOwnProfile && user.email && user.emailVerifiedAt && (
+            <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-border-custom bg-bg-tertiary/60 px-3 py-1.5">
+              <Mail className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
+              <span className="truncate text-sm text-text-primary">{user.email}</span>
+              <span className="h-3 w-px shrink-0 bg-border-custom" aria-hidden />
+              <span className="inline-flex shrink-0 items-center gap-1 text-emerald-400">
+                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                <span className="text-[10px] font-semibold uppercase tracking-wide">Verified</span>
+              </span>
+            </div>
+          )}
           <div>
             <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wide mb-1.5">About</h2>
             <p className="text-sm text-text-secondary leading-relaxed whitespace-pre-line">

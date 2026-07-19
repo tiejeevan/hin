@@ -10,6 +10,7 @@ import { shouldDeliverNotification } from '../lib/blocks';
 import { processUserActionSafe } from '../lib/gamification/hub';
 import { isGamificationEnabled } from '../lib/gamification/settings';
 import { getEquippedBadgesForUser } from '../lib/gamification/equipped';
+import { sendWebPushForNotification } from '../lib/push';
 
 const comments = new Hono<{ Bindings: Env }>();
 
@@ -148,6 +149,7 @@ comments.post('/:id/like', async (c) => {
             })
           );
         } catch (e) {}
+        await sendWebPushForNotification(c.env, db, notifPayload);
       }
     }
   }

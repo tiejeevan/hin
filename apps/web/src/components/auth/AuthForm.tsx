@@ -3,6 +3,7 @@ import { Lock, ChevronRight } from 'lucide-react';
 import { GOOGLE_CLIENT_ID, TURNSTILE_SITE_KEY, API_URL } from '../../config';
 import { GoogleSignInButton } from './GoogleSignInButton';
 import { TurnstileWidget, type TurnstileWidgetHandle } from './TurnstileWidget';
+import { ForgotPasswordForm } from './ForgotPasswordForm';
 
 interface AuthFormProps {
   isRegisterMode: boolean;
@@ -31,6 +32,7 @@ export function AuthForm({
 }: AuthFormProps) {
   const showGoogleSignIn = !!GOOGLE_CLIENT_ID && !!onGoogleCredential;
   const [turnstileEnabledSetting, setTurnstileEnabledSetting] = useState(false);
+  const [forgotMode, setForgotMode] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +75,10 @@ export function AuthForm({
     setTurnstileError(null);
     onSubmit(e, turnstileToken ?? undefined);
   };
+
+  if (forgotMode) {
+    return <ForgotPasswordForm onBack={() => setForgotMode(false)} />;
+  }
 
   return (
     <div className="flex-grow flex flex-col items-center justify-center p-4 bg-radial from-indigo-900/10 via-transparent to-transparent">
@@ -126,7 +132,18 @@ export function AuthForm({
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-text-secondary mb-1.5">Password</label>
+            <div className="flex items-center justify-between mb-1.5 gap-2">
+              <label className="block text-xs font-semibold text-text-secondary">Password</label>
+              {!isRegisterMode && (
+                <button
+                  type="button"
+                  onClick={() => setForgotMode(true)}
+                  className="text-[11px] text-indigo-400 hover:underline cursor-pointer"
+                >
+                  Forgot password?
+                </button>
+              )}
+            </div>
             <input
               type="password"
               required

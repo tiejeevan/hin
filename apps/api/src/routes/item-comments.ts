@@ -11,6 +11,7 @@ import { processUserActionSafe } from '../lib/gamification/hub';
 import { isGamificationEnabled } from '../lib/gamification/settings';
 import { getEquippedBadgesForUser } from '../lib/gamification/equipped';
 import { isOlabidEnabled } from '../lib/system-settings';
+import { sendWebPushForNotification } from '../lib/push';
 
 const itemComments = new Hono<{ Bindings: Env }>();
 
@@ -157,6 +158,7 @@ itemComments.post('/:id/like', async (c) => {
           })
         );
       } catch (e) {}
+      await sendWebPushForNotification(c.env, db, notifPayload);
     }
   }
 

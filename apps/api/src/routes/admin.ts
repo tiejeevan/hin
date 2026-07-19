@@ -5,13 +5,14 @@ import * as schema from '@hin/db';
 import { BroadcastDelivery, BroadcastSystemMessageSchema, Notification, ReportStatus, ResetPlatformDataSchema, ReviewReportSchema, SystemBroadcast, SystemSettings, UpdateSystemSettingsSchema } from '@hin/types';
 import { sign } from 'hono/jwt';
 import type { Env } from '../types';
-import { getAuthUser, JWT_SECRET } from '../lib/auth';
+import { getAuthUser, getJwtSecret } from '../lib/auth';
 import { isNotificationEnabled, toPublicSettings } from '../lib/user-settings';
 import { listReports, reviewReport } from '../lib/reports';
 import { softDeleteUser, reinstateUser, computeAccountStatus } from '../lib/user-lifecycle';
 import { getSystemSettings, updateSystemSettings } from '../lib/system-settings';
 import { broadcastToAll } from '../lib/realtime';
 import { writeAuditLog } from '../lib/audit';
+import { sendWebPushBatch } from '../lib/push';
 
 const admin = new Hono<{ Bindings: Env }>();
 
@@ -92,7 +93,7 @@ admin.post('/impersonate', async (c) => {
     username: targetUser.username, 
     role: targetUser.role,
     exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
-  }, JWT_SECRET, 'HS256');
+  }, getJwtSecret(c.env), 'HS256');
 
   // Audit: admin impersonated a user
   await writeAuditLog(c, {
@@ -240,6 +241,7 @@ admin.post('/broadcast', async (c) => {
         notifyMentions: 1,
         notifyDms: 1,
         notifySystem: 1,
+        notifyPushEnabled: 1,
         muteAllToasts: 0,
         chatIconMode: 'global',
         chatIconPages: '[]',
@@ -305,6 +307,9 @@ admin.post('/broadcast', async (c) => {
         })
       );
     } catch (e) {}
+
+    // Chunked push fanout — do not block the HTTP response on large broadcasts.
+    c.executionCtx.waitUntil(sendWebPushBatch(c.env, db, createdNotifs));
   }
 
   if (sendToast) {

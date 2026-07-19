@@ -186,7 +186,7 @@ auditLogs.get('/me/audit-logs', async (c) => {
     eq(schema.auditLogs.userId, authUser.id),
     isNull(schema.auditLogs.deletedAt),
     // Only show auth events to the user — not admin actions performed on them
-    sql`${schema.auditLogs.eventType} IN ('login', 'register', 'logout', 'failed_login', 'password_change', 'account_delete')`,
+    sql`${schema.auditLogs.eventType} IN ('login', 'register', 'logout', 'failed_login', 'password_change', 'password_reset', 'account_delete')`,
   ];
   if (cursor) conditions.push(lt(schema.auditLogs.id, cursor));
 

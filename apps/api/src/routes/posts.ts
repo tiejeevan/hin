@@ -21,6 +21,7 @@ import { processUserActionSafe } from '../lib/gamification/hub';
 import { isGamificationEnabled, getGamificationVisibility } from '../lib/gamification/settings';
 import { toGamificationBlock } from '../lib/gamification/public';
 import { getEquippedBadgesForUser, loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
+import { sendWebPushForNotification } from '../lib/push';
 
 const posts = new Hono<{ Bindings: Env }>();
 
@@ -707,6 +708,7 @@ posts.post('/:id/like', async (c) => {
             body: JSON.stringify({ recipientId: post.userId, notification: notifPayload }),
           }));
         } catch (e) {}
+        await sendWebPushForNotification(c.env, db, notifPayload);
       }
     }
   }
@@ -1182,6 +1184,7 @@ posts.post('/:id/comments', async (c) => {
           body: JSON.stringify({ recipientId, notification: notifPayload }),
         }));
       } catch (e) {}
+      await sendWebPushForNotification(c.env, db, notifPayload);
     }
   }
 

@@ -6,6 +6,7 @@ import { AuthForm } from '../auth/AuthForm';
 import { ProfileHeader } from './ProfileHeader';
 import { ProfilePosts } from './ProfilePosts';
 import { ProfileSettingsPanel } from './ProfileSettingsPanel';
+import { EmailVerifyNudge } from './EmailVerifyNudge';
 
 interface ProfileViewProps {
   profileUser: UserType | null;
@@ -259,6 +260,14 @@ export function ProfileView({
             onToggleEquipBadge={isOwnProfile ? onToggleEquipBadge : undefined}
           />
 
+          {isOwnProfile &&
+            currentUser?.hasPassword !== false &&
+            !currentUser?.emailVerifiedAt &&
+            !isEditing &&
+            !isSettingsOpen && (
+              <EmailVerifyNudge onVerifyClick={onStartEdit} />
+            )}
+
           {isOwnProfile && showGamification && gamificationEnabled && profileGamification && profileGamification.goalsInProgress.length > 0 && !isEditing && !isSettingsOpen && (
             <GoalProgress goals={profileGamification.goalsInProgress} />
           )}
@@ -268,6 +277,7 @@ export function ProfileView({
               settings={userSettings}
               token={token}
               username={profileUser.username}
+              hasPassword={currentUser?.hasPassword !== false}
               requests={followRequests}
               highlighted={highlightSettings}
               onSettingsChange={onSettingsChange}

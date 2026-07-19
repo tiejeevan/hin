@@ -8,6 +8,15 @@ import { GlobalLoadingOverlay } from './components/ui/GlobalLoadingOverlay';
 
 installGlobalFetchLoading();
 
+// Register PWA service worker (push handlers live in public/sw.js)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      /* ignore registration failures in unsupported contexts */
+    });
+  });
+}
+
 // Disable developer tools in production and reload page on detection
 if (import.meta.env.PROD) {
   disableDevtool({

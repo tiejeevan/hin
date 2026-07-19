@@ -4,10 +4,11 @@ import * as schema from '@hin/db';
 import type { GamificationRewardPayload, Notification } from '@hin/types';
 import type { Env } from '../../types';
 import { getOrCreateUserSettings, isNotificationEnabled } from '../user-settings';
+import { sendWebPushForNotification } from '../push';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
-async function broadcastNotification(env: Env, recipientId: number, notification: Notification) {
+async function broadcastNotification(env: Env, db: Db, recipientId: number, notification: Notification) {
   try {
     const doId = env.REALTIME_DO.idFromName('global');
     const doStub = env.REALTIME_DO.get(doId);
@@ -17,6 +18,7 @@ async function broadcastNotification(env: Env, recipientId: number, notification
       body: JSON.stringify({ recipientId, notification }),
     }));
   } catch (_e) {}
+  await sendWebPushForNotification(env, db, notification);
 }
 
 export async function broadcastGamificationReward(
@@ -85,7 +87,7 @@ export async function notifyBadgeAwards(
       createdAt: notif.createdAt,
     };
 
-    await broadcastNotification(env, userId, payload);
+    await broadcastNotification(env, db, userId, payload);
   }
 }
 
@@ -126,7 +128,7 @@ export async function notifyLevelUp(
     createdAt: notif.createdAt,
   };
 
-  await broadcastNotification(env, userId, payload);
+  await broadcastNotification(env, db, userId, payload);
 }
 
 export async function notifyEventWins(
@@ -175,7 +177,7 @@ export async function notifyEventWins(
       createdAt: notif.createdAt,
     };
 
-    await broadcastNotification(env, userId, payload);
+    await broadcastNotification(env, db, userId, payload);
 
     await broadcastGamificationReward(env, userId, {
       pt: 0,

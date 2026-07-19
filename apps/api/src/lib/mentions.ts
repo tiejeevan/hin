@@ -5,6 +5,7 @@ import { Notification } from '@hin/types';
 import type { Env } from '../types';
 import { getOrCreateUserSettings, isNotificationEnabled } from '../lib/user-settings';
 import { shouldDeliverNotification } from './blocks';
+import { sendWebPushForNotification } from './push';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -109,5 +110,6 @@ export async function notifyMentions(
         })
       );
     } catch (e) {}
+    await sendWebPushForNotification(env, db, notifPayload);
   }
 }
