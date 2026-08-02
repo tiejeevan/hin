@@ -19,6 +19,7 @@ import { setEquippedBadges } from '../lib/gamification/equipped';
 import {
   completeIntroWalkthrough,
   isIntroWalkthroughCompleted,
+  resetIntroWalkthrough,
 } from '../lib/intro-walkthrough';
 import { toPublicUser } from '../lib/users';
 
@@ -141,6 +142,16 @@ me.post('/intro-walkthrough/complete', async (c) => {
   return c.json({ ok: true, introWalkthroughCompleted: true });
 });
 
+me.post('/intro-walkthrough/reset', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  await resetIntroWalkthrough(db, authUser.id);
+
+  return c.json({ ok: true, introWalkthroughCompleted: false });
+});
+
 me.post('/bio-walkthrough/complete', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
@@ -148,6 +159,20 @@ me.post('/bio-walkthrough/complete', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const [updated] = await db.update(schema.users)
     .set({ profileCompletedAt: new Date().toISOString() })
+    .where(eq(schema.users.id, authUser.id))
+    .returning();
+
+  return c.json({ ok: true, user: toPublicUser(updated) });
+});
+
+/** Clears profileCompletedAt so the profile setup tour can be re-tested. */
+me.post('/profile-setup/reset', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const [updated] = await db.update(schema.users)
+    .set({ profileCompletedAt: null })
     .where(eq(schema.users.id, authUser.id))
     .returning();
 

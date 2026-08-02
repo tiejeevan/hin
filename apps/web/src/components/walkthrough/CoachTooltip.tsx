@@ -1,23 +1,20 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Bell, MessageSquare, Plus, Sparkles, User, Calendar } from 'lucide-react';
-
-export interface WalkthroughStep {
-  id: string;
-  targetSelector: string;
-  title: string;
-  description: string;
-  icon: 'post' | 'messages' | 'notifications' | 'user' | 'calendar';
-  padding?: number;
-  borderRadius?: number;
-}
+import { Bell, Calendar, Lock, Settings, Sparkles, User } from 'lucide-react';
+import type { WalkthroughStep } from './IntroWalkthrough';
 
 const STEP_ICONS = {
-  post: Plus,
-  messages: MessageSquare,
+  post: User,
+  messages: User,
   notifications: Bell,
   user: User,
   calendar: Calendar,
+  settings: Settings,
+  lock: Lock,
 } as const;
+
+export type CoachStep = Omit<WalkthroughStep, 'icon'> & {
+  icon: keyof typeof STEP_ICONS;
+};
 
 const TOOLTIP_MAX_WIDTH = 248;
 const VIEWPORT_MARGIN = 12;
@@ -30,12 +27,14 @@ interface Rect {
   height: number;
 }
 
-interface IntroWalkthroughProps {
-  steps: WalkthroughStep[];
+interface CoachTooltipProps {
+  steps: CoachStep[];
   stepIndex: number;
   onNext: () => void;
   onComplete: () => void;
+  onSkip: () => void;
   completionMessage?: string;
+  skipLabel?: string;
 }
 
 function measureTarget(selector: string, padding: number): Rect | null {
@@ -76,23 +75,13 @@ function computeTooltipPosition(
   target: Rect,
   tooltipWidth: number,
   tooltipHeight: number,
-  stepId: string,
 ): { top: number; left: number } {
-  const fabSteps = stepId === 'create-post' || stepId === 'messages';
-
-  const candidates: Array<{ top: number; left: number }> = fabSteps
-    ? [
-        { top: target.top - tooltipHeight - TARGET_GAP, left: target.left - tooltipWidth + target.width },
-        { top: target.top - tooltipHeight - TARGET_GAP, left: target.left - tooltipWidth - TARGET_GAP },
-        { top: target.top + target.height + TARGET_GAP, left: target.left - tooltipWidth + target.width },
-        { top: target.top - tooltipHeight - TARGET_GAP, left: target.left },
-      ]
-    : [
-        { top: target.top + target.height + TARGET_GAP, left: target.left + target.width / 2 - tooltipWidth / 2 },
-        { top: target.top + target.height + TARGET_GAP, left: target.left - tooltipWidth + target.width },
-        { top: target.top - tooltipHeight - TARGET_GAP, left: target.left + target.width / 2 - tooltipWidth / 2 },
-        { top: target.top, left: target.left + target.width + TARGET_GAP },
-      ];
+  const candidates: Array<{ top: number; left: number }> = [
+    { top: target.top + target.height + TARGET_GAP, left: target.left + target.width / 2 - tooltipWidth / 2 },
+    { top: target.top + target.height + TARGET_GAP, left: target.left - tooltipWidth + target.width },
+    { top: target.top - tooltipHeight - TARGET_GAP, left: target.left + target.width / 2 - tooltipWidth / 2 },
+    { top: target.top, left: target.left + target.width + TARGET_GAP },
+  ];
 
   for (const candidate of candidates) {
     const tooltipRect: Rect = {
@@ -107,31 +96,35 @@ function computeTooltipPosition(
     return candidate;
   }
 
-  const fallbackTop = fabSteps
-    ? target.top - tooltipHeight - TARGET_GAP
-    : target.top + target.height + TARGET_GAP;
-  const fallbackLeft = fabSteps
-    ? target.left - tooltipWidth + target.width
-    : target.left + target.width / 2 - tooltipWidth / 2;
-
   return {
-    top: clamp(fallbackTop, VIEWPORT_MARGIN, window.innerHeight - tooltipHeight - VIEWPORT_MARGIN),
-    left: clamp(fallbackLeft, VIEWPORT_MARGIN, window.innerWidth - tooltipWidth - VIEWPORT_MARGIN),
+    top: clamp(
+      target.top + target.height + TARGET_GAP,
+      VIEWPORT_MARGIN,
+      window.innerHeight - tooltipHeight - VIEWPORT_MARGIN,
+    ),
+    left: clamp(
+      target.left + target.width / 2 - tooltipWidth / 2,
+      VIEWPORT_MARGIN,
+      window.innerWidth - tooltipWidth - VIEWPORT_MARGIN,
+    ),
   };
 }
 
-export function IntroWalkthrough({
+/** Non-blocking coach: spotlight + tooltip only; page stays interactive. */
+export function CoachTooltip({
   steps,
   stepIndex,
   onNext,
   onComplete,
+  onSkip,
   completionMessage,
-}: IntroWalkthroughProps) {
+  skipLabel = 'Remind me later',
+}: CoachTooltipProps) {
   const step = steps[stepIndex];
   const isLastStep = stepIndex === steps.length - 1;
-  const Icon = step ? STEP_ICONS[step.icon] : Plus;
+  const Icon = step ? STEP_ICONS[step.icon] : User;
   const padding = step?.padding ?? 6;
-  const borderRadius = step?.borderRadius ?? 9999;
+  const borderRadius = step?.borderRadius ?? 16;
 
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [spotlight, setSpotlight] = useState<Rect | null>(null);
@@ -151,7 +144,7 @@ export function IntroWalkthrough({
 
     const tooltipWidth = Math.min(TOOLTIP_MAX_WIDTH, window.innerWidth - VIEWPORT_MARGIN * 2);
     const tooltipHeight = tooltipRef.current?.offsetHeight ?? 156;
-    setTooltipPos(computeTooltipPosition(rect, tooltipWidth, tooltipHeight, step.id));
+    setTooltipPos(computeTooltipPosition(rect, tooltipWidth, tooltipHeight));
   }, [padding, step]);
 
   useLayoutEffect(() => {
@@ -193,15 +186,6 @@ export function IntroWalkthrough({
     }
   }, [spotlight, updateLayout]);
 
-  const handlePrimary = () => {
-    if (isLastStep) onComplete();
-    else onNext();
-  };
-
-  const handleSkip = () => {
-    onComplete();
-  };
-
   if (!step) return null;
 
   const tooltipWidth = Math.min(TOOLTIP_MAX_WIDTH, window.innerWidth - VIEWPORT_MARGIN * 2);
@@ -211,7 +195,7 @@ export function IntroWalkthrough({
       className="fixed inset-0 z-[120] pointer-events-none animate-walkthrough-enter"
       role="dialog"
       aria-modal="false"
-      aria-label="App walkthrough"
+      aria-label="Profile setup coach"
     >
       {spotlight && (
         <div
@@ -272,21 +256,24 @@ export function IntroWalkthrough({
             {isLastStep && (
               <div className="mt-2 flex items-center gap-1.5 rounded-lg bg-indigo-500/10 px-2.5 py-1.5 text-[11px] text-indigo-300">
                 <Sparkles className="h-3 w-3 shrink-0" />
-                <span>{completionMessage || "You're all set — welcome to Hin."}</span>
+                <span>{completionMessage || 'You can revisit this tour anytime from Settings.'}</span>
               </div>
             )}
 
             <div className="mt-2.5 flex items-center justify-between gap-2">
               <button
                 type="button"
-                onClick={handleSkip}
+                onClick={onSkip}
                 className="rounded-md px-1.5 py-1 text-[11px] font-medium text-text-muted transition-colors hover:text-text-secondary cursor-pointer"
               >
-                Skip
+                {skipLabel}
               </button>
               <button
                 type="button"
-                onClick={handlePrimary}
+                onClick={() => {
+                  if (isLastStep) onComplete();
+                  else onNext();
+                }}
                 className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-500 active:scale-[0.98] cursor-pointer"
               >
                 {isLastStep ? 'Done' : 'Next'}
@@ -299,30 +286,59 @@ export function IntroWalkthrough({
   );
 }
 
-export const INTRO_WALKTHROUGH_STEPS: WalkthroughStep[] = [
+export const PROFILE_TOUR_STEPS: CoachStep[] = [
   {
-    id: 'create-post',
-    targetSelector: '#create-post-fab',
-    title: 'Share something new',
-    description: 'Tap + to write a post, add photos, or start a poll.',
-    icon: 'post',
+    id: 'edit-profile',
+    targetSelector: '#edit-profile-btn',
+    title: 'Update your profile',
+    description: 'Start here to add your name and birthday so others can know you.',
+    icon: 'user',
     padding: 4,
+    borderRadius: 12,
   },
   {
-    id: 'messages',
-    targetSelector: '#messages-fab-trigger',
-    title: 'Message people',
-    description: 'Open messages here for private chats with people you follow.',
-    icon: 'messages',
+    id: 'basics',
+    targetSelector: '#profile-edit-basics',
+    title: 'Your basics',
+    description: 'Add your first name, last name, and birthday. You can type freely — nothing is locked.',
+    icon: 'user',
+    padding: 8,
+    borderRadius: 16,
+  },
+  {
+    id: 'save',
+    targetSelector: '#save-profile-btn',
+    title: 'Save your details',
+    description: 'Save when you are ready. You can come back anytime.',
+    icon: 'user',
     padding: 4,
+    borderRadius: 9999,
+  },
+  {
+    id: 'settings',
+    targetSelector: '#profile-settings-btn',
+    title: 'Profile settings',
+    description: 'Privacy, notifications, and more live here.',
+    icon: 'settings',
+    padding: 4,
+    borderRadius: 12,
+  },
+  {
+    id: 'privacy',
+    targetSelector: '#profile-settings-privacy',
+    title: 'Privacy',
+    description: 'Make your account private and manage follow requests.',
+    icon: 'lock',
+    padding: 4,
+    borderRadius: 16,
   },
   {
     id: 'notifications',
-    targetSelector: '#notifications-bell-trigger',
-    title: 'See what you missed',
-    description: 'The bell shows likes, comments, mentions, and updates.',
+    targetSelector: '#profile-settings-notifications',
+    title: 'Notifications',
+    description: 'Choose what alerts you get for likes, comments, mentions, and messages.',
     icon: 'notifications',
     padding: 4,
-    borderRadius: 9999,
+    borderRadius: 16,
   },
 ];

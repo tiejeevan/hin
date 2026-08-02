@@ -35,3 +35,11 @@ export async function completeIntroWalkthrough(
       set: { completedAt, version },
     });
 }
+
+export async function resetIntroWalkthrough(
+  db: Db,
+  userId: number,
+): Promise<void> {
+  await db.delete(schema.introWalkthrough)
+    .where(eq(schema.introWalkthrough.userId, userId));
+}

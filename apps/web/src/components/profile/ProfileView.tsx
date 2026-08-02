@@ -7,6 +7,7 @@ import { ProfileHeader } from './ProfileHeader';
 import { ProfilePosts } from './ProfilePosts';
 import { ProfileSettingsPanel } from './ProfileSettingsPanel';
 import { EmailVerifyNudge } from './EmailVerifyNudge';
+import { ProfileSetupNudge } from './ProfileSetupNudge';
 
 interface ProfileViewProps {
   profileUser: UserType | null;
@@ -23,6 +24,13 @@ interface ProfileViewProps {
   isEditing: boolean;
   isSettingsOpen: boolean;
   highlightSettings?: boolean;
+  settingsTourSection?: 'privacy' | 'notifications' | null;
+  showProfileSetupNudge?: boolean;
+  onContinueProfileSetup?: () => void;
+  onDismissProfileSetup?: () => void;
+  onStartProfileTour?: () => void;
+  onResetProfileTour?: () => void | Promise<void>;
+  onResetFeedIntro?: () => void | Promise<void>;
   followBusy: boolean;
   expandedComments: Record<number, boolean>;
   postComments: Record<number, Comment[]>;
@@ -123,6 +131,13 @@ export function ProfileView({
   isEditing,
   isSettingsOpen,
   highlightSettings = false,
+  settingsTourSection = null,
+  showProfileSetupNudge = false,
+  onContinueProfileSetup,
+  onDismissProfileSetup,
+  onStartProfileTour,
+  onResetProfileTour,
+  onResetFeedIntro,
   followBusy,
   expandedComments,
   postComments,
@@ -263,6 +278,18 @@ export function ProfileView({
           />
 
           {isOwnProfile &&
+            showProfileSetupNudge &&
+            onContinueProfileSetup &&
+            onDismissProfileSetup &&
+            !isEditing &&
+            !isSettingsOpen && (
+              <ProfileSetupNudge
+                onContinue={onContinueProfileSetup}
+                onDismiss={onDismissProfileSetup}
+              />
+            )}
+
+          {isOwnProfile &&
             currentUser?.hasPassword !== false &&
             !currentUser?.emailVerifiedAt &&
             !isEditing &&
@@ -282,6 +309,7 @@ export function ProfileView({
               hasPassword={currentUser?.hasPassword !== false}
               requests={followRequests}
               highlighted={highlightSettings}
+              tourSection={settingsTourSection}
               onSettingsChange={onSettingsChange}
               onApprove={onApproveFollowRequest}
               onReject={onRejectFollowRequest}
@@ -291,6 +319,9 @@ export function ProfileView({
               onUnmuteUser={onUnmuteUser}
               onDeleteAccount={onDeleteAccount!}
               onSimulateSessionExpired={onSimulateSessionExpired}
+              onStartProfileTour={onStartProfileTour}
+              onResetProfileTour={onResetProfileTour}
+              onResetFeedIntro={onResetFeedIntro}
             />
           )}
 

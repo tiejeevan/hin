@@ -68,56 +68,13 @@ import { ReportModal } from './components/moderation/ReportModal';
 import { applyGamificationReward } from './components/gamification/GamificationToast';
 import { useSessionTick } from './hooks/useSessionTick';
 import { useIntroWalkthrough } from './hooks/useIntroWalkthrough';
-import { useBioWalkthrough } from './hooks/useBioWalkthrough';
+import { useProfileTour } from './hooks/useProfileTour';
 import {
   IntroWalkthrough,
   INTRO_WALKTHROUGH_STEPS,
-  type WalkthroughStep,
 } from './components/walkthrough/IntroWalkthrough';
+import { CoachTooltip, PROFILE_TOUR_STEPS } from './components/walkthrough/CoachTooltip';
 import { SearchOverlay } from './components/feed/SearchOverlay';
-
-const BIO_WALKTHROUGH_STEPS: WalkthroughStep[] = [
-  {
-    id: 'edit-profile-btn',
-    targetSelector: '#edit-profile-btn',
-    title: 'Update your profile',
-    description: "Let's fill in your details so other users can know you better.",
-    icon: 'user',
-    padding: 4,
-  },
-  {
-    id: 'first-name-input',
-    targetSelector: '#first-name-input',
-    title: 'First Name',
-    description: 'Please enter your first name.',
-    icon: 'user',
-    padding: 4,
-  },
-  {
-    id: 'last-name-input',
-    targetSelector: '#last-name-input',
-    title: 'Last Name',
-    description: 'Please enter your last name.',
-    icon: 'user',
-    padding: 4,
-  },
-  {
-    id: 'birthday-input',
-    targetSelector: '#birthday-input',
-    title: 'Birthday',
-    description: 'Please select your date of birth.',
-    icon: 'calendar',
-    padding: 4,
-  },
-  {
-    id: 'save-profile-btn',
-    targetSelector: '#save-profile-btn',
-    title: 'Save Details',
-    description: 'Save your profile to complete this update.',
-    icon: 'user',
-    padding: 4,
-  },
-];
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('hin_token'));
@@ -141,6 +98,7 @@ export default function App() {
   const [followersModal, setFollowersModal] = useState<'followers' | 'following' | null>(null);
   const [highlightFollowRequests, setHighlightFollowRequests] = useState(false);
   const [isProfileSettingsOpen, setIsProfileSettingsOpen] = useState(false);
+  const [settingsTourSection, setSettingsTourSection] = useState<'privacy' | 'notifications' | null>(null);
   const feedModeRef = useRef<FeedMode>('all');
   const profileUserIdRef = useRef<number | null>(null);
   const followedUserIdsRef = useRef<Set<number>>(new Set());
@@ -3537,31 +3495,37 @@ export default function App() {
     onStepChange: handleWalkthroughStepChange,
   });
 
-  const bioWalkthrough = useBioWalkthrough({
-    enabled:
+  const openProfileSettings = useCallback(() => {
+    setIsProfileSettingsOpen(true);
+    void fetchFollowRequests();
+  }, []);
+
+  const closeProfileSettings = useCallback(() => {
+    setIsProfileSettingsOpen(false);
+    setSettingsTourSection(null);
+  }, []);
+
+  const profileTour = useProfileTour({
+    autoStartEnabled:
       !!currentUser &&
       activeTab === 'profile' &&
       profileUser?.id === currentUser.id &&
       !profileLoading &&
       !currentUser.profileCompletedAt &&
-      !showAuthOnly &&
-      !walkthrough.isActive,
-    token,
+      !showAuthOnly,
+    feedIntroActive: walkthrough.isActive,
     isProfileEditing,
     setIsProfileEditing,
-    getHeaders,
-    onUserUpdate: (updatedUser) => {
-      setCurrentUser(updatedUser);
-      localStorage.setItem('hin_user', JSON.stringify(updatedUser));
-      setProfileUser(prev => (prev?.id === updatedUser.id ? { ...prev, ...updatedUser } : prev));
-    },
+    openSettings: openProfileSettings,
+    closeSettings: closeProfileSettings,
+    setSettingsTourSection,
   });
 
   useEffect(() => {
-    if (walkthrough.isActive || bioWalkthrough.isActive) {
+    if (walkthrough.isActive || profileTour.isActive) {
       handleWalkthroughStepChange();
     }
-  }, [walkthrough.isActive, bioWalkthrough.isActive, handleWalkthroughStepChange]);
+  }, [walkthrough.isActive, profileTour.isActive, handleWalkthroughStepChange]);
 
   return (
     <AppShell
@@ -3576,15 +3540,14 @@ export default function App() {
               walkthrough.complete();
             }}
           />
-        ) : bioWalkthrough.isActive ? (
-          <IntroWalkthrough
-            steps={BIO_WALKTHROUGH_STEPS}
-            stepIndex={bioWalkthrough.stepIndex}
-            onNext={bioWalkthrough.next}
-            onComplete={() => {
-              bioWalkthrough.complete();
-            }}
-            completionMessage="Your profile details have been updated!"
+        ) : profileTour.isActive ? (
+          <CoachTooltip
+            steps={PROFILE_TOUR_STEPS}
+            stepIndex={profileTour.stepIndex}
+            onNext={profileTour.next}
+            onComplete={profileTour.complete}
+            onSkip={profileTour.skip}
+            completionMessage="You can revisit this tour anytime from Settings."
           />
         ) : isSearchOpen ? (
           <SearchOverlay
@@ -3836,6 +3799,58 @@ export default function App() {
             isEditing={isProfileEditing}
             isSettingsOpen={isProfileSettingsOpen}
             highlightSettings={highlightFollowRequests}
+            settingsTourSection={settingsTourSection}
+            showProfileSetupNudge={
+              !!currentUser &&
+              !currentUser.profileCompletedAt &&
+              profileTour.showReminderBanner
+            }
+            onContinueProfileSetup={() => profileTour.start(0)}
+            onDismissProfileSetup={profileTour.snoozeFromBanner}
+            onStartProfileTour={() => profileTour.start(0)}
+            onResetProfileTour={async () => {
+              if (!token) return;
+              try {
+                const res = await fetch(`${API_URL}/api/me/profile-setup/reset`, {
+                  method: 'POST',
+                  headers: getHeaders(),
+                });
+                if (res.ok) {
+                  const data = await res.json() as { user?: UserType };
+                  if (data.user) {
+                    setCurrentUser(data.user);
+                    localStorage.setItem('hin_user', JSON.stringify(data.user));
+                    setProfileUser(prev => (prev?.id === data.user!.id ? { ...prev, ...data.user } : prev));
+                  }
+                } else {
+                  // Client-only fallback so the tour is still testable if the API is down.
+                  setCurrentUser(prev => prev ? { ...prev, profileCompletedAt: null } : prev);
+                  const saved = localStorage.getItem('hin_user');
+                  if (saved) {
+                    const parsed = JSON.parse(saved) as UserType;
+                    localStorage.setItem('hin_user', JSON.stringify({ ...parsed, profileCompletedAt: null }));
+                  }
+                }
+              } catch {
+                setCurrentUser(prev => prev ? { ...prev, profileCompletedAt: null } : prev);
+              }
+              profileTour.resetAndStart();
+            }}
+            onResetFeedIntro={async () => {
+              if (!token) return;
+              try {
+                await fetch(`${API_URL}/api/me/intro-walkthrough/reset`, {
+                  method: 'POST',
+                  headers: getHeaders(),
+                });
+              } catch {
+                // Still reset locally so the tour is testable offline.
+              }
+              setIntroWalkthroughCompleted(false);
+              setIsProfileSettingsOpen(false);
+              goHome();
+              walkthrough.resetAndStart();
+            }}
             followBusy={followBusy}
             expandedComments={expandedComments}
             postComments={postComments}
@@ -3876,11 +3891,8 @@ export default function App() {
             onRejectFollowRequest={handleRejectFollowRequest}
             onShowFollowers={() => setFollowersModal('followers')}
             onShowFollowing={() => setFollowersModal('following')}
-            onOpenSettings={() => {
-              setIsProfileSettingsOpen(true);
-              fetchFollowRequests();
-            }}
-            onCloseSettings={() => setIsProfileSettingsOpen(false)}
+            onOpenSettings={openProfileSettings}
+            onCloseSettings={closeProfileSettings}
             onToggleLike={handleToggleLike}
             onToggleComments={toggleComments}
             onDeletePost={handleDeletePost}

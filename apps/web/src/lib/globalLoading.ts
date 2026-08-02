@@ -49,8 +49,9 @@ const SILENT_INTERACTION_RULES: Array<{ method: string; pattern: RegExp }> = [
   { method: 'POST', pattern: /\/api\/messages\/read\/\d+(?:\?|$)/ },
   // Light taps
   { method: 'POST', pattern: /\/api\/events\/\d+\/join(?:\?|$)/ },
-  { method: 'POST', pattern: /\/api\/me\/bio-walkthrough\/complete(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/me\/profile-setup\/reset(?:\?|$)/ },
   { method: 'POST', pattern: /\/api\/me\/intro-walkthrough\/complete(?:\?|$)/ },
+  { method: 'POST', pattern: /\/api\/me\/intro-walkthrough\/reset(?:\?|$)/ },
   { method: 'PATCH', pattern: /\/api\/me\/gamification\/equipped(?:\?|$)/ },
   { method: 'PATCH', pattern: /\/api\/users\/me\/settings(?:\?|$)/ },
   { method: 'POST', pattern: /\/api\/reports(?:\?|$)/ },

@@ -358,55 +358,57 @@ export function ProfileEditForm({ user, token, onSave, onEmailVerified, onCancel
 
       {/* Fields */}
       <div className="px-5 pb-5 pt-16 md:pt-[4.25rem] space-y-5">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <label htmlFor="first-name-input" className="text-[11px] font-semibold text-text-muted uppercase tracking-wider ml-0.5">
-              First Name
-            </label>
-            <div className="input-glass rounded-xl px-3.5 min-h-[44px] flex items-center">
-              <input
-                id="first-name-input"
-                type="text"
-                maxLength={100}
-                value={firstName}
-                onChange={e => setFirstName(e.target.value)}
-                placeholder="First name"
-                className="w-full bg-transparent border-none outline-none p-0 text-sm text-text-primary placeholder-text-muted focus:ring-0"
-              />
+        <div id="profile-edit-basics" className="space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label htmlFor="first-name-input" className="text-[11px] font-semibold text-text-muted uppercase tracking-wider ml-0.5">
+                First Name
+              </label>
+              <div className="input-glass rounded-xl px-3.5 min-h-[44px] flex items-center">
+                <input
+                  id="first-name-input"
+                  type="text"
+                  maxLength={100}
+                  value={firstName}
+                  onChange={e => setFirstName(e.target.value)}
+                  placeholder="First name"
+                  className="w-full bg-transparent border-none outline-none p-0 text-sm text-text-primary placeholder-text-muted focus:ring-0"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="last-name-input" className="text-[11px] font-semibold text-text-muted uppercase tracking-wider ml-0.5">
+                Last Name
+              </label>
+              <div className="input-glass rounded-xl px-3.5 min-h-[44px] flex items-center">
+                <input
+                  id="last-name-input"
+                  type="text"
+                  maxLength={100}
+                  value={lastName}
+                  onChange={e => setLastName(e.target.value)}
+                  placeholder="Last name"
+                  className="w-full bg-transparent border-none outline-none p-0 text-sm text-text-primary placeholder-text-muted focus:ring-0"
+                />
+              </div>
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="last-name-input" className="text-[11px] font-semibold text-text-muted uppercase tracking-wider ml-0.5">
-              Last Name
+            <label htmlFor="birthday-input" className="text-[11px] font-semibold text-text-muted uppercase tracking-wider ml-0.5">
+              Birthday
             </label>
-            <div className="input-glass rounded-xl px-3.5 min-h-[44px] flex items-center">
+            <div className="input-glass rounded-xl px-3.5 min-h-[44px] flex items-center gap-2 relative">
               <input
-                id="last-name-input"
-                type="text"
-                maxLength={100}
-                value={lastName}
-                onChange={e => setLastName(e.target.value)}
-                placeholder="Last name"
-                className="w-full bg-transparent border-none outline-none p-0 text-sm text-text-primary placeholder-text-muted focus:ring-0"
+                id="birthday-input"
+                type="date"
+                value={dateOfBirth}
+                onChange={e => setDateOfBirth(e.target.value)}
+                className="w-full bg-transparent border-none outline-none p-0 text-sm text-text-primary placeholder-text-muted focus:ring-0 relative z-10 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
               />
+              <Calendar className="h-4 w-4 text-text-muted shrink-0 pointer-events-none" />
             </div>
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <label htmlFor="birthday-input" className="text-[11px] font-semibold text-text-muted uppercase tracking-wider ml-0.5">
-            Birthday
-          </label>
-          <div className="input-glass rounded-xl px-3.5 min-h-[44px] flex items-center gap-2 relative">
-            <input
-              id="birthday-input"
-              type="date"
-              value={dateOfBirth}
-              onChange={e => setDateOfBirth(e.target.value)}
-              className="w-full bg-transparent border-none outline-none p-0 text-sm text-text-primary placeholder-text-muted focus:ring-0 relative z-10 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-            />
-            <Calendar className="h-4 w-4 text-text-muted shrink-0 pointer-events-none" />
           </div>
         </div>
 

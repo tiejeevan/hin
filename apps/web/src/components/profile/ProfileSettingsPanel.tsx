@@ -28,6 +28,8 @@ interface ProfileSettingsPanelProps {
   hasPassword?: boolean;
   requests: FollowRequest[];
   highlighted?: boolean;
+  /** Force-open a section (e.g. profile tour). */
+  tourSection?: 'privacy' | 'notifications' | null;
   onSettingsChange: (settings: UserSettings) => void;
   onApprove: (requesterId: number) => Promise<void>;
   onReject: (requesterId: number) => Promise<void>;
@@ -37,6 +39,11 @@ interface ProfileSettingsPanelProps {
   onUnmuteUser: (userId: number) => void | Promise<void>;
   onDeleteAccount: (password: string) => Promise<{ success: boolean; error?: string }>;
   onSimulateSessionExpired?: () => void;
+  onStartProfileTour?: () => void;
+  /** Dev-only: reset tour flags + incomplete profile and restart. */
+  onResetProfileTour?: () => void | Promise<void>;
+  /** Dev-only: reset feed intro walkthrough and restart on feed. */
+  onResetFeedIntro?: () => void | Promise<void>;
 }
 
 export function ProfileSettingsPanel({
@@ -46,6 +53,7 @@ export function ProfileSettingsPanel({
   hasPassword = true,
   requests,
   highlighted = false,
+  tourSection = null,
   onSettingsChange,
   onApprove,
   onReject,
@@ -55,6 +63,9 @@ export function ProfileSettingsPanel({
   onUnmuteUser,
   onDeleteAccount,
   onSimulateSessionExpired,
+  onStartProfileTour,
+  onResetProfileTour,
+  onResetFeedIntro,
 }: ProfileSettingsPanelProps) {
   const [openSection, setOpenSection] = useState<
     'privacy' | 'notifications' | 'chat' | 'blocked' | 'security' | 'danger' | 'debug' | null
@@ -69,6 +80,10 @@ export function ProfileSettingsPanel({
   useEffect(() => {
     if (highlighted) setOpenSection('privacy');
   }, [highlighted]);
+
+  useEffect(() => {
+    if (tourSection) setOpenSection(tourSection);
+  }, [tourSection]);
 
   const patchSettings = useCallback(
     async (patch: Partial<UserSettings>, key: string) => {
@@ -160,7 +175,18 @@ export function ProfileSettingsPanel({
 
       {error && <p className="text-xs text-rose-400">{error}</p>}
 
+      {onStartProfileTour && (
+        <button
+          type="button"
+          onClick={onStartProfileTour}
+          className="w-full px-4 py-2.5 rounded-xl text-xs font-semibold border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/15 text-indigo-300 transition-colors cursor-pointer min-h-[44px]"
+        >
+          Take profile tour
+        </button>
+      )}
+
       <div className="space-y-3">
+        <div id="profile-settings-privacy">
         <CollapsibleSection
           title="Privacy"
           description="Account visibility and follow requests"
@@ -209,7 +235,9 @@ export function ProfileSettingsPanel({
             </section>
           </div>
         </CollapsibleSection>
+        </div>
 
+        <div id="profile-settings-notifications">
         <CollapsibleSection
           title="Notifications"
           description="Choose what you receive and how alerts appear"
@@ -283,6 +311,7 @@ export function ProfileSettingsPanel({
             </div>
           </div>
         </CollapsibleSection>
+        </div>
 
         <CollapsibleSection
           title="Chat"
@@ -443,6 +472,24 @@ export function ProfileSettingsPanel({
             onToggle={() => toggleSection('debug')}
           >
             <div className="space-y-3">
+              {onResetProfileTour && (
+                <button
+                  type="button"
+                  onClick={() => void onResetProfileTour()}
+                  className="w-full px-4 py-2.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer min-h-[44px]"
+                >
+                  Reset & start profile tour
+                </button>
+              )}
+              {onResetFeedIntro && (
+                <button
+                  type="button"
+                  onClick={() => void onResetFeedIntro()}
+                  className="w-full px-4 py-2.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-colors cursor-pointer min-h-[44px]"
+                >
+                  Reset & start feed intro
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => onSimulateSessionExpired?.()}
@@ -461,7 +508,9 @@ export function ProfileSettingsPanel({
                 Clear all localStorage
               </button>
               <p className="text-[11px] text-text-muted leading-relaxed">
-                Clear wipes auth tokens plus walkthrough and chat UI keys, then reloads the page.
+                Profile tour reset clears snooze/seen flags and profileCompletedAt, then starts the coach.
+                Feed intro reset clears the intro completion flag (local + DB) and returns to the feed.
+                Clear localStorage wipes auth tokens plus walkthrough and chat UI keys, then reloads.
               </p>
             </div>
           </CollapsibleSection>
