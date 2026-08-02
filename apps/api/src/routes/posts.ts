@@ -9,19 +9,20 @@ import { linkPostMedia, parseMediaUrls, serializeMediaUrls, validateOwnedPostMed
 import { notifyMentions } from '../lib/mentions';
 import { syncPostHashtags } from '../lib/hashtags';
 import { parseFirstUrl, getOrFetchLinkPreview } from '../lib/linkPreview';
-import { createPollWithOptions, loadPollsForPosts, castVote, retractVote, closePoll, getPollByPostId } from '../lib/polls';
+import { createPollWithOptions, castVote, retractVote, closePoll } from '../lib/polls';
 import { getFollowingFeedUserIds } from '../lib/follows';
 import { getHiddenAuthorIds, shouldDeliverNotification } from '../lib/blocks';
 import { buildVisibilitySqlConditions, assertCanViewPost } from '../lib/postVisibility';
 import { getOrCreateUserSettings, isNotificationEnabled } from '../lib/user-settings';
 import { pinPost, unpinPost } from '../lib/post-pins';
 import { getSystemSettings } from '../lib/system-settings';
-import { validateThreadReply, countThreadReplies, assertCanViewThread, getThreadPostRows } from '../lib/post-threads';
+import { validateThreadReply, assertCanViewThread, getThreadPostRows } from '../lib/post-threads';
 import { processUserActionSafe } from '../lib/gamification/hub';
-import { isGamificationEnabled, getGamificationVisibility } from '../lib/gamification/settings';
+import { getGamificationVisibility, isGamificationEnabled } from '../lib/gamification/settings';
 import { toGamificationBlock } from '../lib/gamification/public';
 import { getEquippedBadgesForUser, loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
 import { sendWebPushForNotification } from '../lib/push';
+import { buildPostsResponseBatch, type PostHydrationRow } from '../lib/postBatchHydrator';
 
 const posts = new Hono<{ Bindings: Env }>();
 
@@ -42,136 +43,11 @@ async function broadcastEvent(env: Env, message: object) {
 
 export async function buildPostResponse(
   db: ReturnType<typeof drizzle<typeof schema>>,
-  post: {
-    id: number;
-    userId: number;
-    type?: string | null;
-    content: string;
-    mediaUrls: string | null;
-    visibility?: string | null;
-    createdAt: string;
-    pinnedAt?: string | null;
-    threadRootId?: number | null;
-    parentPostId?: number | null;
-    linkPreviewId?: number | null;
-    username: string;
-    authorAvatarUrl?: string | null;
-    authorRole?: string;
-  },
+  post: PostHydrationRow,
   currentUserId: number | null,
   pollMap?: Map<number, import('@hin/types').Poll>,
 ): Promise<Post> {
-  const likesRes = await db
-    .select({ value: count() })
-    .from(schema.likes)
-    .where(and(eq(schema.likes.postId, post.id), isNull(schema.likes.deletedAt)))
-    .get();
-  const likesCount = likesRes?.value || 0;
-
-  const commentsRes = await db
-    .select({ value: count() })
-    .from(schema.comments)
-    .where(and(eq(schema.comments.postId, post.id), sql`${schema.comments.deletedAt} IS NULL`))
-    .get();
-  const commentsCount = commentsRes?.value || 0;
-
-  let hasLiked = false;
-  if (currentUserId) {
-    const likeRecord = await db
-      .select()
-      .from(schema.likes)
-      .where(and(
-        eq(schema.likes.postId, post.id),
-        eq(schema.likes.userId, currentUserId),
-        isNull(schema.likes.deletedAt),
-      ))
-      .get();
-    hasLiked = !!likeRecord;
-  }
-
-  const bookmarksRes = await db
-    .select({ value: count() })
-    .from(schema.postBookmarks)
-    .where(and(eq(schema.postBookmarks.postId, post.id), isNull(schema.postBookmarks.deletedAt)))
-    .get();
-  const bookmarksCount = bookmarksRes?.value || 0;
-
-  const sharesRes = await db
-    .select({ value: count() })
-    .from(schema.postShares)
-    .where(eq(schema.postShares.postId, post.id))
-    .get();
-  const sharesCount = sharesRes?.value || 0;
-
-  let hasBookmarked = false;
-  if (currentUserId) {
-    const bookmarkRecord = await db
-      .select()
-      .from(schema.postBookmarks)
-      .where(and(
-        eq(schema.postBookmarks.postId, post.id),
-        eq(schema.postBookmarks.userId, currentUserId),
-        isNull(schema.postBookmarks.deletedAt),
-      ))
-      .get();
-    hasBookmarked = !!bookmarkRecord;
-  }
-
-  const postType = (post.type ?? 'text') as Post['type'];
-  const effectiveRootId = post.threadRootId ?? post.id;
-  const threadReplyCount = await countThreadReplies(db, effectiveRootId);
-
-  let linkPreview: Post['linkPreview'] = null;
-  if (post.linkPreviewId) {
-    const preview = await db
-      .select()
-      .from(schema.linkPreviews)
-      .where(eq(schema.linkPreviews.id, post.linkPreviewId))
-      .get();
-    if (preview && !preview.fetchFailed) {
-      linkPreview = {
-        url: preview.url,
-        title: preview.title,
-        description: preview.description,
-        imageUrl: preview.imageUrl,
-        siteName: preview.siteName,
-      };
-    }
-  }
-
-  const equippedBadges = (await isGamificationEnabled(db))
-    ? await getEquippedBadgesForUser(db, post.userId)
-    : [];
-
-  const response: Post = {
-    id: post.id,
-    userId: post.userId,
-    username: post.username,
-    authorAvatarUrl: post.authorAvatarUrl,
-    authorRole: post.authorRole,
-    authorEquippedBadges: equippedBadges,
-    type: postType,
-    content: post.content,
-    mediaUrls: parseMediaUrls(post.mediaUrls),
-    createdAt: post.createdAt,
-    likesCount,
-    commentsCount,
-    hasLiked,
-    hasBookmarked,
-    bookmarksCount,
-    sharesCount,
-    visibility: (post.visibility ?? 'public') as PostVisibility,
-    pinnedAt: post.pinnedAt ?? null,
-    threadRootId: post.threadRootId ?? null,
-    parentPostId: post.parentPostId ?? null,
-    threadReplyCount,
-    linkPreview,
-  };
-
-  if (postType === 'poll') {
-    response.poll = pollMap?.get(post.id) ?? await getPollByPostId(db, post.id, post.userId, currentUserId) ?? undefined;
-  }
-
+  const [response] = await buildPostsResponseBatch(db, [post], currentUserId, pollMap);
   return response;
 }
 
@@ -306,12 +182,10 @@ posts.get('/', async (c) => {
   const pageRows = hasMore ? rows.slice(0, limit) : rows;
   const nextCursor = hasMore ? pageRows[pageRows.length - 1].id : null;
 
-  const pollPostIds = pageRows.filter(p => p.type === 'poll').map(p => p.id);
-  const postAuthorMap = new Map(pageRows.map(p => [p.id, p.userId]));
-  const pollMap = await loadPollsForPosts(db, pollPostIds, postAuthorMap, currentUserId);
-
-  const postsWithMetadata: Post[] = await Promise.all(
-    pageRows.map(post => buildPostResponse(db, post, currentUserId, pollMap)),
+  const postsWithMetadata: Post[] = await buildPostsResponseBatch(
+    db,
+    pageRows,
+    currentUserId,
   );
 
   const page: PostsPage = { posts: postsWithMetadata, nextCursor };
@@ -377,14 +251,10 @@ posts.get('/bookmarks', async (c) => {
   const pageRows = hasMore ? rows.slice(0, limit) : rows;
   const nextCursor = hasMore ? pageRows[pageRows.length - 1].bookmarkCreatedAt : null;
 
-  const pollPostIds = pageRows.filter(p => p.type === 'poll').map(p => p.id);
-  const postAuthorMap = new Map(pageRows.map(p => [p.id, p.userId]));
-  const pollMap = await loadPollsForPosts(db, pollPostIds, postAuthorMap, authUser.id);
-
-  const postsWithMetadata: Post[] = await Promise.all(
-    pageRows.map(({ bookmarkCreatedAt: _bc, ...post }) =>
-      buildPostResponse(db, post, authUser.id, pollMap),
-    ),
+  const postsWithMetadata: Post[] = await buildPostsResponseBatch(
+    db,
+    pageRows.map(({ bookmarkCreatedAt: _bc, ...post }) => post),
+    authUser.id,
   );
 
   return c.json({ posts: postsWithMetadata, nextCursor } satisfies PostsPage);
@@ -1034,13 +904,7 @@ posts.get('/:id/thread', async (c) => {
   const rows = await getThreadPostRows(db, access.rootId);
   if (rows.length === 0) return c.json({ error: 'Post not found' }, 404);
 
-  const pollPostIds = rows.filter(p => p.type === 'poll').map(p => p.id);
-  const postAuthorMap = new Map(rows.map(p => [p.id, p.userId]));
-  const pollMap = await loadPollsForPosts(db, pollPostIds, postAuthorMap, currentUserId);
-
-  const postsWithMetadata = await Promise.all(
-    rows.map(row => buildPostResponse(db, row, currentUserId, pollMap)),
-  );
+  const postsWithMetadata = await buildPostsResponseBatch(db, rows, currentUserId);
 
   const page: PostThreadPage = {
     root: postsWithMetadata[0],

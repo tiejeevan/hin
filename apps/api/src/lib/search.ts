@@ -5,10 +5,9 @@ import { User, Post, TrendingHashtag, FollowStatus } from '@hin/types';
 import { USER_PUBLIC_FIELDS, toPublicUser } from './users';
 import { getHiddenAuthorIds } from './blocks';
 import { buildVisibilitySqlConditions } from './postVisibility';
-import { loadPollsForPosts } from './polls';
 import { loadEquippedBadgesForUsers } from './gamification/equipped';
 import { isGamificationEnabled } from './gamification/settings';
-import { buildPostResponse } from '../routes/posts';
+import { buildPostsResponseBatch } from './postBatchHydrator';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -223,14 +222,7 @@ export async function searchPosts(
 
   if (rows.length === 0) return [];
 
-  // Load polls
-  const pollPostIds = rows.filter(r => r.type === 'poll').map(r => r.id);
-  const postAuthorMap = new Map(rows.map(r => [r.id, r.userId]));
-  const pollMap = await loadPollsForPosts(db, pollPostIds, postAuthorMap, viewerId);
-
-  return Promise.all(
-    rows.map(post => buildPostResponse(db, post, viewerId, pollMap)),
-  );
+  return buildPostsResponseBatch(db, rows, viewerId);
 }
 
 /**
@@ -333,12 +325,5 @@ export async function searchMentions(
 
   if (rows.length === 0) return [];
 
-  // Load polls
-  const pollPostIds = rows.filter(r => r.type === 'poll').map(r => r.id);
-  const postAuthorMap = new Map(rows.map(r => [r.id, r.userId]));
-  const pollMap = await loadPollsForPosts(db, pollPostIds, postAuthorMap, viewerId);
-
-  return Promise.all(
-    rows.map(post => buildPostResponse(db, post, viewerId, pollMap)),
-  );
+  return buildPostsResponseBatch(db, rows, viewerId);
 }

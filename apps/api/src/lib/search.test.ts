@@ -55,8 +55,8 @@ vi.mock('./gamification/settings', () => ({
   isGamificationEnabled: vi.fn().mockResolvedValue(false),
 }));
 
-vi.mock('../routes/posts', () => ({
-  buildPostResponse: vi.fn((db, post) => post),
+vi.mock('./postBatchHydrator', () => ({
+  buildPostsResponseBatch: vi.fn((_db, posts) => Promise.resolve(posts)),
 }));
 
 describe('Search Service Layer', () => {

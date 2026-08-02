@@ -18,7 +18,8 @@ export async function openCreatePostForm(page: Page) {
 }
 
 export async function enablePollOnCreateForm(page: Page) {
-  await page.getByRole('button', { name: 'Post options' }).click();
+  const form = page.locator('form').filter({ has: page.getByPlaceholder('What is on your mind?') });
+  await form.getByRole('button', { name: 'Post options' }).click();
   await page.getByRole('menuitem', { name: 'Add Poll' }).click();
   await expect(page.getByText('Poll', { exact: true })).toBeVisible();
 }
