@@ -4,6 +4,7 @@ export interface Toast {
   id: string;
   content: string;
   type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted' | 'badge_award' | 'level_up';
+  duration: number;
   postId?: number;
   commentId?: number;
   olabidItemId?: number;

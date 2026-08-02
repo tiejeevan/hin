@@ -295,6 +295,9 @@ export interface Comment {
   g?: GamificationActionBlock;
 }
 
+/** Server derives sent|delivered|read from DB timestamps; client may use sending|failed. */
+export type DeliveryStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+
 export interface Message {
   id: number;
   senderId: number;
@@ -304,6 +307,12 @@ export interface Message {
   content: string;
   createdAt: string;
   read: boolean;
+  /** Derived delivery lifecycle for UI checkmarks. */
+  status: DeliveryStatus;
+  deliveredAt?: string | null;
+  readAt?: string | null;
+  /** Client-generated id echoed on WS ack; not persisted in D1. */
+  clientMessageId?: string | null;
   deletedAt?: string | null;
   linkPreview?: LinkPreview | null;
   mediaUrl?: string | null;
@@ -345,11 +354,15 @@ export interface ChatThread {
   role: string;
   avatarUrl?: string | null;
   equippedBadges?: EquippedBadgePublic[];
+  /** Partner's last WebSocket disconnect time (presence). */
+  lastSeenAt?: string | null;
   lastMessage: {
+    id: number;
     content: string;
     senderId: number;
     createdAt: string;
     read: boolean;
+    status?: DeliveryStatus;
   } | null;
   unreadCount: number;
 }
@@ -616,9 +629,11 @@ export type ClientMessage =
         suppressLinkPreview?: boolean;
         mediaUrl?: string;
         mediaType?: string;
+        clientMessageId?: string;
       };
     }
-  | { type: 'typing'; payload: { receiverId: number; isTyping: boolean } };
+  | { type: 'typing'; payload: { receiverId: number; isTyping: boolean } }
+  | { type: 'ack_delivered'; payload: { messageIds: number[] } };
 
 export type ServerMessage =
   | { type: 'joined'; payload: { userId: number } }
@@ -640,10 +655,11 @@ export type ServerMessage =
   | { type: 'poll_vote_update'; payload: { postId: number; poll: Poll } }
   | { type: 'poll_closed'; payload: { postId: number; poll: Poll } }
   | { type: 'typing'; payload: { senderId: number; isTyping: boolean } }
-  | { type: 'messages_read'; payload: { senderId: number; receiverId: number } }
+  | { type: 'messages_read'; payload: { senderId: number; receiverId: number; readAt: string } }
+  | { type: 'message_delivered'; payload: { messageIds: number[]; deliveredAt: string } }
   | { type: 'presence_snapshot'; payload: { onlineUserIds: number[] } }
   | { type: 'user_online'; payload: { userId: number } }
-  | { type: 'user_offline'; payload: { userId: number } }
+  | { type: 'user_offline'; payload: { userId: number; lastSeenAt?: string } }
   | { type: 'system_toast'; payload: { content: string } }
   | { type: 'system_settings_changed'; payload: { settings: SystemSettings } };
 

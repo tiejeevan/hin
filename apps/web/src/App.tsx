@@ -44,6 +44,11 @@ import {
   pruneDraftEntry,
   type DraftEntry,
 } from './lib/chatStorage';
+import {
+  applyDelivered,
+  applyMessagesRead,
+  mergeAndSortMessages,
+} from './lib/chatMessages';
 import { AppShell } from './components/layout/AppShell';
 import { AppHeader } from './components/layout/AppHeader';
 import { GuestHeader } from './components/layout/GuestHeader';
@@ -208,9 +213,12 @@ export default function App() {
   const [sendingChatMedia, setSendingChatMedia] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const chatDraftsRef = useRef(chatDrafts);
+  const chatMessagesRef = useRef<Message[]>([]);
+  const connectWSRef = useRef<(() => void) | null>(null);
 
   const [threads, setThreads] = useState<import('@hin/types').ChatThread[]>([]);
   const [typingUsers, setTypingUsers] = useState<Record<number, boolean>>({});
+  const [lastSeenByUserId, setLastSeenByUserId] = useState<Record<number, string>>({});
   const typingTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const typingClearTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const lastTypingSentRef = useRef<Record<number, number>>({});
@@ -283,6 +291,8 @@ export default function App() {
   const showMessagesDropdownRef = useRef(showMessagesDropdown);
   const chatRecipientRef = useRef(chatRecipient);
   const handleSessionExpiredRef = useRef<() => void>(() => {});
+  /** Prevents duplicate toasts when multiple in-flight requests (or StrictMode double-fetch) return 401. */
+  const sessionExpiredHandledRef = useRef(false);
 
   useEffect(() => {
     showMessagesDropdownRef.current = showMessagesDropdown;
@@ -295,6 +305,10 @@ export default function App() {
   useEffect(() => {
     chatDraftsRef.current = chatDrafts;
   }, [chatDrafts]);
+
+  useEffect(() => {
+    chatMessagesRef.current = chatMessages;
+  }, [chatMessages]);
 
   // Keep per-conversation draft map in sync with the active composer.
   useEffect(() => {
@@ -423,9 +437,8 @@ export default function App() {
       return;
     }
     const id = Math.random().toString(36).substring(2, 9);
-    setToasts(prev => [...prev, { id, content, type, ...target }]);
     const duration = type === 'system' ? 7000 : 4000;
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), duration);
+    setToasts(prev => [...prev, { id, content, type, duration, ...target }]);
   };
 
   const goHome = (opts?: { skipUrlSync?: boolean }) => {
@@ -1217,11 +1230,41 @@ export default function App() {
     }
   };
 
-  const fetchMessages = async (otherUserId: number) => {
+  const fetchMessages = async (
+    otherUserId: number,
+    opts?: { sinceId?: number; markRead?: boolean; merge?: boolean },
+  ) => {
     if (!currentUser || !token) return;
     try {
-      const res = await fetch(`${API_URL}/api/messages/${otherUserId}`, { headers: getHeaders() });
-      if (res.ok) setChatMessages(await res.json());
+      const params = new URLSearchParams();
+      if (opts?.sinceId && opts.sinceId > 0) params.set('sinceId', String(opts.sinceId));
+      if (opts?.markRead === false) params.set('markRead', '0');
+      const qs = params.toString();
+      const res = await fetch(
+        `${API_URL}/api/messages/${otherUserId}${qs ? `?${qs}` : ''}`,
+        { headers: getHeaders() },
+      );
+      if (!res.ok) return;
+      const data: Message[] = await res.json();
+      // Always preserve in-flight optimistic / failed bubbles across full and delta fetches.
+      setChatMessages(prev => {
+        const pending = prev.filter(
+          m => m.id < 0 || m.status === 'sending' || m.status === 'failed',
+        );
+        return mergeAndSortMessages(data, pending);
+      });
+
+      // Ack delivery for incoming undelivered messages (extra safety beyond REST deliver-on-fetch).
+      const undeliveredIds = data
+        .filter(m => m.receiverId === currentUser.id && m.status === 'sent' && !m.deliveredAt)
+        .map(m => m.id);
+      if (
+        undeliveredIds.length > 0 &&
+        ws.current?.readyState === WebSocket.OPEN &&
+        wsReadyRef.current
+      ) {
+        ws.current.send(JSON.stringify({ type: 'ack_delivered', payload: { messageIds: undeliveredIds } }));
+      }
     } catch (e) {
       console.error('Error fetching messages:', e);
     }
@@ -1235,6 +1278,13 @@ export default function App() {
         const data: import('@hin/types').ChatThread[] = await res.json();
         setThreads(data);
         setUnreadMessagesCount(data.reduce((sum, t) => sum + t.unreadCount, 0));
+        setLastSeenByUserId(prev => {
+          const next = { ...prev };
+          for (const t of data) {
+            if (t.lastSeenAt) next[t.id] = t.lastSeenAt;
+          }
+          return next;
+        });
       }
     } catch (e) {
       console.error('Error fetching threads:', e);
@@ -1376,16 +1426,42 @@ export default function App() {
     }
 
     const appendChatMessage = (msg: Message) => {
-      setChatMessages(prev => {
-        if (prev.some(m => m.id === msg.id)) return prev;
-        const withoutOptimistic = prev.filter(
-          m => !(m.id < 0 && m.content === msg.content && m.senderId === msg.senderId)
-        );
-        return [...withoutOptimistic, msg];
-      });
+      setChatMessages(prev => mergeAndSortMessages(prev, [msg]));
+    };
+
+    const markSendingFailed = () => {
+      setChatMessages(prev =>
+        prev.map(m => (m.status === 'sending' ? { ...m, status: 'failed' as const } : m)),
+      );
+    };
+
+    const syncAfterReconnect = () => {
+      void fetchThreads();
+      const recipient = chatRecipientRef.current;
+      if (!recipient || !showMessagesDropdownRef.current) return;
+      const maxId = chatMessagesRef.current.reduce(
+        (max, m) => (m.id > max ? m.id : max),
+        0,
+      );
+      if (maxId > 0) {
+        void fetchMessages(recipient.id, { sinceId: maxId, markRead: false, merge: true });
+      } else {
+        void fetchMessages(recipient.id);
+      }
     };
 
     const connectWS = () => {
+      if (ws.current) {
+        const prev = ws.current;
+        prev.onclose = null;
+        prev.onmessage = null;
+        prev.onopen = null;
+        if (prev.readyState === WebSocket.OPEN || prev.readyState === WebSocket.CONNECTING) {
+          try {
+            prev.close();
+          } catch (_) {}
+        }
+      }
       wsReadyRef.current = false;
       const socket = new WebSocket(WS_URL);
       ws.current = socket;
@@ -1401,6 +1477,7 @@ export default function App() {
             case 'joined':
               wsReadyRef.current = true;
               sendActiveChat();
+              syncAfterReconnect();
               break;
             case 'presence_snapshot': {
               if (!presenceEnabledRef.current) break;
@@ -1423,6 +1500,11 @@ export default function App() {
                 next.delete(message.payload.userId);
                 return next;
               });
+              if (typeof message.payload.lastSeenAt === 'string') {
+                const uid = message.payload.userId as number;
+                const lastSeenAt = message.payload.lastSeenAt as string;
+                setLastSeenByUserId(prev => ({ ...prev, [uid]: lastSeenAt }));
+              }
               break;
             case 'message': {
               const msg: Message = message.payload;
@@ -1461,32 +1543,80 @@ export default function App() {
                           ...t,
                           unreadCount: t.unreadCount + 1,
                           lastMessage: {
-                            content: msg.content,
+                            id: msg.id,
+                            content: msg.content.trim() ? msg.content : msg.mediaUrl ? 'Photo' : '',
                             createdAt: msg.createdAt,
                             senderId: msg.senderId,
                             read: false,
+                            status: msg.status,
                           },
                         }
-                      : t
+                      : t,
+                  );
+                });
+              } else {
+                setThreads(prev => {
+                  const idx = prev.findIndex(t => t.id === partnerId);
+                  if (idx === -1) return prev;
+                  return prev.map(t =>
+                    t.id === partnerId
+                      ? {
+                          ...t,
+                          lastMessage: {
+                            id: msg.id,
+                            content: msg.content.trim() ? msg.content : msg.mediaUrl ? 'Photo' : '',
+                            createdAt: msg.createdAt,
+                            senderId: msg.senderId,
+                            read: msg.read,
+                            status: msg.status,
+                          },
+                        }
+                      : t,
                   );
                 });
               }
 
               break;
             }
+            case 'message_delivered': {
+              const { messageIds, deliveredAt } = message.payload as {
+                messageIds: number[];
+                deliveredAt: string;
+              };
+              const idSet = new Set(messageIds);
+              setChatMessages(prev => applyDelivered(prev, messageIds, deliveredAt));
+              setThreads(prev =>
+                prev.map(t => {
+                  if (!t.lastMessage?.id || !idSet.has(t.lastMessage.id)) return t;
+                  if (t.lastMessage.status === 'read' || t.lastMessage.read) return t;
+                  return {
+                    ...t,
+                    lastMessage: { ...t.lastMessage, status: 'delivered' as const },
+                  };
+                }),
+              );
+              break;
+            }
             case 'messages_read': {
-              const { senderId, receiverId } = message.payload;
-              // Sent to the message sender; receiverId is the chat partner who read them
-              if (currentUser!.id === senderId && chatRecipientRef.current?.id === receiverId) {
+              const { senderId, receiverId, readAt } = message.payload as {
+                senderId: number;
+                receiverId: number;
+                readAt?: string;
+              };
+              const readAtIso = readAt || new Date().toISOString();
+              if (currentUser!.id === senderId) {
                 setChatMessages(prev =>
-                  prev.map(m => (m.senderId === currentUser!.id ? { ...m, read: true } : m))
+                  applyMessagesRead(prev, { senderId, receiverId, readAt: readAtIso }),
                 );
               }
               setThreads(prev =>
                 prev.map(t => {
                   if (t.id !== receiverId || !t.lastMessage || t.lastMessage.senderId !== senderId) return t;
-                  return { ...t, lastMessage: { ...t.lastMessage, read: true } };
-                })
+                  return {
+                    ...t,
+                    lastMessage: { ...t.lastMessage, read: true, status: 'read' as const },
+                  };
+                }),
               );
               break;
             }
@@ -1828,15 +1958,27 @@ export default function App() {
 
       socket.onclose = () => {
         wsReadyRef.current = false;
+        markSendingFailed();
         setTimeout(() => {
           if (currentUser && token) connectWS();
         }, 3000);
       };
     };
 
+    connectWSRef.current = connectWS;
     connectWS();
+
+    const onOnline = () => {
+      const state = ws.current?.readyState;
+      if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) return;
+      connectWS();
+    };
+    window.addEventListener('online', onOnline);
+
     return () => {
       wsReadyRef.current = false;
+      connectWSRef.current = null;
+      window.removeEventListener('online', onOnline);
       if (ws.current) {
         ws.current.onclose = null;
         ws.current.close();
@@ -1844,11 +1986,10 @@ export default function App() {
     };
   }, [currentUser, token]);
 
-  useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
+  // Auto-scroll is owned by MessagesPanel (smart near-bottom + new-messages pill).
 
   const completeAuthSuccess = useCallback((data: { token: string; user: UserType }) => {
+    sessionExpiredHandledRef.current = false;
     setToken(data.token);
     setCurrentUser(data.user);
     localStorage.setItem('hin_token', data.token);
@@ -1993,14 +2134,16 @@ export default function App() {
   };
 
   /** Stale/invalid JWT — clear local session and prompt sign-in. */
-  const handleSessionExpired = () => {
+  const handleSessionExpired = (opts?: { force?: boolean }) => {
+    if (!opts?.force && sessionExpiredHandledRef.current) return;
+    sessionExpiredHandledRef.current = true;
     addToast('Your session expired. Please sign in again.', 'system', undefined, { skipPrefCheck: true });
     handleLogout();
     handleGuestSignIn();
   };
 
   useEffect(() => {
-    handleSessionExpiredRef.current = handleSessionExpired;
+    handleSessionExpiredRef.current = () => handleSessionExpired();
   });
 
   const applyPollUpdate = (postId: number, poll: Poll) => {
@@ -2742,22 +2885,25 @@ export default function App() {
       return;
     }
 
-    setChatMessages(prev => [
-      ...prev,
-      {
-        id: -Date.now(),
-        senderId: currentUser.id,
-        senderUsername: currentUser.username,
-        receiverId: chatRecipient.id,
-        receiverUsername: chatRecipient.username,
-        content,
-        createdAt: new Date().toISOString(),
-        read: false,
-        linkPreview: optimisticPreview,
-        mediaUrl: optimisticMediaUrl,
-        mediaType: mediaType ?? null,
-      },
-    ]);
+    const clientMessageId = crypto.randomUUID();
+    const optimisticMsg: Message = {
+      id: -Date.now(),
+      senderId: currentUser.id,
+      senderUsername: currentUser.username,
+      receiverId: chatRecipient.id,
+      receiverUsername: chatRecipient.username,
+      content,
+      createdAt: new Date().toISOString(),
+      read: false,
+      status: 'sending',
+      clientMessageId,
+      linkPreview: optimisticPreview,
+      mediaUrl: optimisticMediaUrl,
+      mediaType: mediaType ?? null,
+    };
+
+    setChatMessages(prev => mergeAndSortMessages(prev, [optimisticMsg]));
+
     ws.current.send(
       JSON.stringify({
         type: 'send_message',
@@ -2767,6 +2913,7 @@ export default function App() {
           suppressLinkPreview: suppressLinkPreview || undefined,
           mediaUrl,
           mediaType,
+          clientMessageId,
         },
       })
     );
@@ -2785,6 +2932,43 @@ export default function App() {
     });
     setNewMsgText('');
     setDraftLinkPreview(null);
+  };
+
+  const handleRetryFailedMessage = (failed: Message) => {
+    if (!currentUser || !chatRecipient) return;
+    if (!(ws.current?.readyState === WebSocket.OPEN && wsReadyRef.current)) {
+      alert('Real-time connection is not ready yet. Please wait a moment and try again.');
+      return;
+    }
+    // Keep the same clientMessageId so the server returns the original row if it already committed.
+    const clientMessageId = failed.clientMessageId || crypto.randomUUID();
+    const retryMsg: Message = {
+      ...failed,
+      id: failed.id < 0 ? failed.id : -Date.now(),
+      status: 'sending',
+      clientMessageId,
+      createdAt: failed.createdAt,
+    };
+    setChatMessages(prev =>
+      mergeAndSortMessages(
+        prev.filter(m => !(m.id === failed.id || (failed.clientMessageId && m.clientMessageId === failed.clientMessageId))),
+        [retryMsg],
+      ),
+    );
+
+    ws.current.send(
+      JSON.stringify({
+        type: 'send_message',
+        payload: {
+          receiverId: chatRecipient.id,
+          content: failed.content,
+          mediaUrl: failed.mediaUrl || undefined,
+          mediaType: failed.mediaType || undefined,
+          clientMessageId,
+          suppressLinkPreview: !failed.linkPreview,
+        },
+      }),
+    );
   };
 
   const handleMarkNotifRead = async (notifId: number) => {
@@ -3751,6 +3935,7 @@ export default function App() {
             threadReplyContent={threadReplyContent}
             onThreadReplyContentChange={setThreadReplyContent}
             onDeleteAccount={handleDeleteAccount}
+            onSimulateSessionExpired={() => handleSessionExpired({ force: true })}
             postLimits={postLimits}
             profileGamification={profileGamification}
             showGamification={shouldShowGamification(profileGamification)}
@@ -3940,12 +4125,14 @@ export default function App() {
             sendingMedia={sendingChatMedia}
             typingUsers={typingUsers}
             onlineUserIds={onlineUserIds}
+            lastSeenByUserId={lastSeenByUserId}
             chatBottomRef={chatBottomRef}
             onClose={closeMessagesPanel}
             onSelectThread={openChatInPanel}
             onBackToList={backToMessagesList}
             onNewMsgTextChange={setNewMsgText}
             onSendDM={handleSendDM}
+            onRetryFailedMessage={handleRetryFailedMessage}
             onTyping={handleUserTyping}
             onOpenProfile={openProfile}
             onOpenOlabidItem={olabidEnabled ? openOlabidItem : undefined}
@@ -3957,7 +4144,11 @@ export default function App() {
           />
         )}
 
-        <ToastContainer toasts={toasts} onToastClick={handleToastClick} />
+        <ToastContainer
+          toasts={toasts}
+          onToastClick={handleToastClick}
+          onDismiss={id => setToasts(prev => prev.filter(t => t.id !== id))}
+        />
 
         {profileUserId && followersModal && token && (
           <FollowersModal

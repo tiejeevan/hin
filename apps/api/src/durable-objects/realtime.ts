@@ -1,5 +1,5 @@
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray, sql, isNull } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import { Message, Notification } from '@hin/types';
 import { verify } from 'hono/jwt';
@@ -8,6 +8,7 @@ import { getJwtSecret } from '../lib/auth';
 import { isBlocked } from '../lib/blocks';
 import { parseFirstUrl, getOrFetchLinkPreview } from '../lib/linkPreview';
 import { isPresenceEnabled } from '../lib/system-settings';
+import { markMessagesReadSet, toMessageDto } from '../lib/messages';
 
 export interface RealtimeSession {
   userId: number;
@@ -173,14 +174,37 @@ export class RealtimeDO implements DurableObject {
       if (request.method !== 'POST') {
         return new Response('Method Not Allowed', { status: 405 });
       }
-      const { senderId, receiverId } = await request.json() as {
+      const { senderId, receiverId, readAt } = await request.json() as {
         senderId: number;
         receiverId: number;
+        readAt?: string;
       };
       this.broadcastToUser(senderId, {
         type: 'messages_read',
-        payload: { senderId, receiverId },
+        payload: {
+          senderId,
+          receiverId,
+          readAt: readAt || new Date().toISOString(),
+        },
       });
+      return new Response('OK');
+    }
+
+    if (url.pathname === '/broadcast-message-delivered') {
+      if (request.method !== 'POST') {
+        return new Response('Method Not Allowed', { status: 405 });
+      }
+      const { recipientId, messageIds, deliveredAt } = await request.json() as {
+        recipientId: number;
+        messageIds: number[];
+        deliveredAt: string;
+      };
+      if (recipientId && Array.isArray(messageIds) && messageIds.length > 0) {
+        this.broadcastToUser(recipientId, {
+          type: 'message_delivered',
+          payload: { messageIds, deliveredAt },
+        });
+      }
       return new Response('OK');
     }
 
@@ -294,20 +318,22 @@ export class RealtimeDO implements DurableObject {
       this.setSession(ws, { ...session, activeChatId });
 
       if (activeChatId) {
+        const readAt = new Date().toISOString();
         await db.update(schema.messages)
-          .set({ read: 1 })
+          .set(markMessagesReadSet(readAt))
           .where(
             and(
               eq(schema.messages.senderId, activeChatId),
               eq(schema.messages.receiverId, session.userId),
-              eq(schema.messages.read, 0)
+              eq(schema.messages.read, 0),
+              sql`${schema.messages.deletedAt} IS NULL`,
             )
           )
           .run();
 
         this.broadcastToUser(activeChatId, {
           type: 'messages_read',
-          payload: { senderId: activeChatId, receiverId: session.userId },
+          payload: { senderId: activeChatId, receiverId: session.userId, readAt },
         });
       }
     }
@@ -322,12 +348,14 @@ export class RealtimeDO implements DurableObject {
         suppressLinkPreview,
         mediaUrl: rawMediaUrl,
         mediaType: rawMediaType,
+        clientMessageId: rawClientMessageId,
       } = message.payload as {
         receiverId: number;
         content?: string;
         suppressLinkPreview?: boolean;
         mediaUrl?: string;
         mediaType?: string;
+        clientMessageId?: string;
       };
 
       const content = typeof rawContent === 'string' ? rawContent.trim() : '';
@@ -335,6 +363,10 @@ export class RealtimeDO implements DurableObject {
       const allowedMediaTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
       const mediaType =
         typeof rawMediaType === 'string' && allowedMediaTypes.has(rawMediaType) ? rawMediaType : null;
+      const clientMessageId =
+        typeof rawClientMessageId === 'string' && rawClientMessageId.trim()
+          ? rawClientMessageId.trim().slice(0, 64)
+          : null;
 
       if (!content && !mediaUrl) {
         this.sendSafely(ws, { type: 'error', payload: { message: 'Message cannot be empty' } });
@@ -370,6 +402,54 @@ export class RealtimeDO implements DurableObject {
         return;
       }
 
+      // Idempotent retry: return existing row for the same clientMessageId.
+      if (clientMessageId) {
+        const existing = await db
+          .select()
+          .from(schema.messages)
+          .where(
+            and(
+              eq(schema.messages.senderId, session.userId),
+              eq(schema.messages.clientMessageId, clientMessageId),
+              sql`${schema.messages.deletedAt} IS NULL`,
+            ),
+          )
+          .get();
+
+        if (existing) {
+          const receiverUser = await db.select().from(schema.users).where(eq(schema.users.id, existing.receiverId)).get();
+          const linkPreviewRow = existing.linkPreviewId
+            ? await db.select().from(schema.linkPreviews).where(eq(schema.linkPreviews.id, existing.linkPreviewId)).get()
+            : null;
+          const messagePayload: Message = toMessageDto({
+            id: existing.id,
+            senderId: session.userId,
+            senderUsername: session.username,
+            receiverId: existing.receiverId,
+            receiverUsername: receiverUser?.username || 'Unknown',
+            content: existing.content,
+            createdAt: existing.createdAt,
+            read: existing.read,
+            deliveredAt: existing.deliveredAt,
+            readAt: existing.readAt,
+            linkPreview: linkPreviewRow
+              ? {
+                  url: linkPreviewRow.url,
+                  title: linkPreviewRow.title,
+                  description: linkPreviewRow.description,
+                  imageUrl: linkPreviewRow.imageUrl,
+                  siteName: linkPreviewRow.siteName,
+                }
+              : null,
+            mediaUrl: existing.mediaUrl,
+            mediaType: existing.mediaType,
+            clientMessageId: existing.clientMessageId ?? clientMessageId,
+          });
+          this.sendSafely(ws, { type: 'message', payload: messagePayload });
+          return;
+        }
+      }
+
       let receiverIsViewingChat = false;
       for (const targetWs of this.getAuthenticatedSockets()) {
         const targetSession = this.getSession(targetWs);
@@ -377,6 +457,19 @@ export class RealtimeDO implements DurableObject {
           receiverIsViewingChat = true;
           break;
         }
+      }
+
+      const receiverOnline = this.isUserOnline(receiverId);
+      const nowIso = new Date().toISOString();
+      let deliveredAt: string | null = null;
+      let readAt: string | null = null;
+      let readFlag = 0;
+      if (receiverIsViewingChat) {
+        readFlag = 1;
+        deliveredAt = nowIso;
+        readAt = nowIso;
+      } else if (receiverOnline) {
+        deliveredAt = nowIso;
       }
 
       const firstUrl = !suppressLinkPreview && content ? parseFirstUrl(content) : null;
@@ -388,10 +481,13 @@ export class RealtimeDO implements DurableObject {
         senderId: session.userId,
         receiverId,
         content: content || '',
-        read: receiverIsViewingChat ? 1 : 0,
+        read: readFlag,
+        deliveredAt,
+        readAt,
         linkPreviewId,
         mediaUrl,
         mediaType: resolvedMediaType,
+        clientMessageId,
       }).returning();
 
       const receiverUser = await db.select().from(schema.users).where(eq(schema.users.id, receiverId)).get();
@@ -399,7 +495,7 @@ export class RealtimeDO implements DurableObject {
         ? await db.select().from(schema.linkPreviews).where(eq(schema.linkPreviews.id, linkPreviewId)).get()
         : null;
 
-      const messagePayload: Message = {
+      const messagePayload: Message = toMessageDto({
         id: inserted.id,
         senderId: session.userId,
         senderUsername: session.username,
@@ -407,7 +503,9 @@ export class RealtimeDO implements DurableObject {
         receiverUsername: receiverUser?.username || 'Unknown',
         content: inserted.content,
         createdAt: inserted.createdAt,
-        read: inserted.read === 1,
+        read: inserted.read,
+        deliveredAt: inserted.deliveredAt ?? deliveredAt,
+        readAt: inserted.readAt ?? readAt,
         linkPreview: linkPreviewRow
           ? {
               url: linkPreviewRow.url,
@@ -419,10 +517,61 @@ export class RealtimeDO implements DurableObject {
           : null,
         mediaUrl: inserted.mediaUrl,
         mediaType: inserted.mediaType,
-      };
+        clientMessageId: inserted.clientMessageId ?? clientMessageId,
+      });
 
       this.sendSafely(ws, { type: 'message', payload: messagePayload });
       this.broadcastToUser(receiverId, { type: 'message', payload: messagePayload });
+    }
+
+    else if (message.type === 'ack_delivered') {
+      const session = this.getSession(ws);
+      if (!session) return;
+
+      const rawIds = message.payload?.messageIds;
+      if (!Array.isArray(rawIds) || rawIds.length === 0) return;
+      const messageIds = [...new Set(
+        rawIds.filter((id: unknown): id is number => typeof id === 'number' && Number.isFinite(id) && id > 0),
+      )].slice(0, 200);
+      if (messageIds.length === 0) return;
+
+      const deliveredAt = new Date().toISOString();
+      const undelivered = await db
+        .select({
+          id: schema.messages.id,
+          senderId: schema.messages.senderId,
+        })
+        .from(schema.messages)
+        .where(
+          and(
+            inArray(schema.messages.id, messageIds),
+            eq(schema.messages.receiverId, session.userId),
+            isNull(schema.messages.deliveredAt),
+            sql`${schema.messages.deletedAt} IS NULL`,
+          ),
+        )
+        .all();
+
+      if (undelivered.length === 0) return;
+
+      const ids = undelivered.map(m => m.id);
+      await db.update(schema.messages)
+        .set({ deliveredAt })
+        .where(inArray(schema.messages.id, ids))
+        .run();
+
+      const bySender = new Map<number, number[]>();
+      for (const row of undelivered) {
+        const list = bySender.get(row.senderId) ?? [];
+        list.push(row.id);
+        bySender.set(row.senderId, list);
+      }
+      for (const [senderId, idsForSender] of bySender) {
+        this.broadcastToUser(senderId, {
+          type: 'message_delivered',
+          payload: { messageIds: idsForSender, deliveredAt },
+        });
+      }
     }
 
     else if (message.type === 'typing') {
@@ -446,7 +595,16 @@ export class RealtimeDO implements DurableObject {
     if (!this.isUserOnline(userId, ws)) {
       const db = drizzle(this.env.DB, { schema });
       if (await isPresenceEnabled(db)) {
-        this.broadcastToAll({ type: 'user_offline', payload: { userId } }, ws);
+        const lastSeenAt = new Date().toISOString();
+        try {
+          await db.update(schema.users)
+            .set({ lastSeenAt })
+            .where(eq(schema.users.id, userId))
+            .run();
+        } catch (e) {
+          console.error('Failed to persist lastSeenAt:', e);
+        }
+        this.broadcastToAll({ type: 'user_offline', payload: { userId, lastSeenAt } }, ws);
       }
     }
   }

@@ -167,6 +167,21 @@
   animation: fade-in 0.2s ease-out;
 }
 
+@keyframes message-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-message-fade-in {
+  animation: message-fade-in 0.22s ease-out;
+}
+
 @keyframes slide-up-sheet {
   from { transform: translateY(100%); }
   to { transform: translateY(0); }

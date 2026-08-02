@@ -35,6 +35,8 @@ export const users = sqliteTable('users', {
   nameUpdatedAt: text('name_updated_at'),
   /** When the user finished filling out their profile (onboarding). */
   profileCompletedAt: text('profile_completed_at'),
+  /** ISO-8601 UTC when the user's last WebSocket session closed (presence). */
+  lastSeenAt: text('last_seen_at'),
 }, (table) => ({
   deletedAtIdx: index('users_deleted_at_idx').on(table.deletedAt),
   isPrivateIdx: index('users_is_private_idx').on(table.isPrivate),
@@ -377,11 +379,21 @@ export const messages = sqliteTable('messages', {
   mediaUrl: text('media_url'),
   /** MIME type for mediaUrl, e.g. image/jpeg | image/png | image/webp. */
   mediaType: text('media_type'),
+  /** ISO-8601 when the recipient device acknowledged receipt. */
+  deliveredAt: text('delivered_at'),
+  /** ISO-8601 when the recipient viewed the chat / marked read. */
+  readAt: text('read_at'),
+  /** Client-generated idempotency key; unique per sender when set. */
+  clientMessageId: text('client_message_id'),
 }, (table) => ({
   senderIdIdx: index('messages_sender_id_idx').on(table.senderId),
   receiverIdIdx: index('messages_receiver_id_idx').on(table.receiverId),
   receiverReadIdx: index('messages_receiver_id_read_idx').on(table.receiverId, table.read),
   deletedAtIdx: index('messages_deleted_at_idx').on(table.deletedAt),
+  senderClientMessageIdIdx: uniqueIndex('messages_sender_client_message_id_idx').on(
+    table.senderId,
+    table.clientMessageId,
+  ),
 }));
 
 export const notifications = sqliteTable('notifications', {

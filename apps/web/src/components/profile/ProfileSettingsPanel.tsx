@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, Lock, MessageSquare, Settings, UserX, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Bell, Lock, MessageSquare, Settings, UserX, AlertTriangle, ShieldCheck, Bug } from 'lucide-react';
 import {
   ChatIconPage,
   FollowRequest,
@@ -36,6 +36,7 @@ interface ProfileSettingsPanelProps {
   onUnblockUser: (userId: number) => void | Promise<void>;
   onUnmuteUser: (userId: number) => void | Promise<void>;
   onDeleteAccount: (password: string) => Promise<{ success: boolean; error?: string }>;
+  onSimulateSessionExpired?: () => void;
 }
 
 export function ProfileSettingsPanel({
@@ -53,8 +54,11 @@ export function ProfileSettingsPanel({
   onUnblockUser,
   onUnmuteUser,
   onDeleteAccount,
+  onSimulateSessionExpired,
 }: ProfileSettingsPanelProps) {
-  const [openSection, setOpenSection] = useState<'privacy' | 'notifications' | 'chat' | 'blocked' | 'security' | 'danger' | null>(null);
+  const [openSection, setOpenSection] = useState<
+    'privacy' | 'notifications' | 'chat' | 'blocked' | 'security' | 'danger' | 'debug' | null
+  >(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirmUsername, setDeleteConfirmUsername] = useState('');
@@ -100,7 +104,9 @@ export function ProfileSettingsPanel({
     [settings, token, onSettingsChange],
   );
 
-  const toggleSection = (section: 'privacy' | 'notifications' | 'chat' | 'blocked' | 'security' | 'danger') => {
+  const toggleSection = (
+    section: 'privacy' | 'notifications' | 'chat' | 'blocked' | 'security' | 'danger' | 'debug',
+  ) => {
     setOpenSection(prev => (prev === section ? null : section));
   };
 
@@ -426,6 +432,40 @@ export function ProfileSettingsPanel({
             </button>
           </div>
         </CollapsibleSection>
+
+        {import.meta.env.DEV && (
+          <CollapsibleSection
+            title="Temporary debug"
+            description="Dev-only helpers for testing auth and storage"
+            icon={<Bug className="h-4 w-4" />}
+            iconClassName="bg-amber-500/10 text-amber-400 border-amber-500/20"
+            open={openSection === 'debug'}
+            onToggle={() => toggleSection('debug')}
+          >
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => onSimulateSessionExpired?.()}
+                className="w-full px-4 py-2.5 rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white transition-colors cursor-pointer min-h-[44px]"
+              >
+                Corrupt authorization (401)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  localStorage.clear();
+                  window.location.reload();
+                }}
+                className="w-full px-4 py-2.5 rounded-xl text-xs font-semibold border border-border-custom bg-bg-primary hover:bg-bg-secondary text-text-primary transition-colors cursor-pointer min-h-[44px]"
+              >
+                Clear all localStorage
+              </button>
+              <p className="text-[11px] text-text-muted leading-relaxed">
+                Clear wipes auth tokens plus walkthrough and chat UI keys, then reloads the page.
+              </p>
+            </div>
+          </CollapsibleSection>
+        )}
       </div>
     </div>
   );

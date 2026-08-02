@@ -86,6 +86,10 @@ function createMockState(socketsRef: { current: MockWebSocket[] }): DurableObjec
 function createDbMock(options?: {
   insertReturning?: Record<string, unknown>;
   receiverUser?: { id: number; username: string } | null;
+  selectAll?: Record<string, unknown>[];
+  lastUpdateSet?: { current: Record<string, unknown> | null };
+  /** Values returned by successive `.get()` calls before falling back to receiverUser. */
+  getQueue?: unknown[];
 }) {
   const inserted = options?.insertReturning ?? {
     id: 42,
@@ -94,21 +98,29 @@ function createDbMock(options?: {
     read: 0,
     mediaUrl: null,
     mediaType: null,
+    deliveredAt: null,
+    readAt: null,
+    clientMessageId: null,
   };
 
+  const getQueue = [...(options?.getQueue ?? [])];
   const chain: Record<string, any> = {};
   const self = () => chain;
   chain.select = vi.fn(self);
   chain.from = vi.fn(self);
   chain.where = vi.fn(self);
-  chain.set = vi.fn(self);
+  chain.set = vi.fn((values: Record<string, unknown>) => {
+    if (options?.lastUpdateSet) options.lastUpdateSet.current = values;
+    return chain;
+  });
   chain.values = vi.fn(self);
   chain.update = vi.fn(self);
   chain.insert = vi.fn(self);
   chain.run = vi.fn().mockResolvedValue(undefined);
   chain.returning = vi.fn().mockResolvedValue([inserted]);
+  chain.all = vi.fn().mockResolvedValue(options?.selectAll ?? []);
   chain.get = vi.fn().mockImplementation(async () => {
-    // First get after insert path is often receiver user; keep simple.
+    if (getQueue.length > 0) return getQueue.shift();
     return options?.receiverUser ?? { id: 2, username: 'bob' };
   });
 
@@ -239,7 +251,10 @@ describe('RealtimeDO hibernation session routing', () => {
 
     await dob.handleClose(a2 as unknown as WebSocket);
     expect(bob.eventsOfType('user_offline')).toEqual([
-      { type: 'user_offline', payload: { userId: 1 } },
+      expect.objectContaining({
+        type: 'user_offline',
+        payload: expect.objectContaining({ userId: 1, lastSeenAt: expect.any(String) }),
+      }),
     ]);
   });
 
@@ -401,7 +416,150 @@ describe('RealtimeDO hibernation session routing', () => {
       senderId: 1,
       receiverId: 2,
       content: 'hi',
+      status: 'delivered',
     });
+  });
+
+  it('marks send_message as sent when recipient is offline', async () => {
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      createDbMock({
+        insertReturning: {
+          id: 8,
+          content: 'ping',
+          createdAt: 123,
+          read: 0,
+          mediaUrl: null,
+          mediaType: null,
+          deliveredAt: null,
+          readAt: null,
+          clientMessageId: 'c-1',
+        },
+        receiverUser: { id: 2, username: 'bob' },
+        // First get: idempotent lookup miss; later gets fall back to receiverUser.
+        getQueue: [null],
+      }),
+    );
+
+    const alice = dob.addSocket();
+    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
+
+    await dob.handleClientMessage(alice as unknown as WebSocket, {
+      type: 'send_message',
+      payload: { receiverId: 2, content: 'ping', clientMessageId: 'c-1' },
+    });
+
+    expect(alice.eventsOfType('message')[0]?.payload).toMatchObject({
+      id: 8,
+      status: 'sent',
+      clientMessageId: 'c-1',
+      deliveredAt: null,
+    });
+  });
+
+  it('returns existing row for duplicate clientMessageId without inserting again', async () => {
+    const insertSpy = vi.fn();
+    const mock = createDbMock({
+      getQueue: [
+        {
+          id: 55,
+          senderId: 1,
+          receiverId: 2,
+          content: 'ping',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          read: 0,
+          deliveredAt: null,
+          readAt: null,
+          mediaUrl: null,
+          mediaType: null,
+          linkPreviewId: null,
+          clientMessageId: 'idem-1',
+        },
+        { id: 2, username: 'bob' },
+      ],
+      receiverUser: { id: 2, username: 'bob' },
+    });
+    mock.insert = insertSpy.mockReturnValue(mock);
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mock);
+
+    const alice = dob.addSocket();
+    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
+
+    await dob.handleClientMessage(alice as unknown as WebSocket, {
+      type: 'send_message',
+      payload: { receiverId: 2, content: 'ping', clientMessageId: 'idem-1' },
+    });
+
+    expect(insertSpy).not.toHaveBeenCalled();
+    expect(alice.eventsOfType('message')).toHaveLength(1);
+    expect(alice.eventsOfType('message')[0]?.payload).toMatchObject({
+      id: 55,
+      clientMessageId: 'idem-1',
+      content: 'ping',
+      status: 'sent',
+    });
+  });
+
+  it('marks send_message as read when recipient is viewing the chat', async () => {
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      createDbMock({
+        insertReturning: {
+          id: 9,
+          content: 'yo',
+          createdAt: 123,
+          read: 1,
+          mediaUrl: null,
+          mediaType: null,
+          deliveredAt: '2026-01-01T00:00:00.000Z',
+          readAt: '2026-01-01T00:00:00.000Z',
+        },
+        receiverUser: { id: 2, username: 'bob' },
+      }),
+    );
+
+    const alice = dob.addSocket();
+    const bob = dob.addSocket();
+    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
+    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: 1 });
+
+    await dob.handleClientMessage(alice as unknown as WebSocket, {
+      type: 'send_message',
+      payload: { receiverId: 2, content: 'yo' },
+    });
+
+    expect(alice.eventsOfType('message')[0]?.payload).toMatchObject({
+      id: 9,
+      status: 'read',
+      read: true,
+    });
+  });
+
+  it('ack_delivered upgrades undelivered messages and notifies senders', async () => {
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      createDbMock({
+        selectAll: [{ id: 55, senderId: 1 }],
+        receiverUser: { id: 2, username: 'bob' },
+      }),
+    );
+
+    const alice = dob.addSocket();
+    const bob = dob.addSocket();
+    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
+    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+
+    await dob.handleClientMessage(bob as unknown as WebSocket, {
+      type: 'ack_delivered',
+      payload: { messageIds: [55] },
+    });
+
+    expect(alice.eventsOfType('message_delivered')).toEqual([
+      expect.objectContaining({
+        type: 'message_delivered',
+        payload: expect.objectContaining({
+          messageIds: [55],
+          deliveredAt: expect.any(String),
+        }),
+      }),
+    ]);
   });
 
   it('persists active_chat attachment and fans out read status', async () => {
@@ -417,7 +575,14 @@ describe('RealtimeDO hibernation session routing', () => {
 
     expect(alice.attachment).toEqual({ userId: 1, username: 'alice', activeChatId: 2 });
     expect(bob.eventsOfType('messages_read')).toEqual([
-      { type: 'messages_read', payload: { senderId: 2, receiverId: 1 } },
+      expect.objectContaining({
+        type: 'messages_read',
+        payload: expect.objectContaining({
+          senderId: 2,
+          receiverId: 1,
+          readAt: expect.any(String),
+        }),
+      }),
     ]);
   });
 

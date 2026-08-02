@@ -1,12 +1,64 @@
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and, count, sql, inArray, notInArray } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import type { ChatThread } from '@hin/types';
+import type { ChatThread, DeliveryStatus, LinkPreview, Message } from '@hin/types';
 import { getBlockedUserIds, getBlockerUserIds } from './blocks';
 import { isGamificationEnabled } from './gamification/settings';
 import { loadEquippedBadgesForUsers } from './gamification/equipped';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
+
+/** Derive WhatsApp-style delivery status from persisted timestamps + read flag. */
+export function deriveDeliveryStatus(row: {
+  read: number | boolean;
+  deliveredAt?: string | null;
+  readAt?: string | null;
+}): DeliveryStatus {
+  const isRead = row.read === 1 || row.read === true;
+  if (isRead) return 'read';
+  if (row.deliveredAt) return 'delivered';
+  return 'sent';
+}
+
+export type MessageRowInput = {
+  id: number;
+  senderId: number;
+  senderUsername: string;
+  receiverId: number;
+  receiverUsername: string;
+  content: string;
+  createdAt: string;
+  read: number | boolean;
+  deliveredAt?: string | null;
+  readAt?: string | null;
+  deletedAt?: string | null;
+  linkPreview?: LinkPreview | null;
+  mediaUrl?: string | null;
+  mediaType?: string | null;
+  clientMessageId?: string | null;
+};
+
+export function toMessageDto(row: MessageRowInput): Message {
+  const read = row.read === 1 || row.read === true;
+  return {
+    id: row.id,
+    senderId: row.senderId,
+    senderUsername: row.senderUsername,
+    receiverId: row.receiverId,
+    receiverUsername: row.receiverUsername,
+    content: row.content,
+    createdAt: row.createdAt,
+    read,
+    status: deriveDeliveryStatus(row),
+    deliveredAt: row.deliveredAt ?? null,
+    readAt: row.readAt ?? null,
+    deletedAt: row.deletedAt ?? null,
+    linkPreview: row.linkPreview ?? null,
+    mediaUrl: row.mediaUrl ?? null,
+    mediaType: row.mediaType ?? null,
+    clientMessageId: row.clientMessageId ?? null,
+  };
+}
 
 async function getHiddenMessagePartnerIds(db: Db, userId: number): Promise<Set<number>> {
   const [blockedByMe, blockedMe] = await Promise.all([
@@ -37,11 +89,14 @@ export async function countUnreadMessages(db: Db, userId: number): Promise<numbe
 
 type LastMessageRow = {
   partnerId: number;
+  id: number;
   content: string;
   mediaUrl: string | null;
   senderId: number;
   createdAt: string;
   read: number;
+  deliveredAt: string | null;
+  readAt: string | null;
 };
 
 export async function listMessageThreads(db: Db, userId: number): Promise<ChatThread[]> {
@@ -56,6 +111,8 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
         m.content,
         m.media_url AS media_url,
         m.read,
+        m.delivered_at AS delivered_at,
+        m.read_at AS read_at,
         m.created_at AS created_at,
         CASE
           WHEN m.sender_id = ${userId} THEN m.receiver_id
@@ -68,15 +125,18 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
     ranked AS (
       SELECT
         partner_id AS partnerId,
+        id,
         content,
         media_url AS mediaUrl,
         sender_id AS senderId,
         created_at AS createdAt,
         read,
+        delivered_at AS deliveredAt,
+        read_at AS readAt,
         ROW_NUMBER() OVER (PARTITION BY partner_id ORDER BY created_at DESC) AS rn
       FROM partner_messages
     )
-    SELECT partnerId, content, mediaUrl, senderId, createdAt, read
+    SELECT partnerId, id, content, mediaUrl, senderId, createdAt, read, deliveredAt, readAt
     FROM ranked
     WHERE rn = 1
   `);
@@ -95,6 +155,7 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
         username: schema.users.username,
         role: schema.users.role,
         avatarUrl: schema.users.avatarUrl,
+        lastSeenAt: schema.users.lastSeenAt,
       })
       .from(schema.users)
       .where(
@@ -141,8 +202,10 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
       role: u.role,
       avatarUrl: u.avatarUrl,
       equippedBadges: equippedBadgesByUser.get(u.id) ?? [],
+      lastSeenAt: u.lastSeenAt ?? null,
       lastMessage: lastMsg
         ? {
+            id: lastMsg.id,
             content: lastMsg.content.trim()
               ? lastMsg.content
               : lastMsg.mediaUrl
@@ -151,6 +214,11 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
             senderId: lastMsg.senderId,
             createdAt: lastMsg.createdAt,
             read: lastMsg.read === 1,
+            status: deriveDeliveryStatus({
+              read: lastMsg.read,
+              deliveredAt: lastMsg.deliveredAt,
+              readAt: lastMsg.readAt,
+            }),
           }
         : null,
       unreadCount: unreadBySender.get(partnerId) || 0,
@@ -164,4 +232,13 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
   });
 
   return threads;
+}
+
+/** Shared UPDATE values when marking messages read (also backfills deliveredAt). */
+export function markMessagesReadSet(nowIso: string) {
+  return {
+    read: 1 as const,
+    readAt: nowIso,
+    deliveredAt: sql`COALESCE(${schema.messages.deliveredAt}, ${nowIso})`,
+  };
 }

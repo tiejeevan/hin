@@ -101,6 +101,7 @@ interface ProfileViewProps {
   threadPosts?: import('@hin/types').Post[];
   postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
   onDeleteAccount?: (password: string) => Promise<{ success: boolean; error?: string }>;
+  onSimulateSessionExpired?: () => void;
   profileGamification?: GamificationPublic | null;
   showGamification?: boolean;
   gamificationEnabled?: boolean;
@@ -199,6 +200,7 @@ export function ProfileView({
   onThreadReplyContentChange,
   postLimits,
   onDeleteAccount,
+  onSimulateSessionExpired,
   profileGamification,
   showGamification = false,
   gamificationEnabled = false,
@@ -288,6 +290,7 @@ export function ProfileView({
               onUnblockUser={onUnblockUser}
               onUnmuteUser={onUnmuteUser}
               onDeleteAccount={onDeleteAccount!}
+              onSimulateSessionExpired={onSimulateSessionExpired}
             />
           )}
 

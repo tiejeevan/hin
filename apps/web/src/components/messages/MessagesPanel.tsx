@@ -1,18 +1,37 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { X, Shield, SquarePen, ChevronLeft, Maximize2, Minimize2, Send, MessageCircle, ImagePlus, Camera, Loader2 } from 'lucide-react';
-import { ChatThread, LinkPreview, Message, User as UserType } from '@hin/types';
+import { X, Shield, SquarePen, ChevronLeft, Maximize2, Minimize2, Send, MessageCircle, ImagePlus, Camera, Loader2, Check, CheckCheck } from 'lucide-react';
+import { ChatThread, DeliveryStatus, LinkPreview, Message, User as UserType } from '@hin/types';
 import { ChatRecipient } from '../../types/ui';
 import { UserAvatar } from '../profile/UserAvatar';
 import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
 import { useOverscrollBounce } from '../../hooks/useOverscrollBounce';
 import { LinkPreviewCard } from '../feed/LinkPreviewCard';
 import { getOlabidItemIdFromUrl } from '../../lib/appRoutes';
+import { deriveLocalStatus } from '../../lib/chatMessages';
+import { formatLastSeen } from '../../lib/formatRelativeTime';
 
 const TEXTAREA_MAX_HEIGHT_PX = 120;
+const NEAR_BOTTOM_PX = 100;
 
 function prefersTouchComposer(): boolean {
   if (typeof window === 'undefined') return false;
   return window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+}
+
+function DeliveryTicks({ status }: { status: DeliveryStatus }) {
+  if (status === 'sending') {
+    return <Loader2 className="h-3 w-3 animate-spin text-text-muted" aria-label="Sending" />;
+  }
+  if (status === 'failed') {
+    return <span className="text-red-400 text-[10px] font-medium">Failed</span>;
+  }
+  if (status === 'sent') {
+    return <Check className="h-3 w-3 text-text-muted" aria-label="Sent" />;
+  }
+  if (status === 'delivered') {
+    return <CheckCheck className="h-3 w-3 text-text-muted" aria-label="Delivered" />;
+  }
+  return <CheckCheck className="h-3 w-3 text-sky-400" aria-label="Read" />;
 }
 
 interface MessagesPanelProps {
@@ -29,12 +48,14 @@ interface MessagesPanelProps {
   sendingMedia?: boolean;
   typingUsers: Record<number, boolean>;
   onlineUserIds: Set<number>;
+  lastSeenByUserId?: Record<number, string>;
   chatBottomRef: React.RefObject<HTMLDivElement>;
   onClose: () => void;
   onSelectThread: (thread: ChatRecipient) => void;
   onBackToList: () => void;
   onNewMsgTextChange: (text: string) => void;
   onSendDM: (e: React.FormEvent) => void;
+  onRetryFailedMessage?: (msg: Message) => void;
   onTyping: (recipientId: number) => void;
   onOpenProfile: (userId: number, opts?: { username?: string }) => void;
   onOpenOlabidItem?: (itemId: number) => void;
@@ -60,12 +81,14 @@ export function MessagesPanel({
   sendingMedia = false,
   typingUsers,
   onlineUserIds,
+  lastSeenByUserId = {},
   chatBottomRef,
   onClose,
   onSelectThread,
   onBackToList,
   onNewMsgTextChange,
   onSendDM,
+  onRetryFailedMessage,
   onTyping,
   onOpenProfile,
   onOpenOlabidItem,
@@ -112,8 +135,60 @@ export function MessagesPanel({
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraStarting, setCameraStarting] = useState(false);
+  const [showNewMessagesPill, setShowNewMessagesPill] = useState(false);
+  const nearBottomRef = useRef(true);
+  const prevMessageCountRef = useRef(0);
   const peerIsTyping = !!(chatRecipient && typingUsers[chatRecipient.id]);
   const canSend = !!(newMsgText.trim() || draftMediaPreviewUrl) && !sendingMedia;
+  const peerLastSeen =
+    chatRecipient ? (lastSeenByUserId[chatRecipient.id] ?? threads.find(t => t.id === chatRecipient.id)?.lastSeenAt ?? null) : null;
+
+  const isNearBottom = () => {
+    const el = chatScrollRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+  };
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    chatBottomRef.current?.scrollIntoView({ behavior });
+    setShowNewMessagesPill(false);
+    nearBottomRef.current = true;
+  };
+
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      nearBottomRef.current = isNearBottom();
+      if (nearBottomRef.current) setShowNewMessagesPill(false);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [chatScrollRef, isOpen, chatRecipient?.id]);
+
+  useEffect(() => {
+    if (!chatRecipient) {
+      prevMessageCountRef.current = 0;
+      setShowNewMessagesPill(false);
+      return;
+    }
+    const prevCount = prevMessageCountRef.current;
+    const nextCount = chatMessages.length;
+    prevMessageCountRef.current = nextCount;
+    if (nextCount === 0) return;
+
+    const last = chatMessages[nextCount - 1];
+    const ownSend = last?.senderId === currentUser.id;
+    const grew = nextCount > prevCount;
+
+    if (!grew && prevCount !== 0) return;
+
+    if (ownSend || nearBottomRef.current || prevCount === 0) {
+      requestAnimationFrame(() => scrollToBottom(prevCount === 0 ? 'auto' : 'smooth'));
+    } else if (grew) {
+      setShowNewMessagesPill(true);
+    }
+  }, [chatMessages, chatRecipient?.id, currentUser.id]);
 
   const stopCameraStream = () => {
     streamRef.current?.getTracks().forEach(track => track.stop());
@@ -257,6 +332,7 @@ export function MessagesPanel({
           showingChat={showingChat}
           chatRecipient={chatRecipient}
           isOnline={presenceEnabled && chatRecipient ? onlineUserIds.has(chatRecipient.id) : false}
+          lastSeenAt={peerLastSeen}
           showPresence={presenceEnabled}
           isTyping={peerIsTyping}
           isExpanded={isExpanded}
@@ -268,6 +344,7 @@ export function MessagesPanel({
 
         {showingChat && chatRecipient ? (
           <>
+            <div className="relative flex-1 min-h-0 flex flex-col">
             <div ref={chatScrollRef} className="flex-1 overflow-y-auto overscroll-contain p-3 space-y-2 bg-chat-bg min-h-0">
               {chatMessages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-text-muted text-[11px] gap-1.5 py-8">
@@ -278,13 +355,13 @@ export function MessagesPanel({
                 chatMessages.map((msg, index) => {
                   const isMe = msg.senderId === currentUser.id;
                   const prevMsg = index > 0 ? chatMessages[index - 1] : null;
-                  const isLast = index === chatMessages.length - 1;
+                  const status = deriveLocalStatus(msg);
                   const showTime =
                     !prevMsg ||
                     new Date(msg.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() > 15 * 60 * 1000;
 
                   return (
-                    <div key={msg.id} className="flex flex-col">
+                    <div key={msg.id} className="flex flex-col animate-message-fade-in">
                       {showTime && (
                         <div className="text-[10px] text-text-muted font-medium text-center my-2">
                           {new Date(msg.createdAt).toLocaleDateString([], {
@@ -339,9 +416,18 @@ export function MessagesPanel({
                           )}
                         </div>
                       </div>
-                      {isLast && isMe && (
-                        <div className="text-[10px] text-text-muted text-right pr-1 mt-0.5">
-                          {msg.read ? 'Read' : 'Delivered'}
+                      {isMe && (
+                        <div className="flex items-center justify-end gap-1.5 pr-1 mt-0.5 min-h-[14px]">
+                          {status === 'failed' && onRetryFailedMessage ? (
+                            <button
+                              type="button"
+                              onClick={() => onRetryFailedMessage(msg)}
+                              className="text-[10px] text-red-400 hover:text-red-300 font-medium cursor-pointer underline-offset-2 hover:underline"
+                            >
+                              Retry
+                            </button>
+                          ) : null}
+                          <DeliveryTicks status={status} />
                         </div>
                       )}
                     </div>
@@ -349,6 +435,16 @@ export function MessagesPanel({
                 })
               )}
               <div ref={chatBottomRef} />
+            </div>
+            {showNewMessagesPill && (
+              <button
+                type="button"
+                onClick={() => scrollToBottom('smooth')}
+                className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 rounded-full bg-bg-tertiary border border-border-custom text-[11px] font-medium text-text-primary shadow-lg cursor-pointer hover:bg-bg-secondary"
+              >
+                New messages ↓
+              </button>
+            )}
             </div>
 
             {(draftLinkPreview || draftMediaPreviewUrl) && (
@@ -627,6 +723,7 @@ function PanelHeader({
   showingChat,
   chatRecipient,
   isOnline,
+  lastSeenAt,
   showPresence,
   isTyping,
   isExpanded,
@@ -638,6 +735,7 @@ function PanelHeader({
   showingChat: boolean;
   chatRecipient: ChatRecipient | null;
   isOnline: boolean;
+  lastSeenAt?: string | null;
   showPresence: boolean;
   isTyping: boolean;
   isExpanded: boolean;
@@ -646,6 +744,13 @@ function PanelHeader({
   onClose: () => void;
   onOpenProfile: (userId: number, opts?: { username?: string }) => void;
 }) {
+  const presenceLabel = isOnline
+    ? 'Online'
+    : lastSeenAt
+      ? `Last seen ${formatLastSeen(lastSeenAt)}`
+      : 'Offline';
+  const presenceClass = isOnline ? 'text-emerald-500' : 'text-text-muted';
+
   return (
     <div className="px-3 py-2 flex items-center justify-between bg-bg-primary/50 border-b border-border-custom/60 shrink-0 gap-2">
       <div className="flex items-center gap-1 min-w-0 flex-1">
@@ -675,8 +780,8 @@ function PanelHeader({
                     className={`absolute bottom-0 right-0 h-2 w-2 rounded-full border-2 border-bg-primary ${
                       isOnline ? 'bg-emerald-500' : 'bg-text-muted/60'
                     }`}
-                    title={isOnline ? 'Online' : 'Offline'}
-                    aria-label={isOnline ? 'Online' : 'Offline'}
+                    title={presenceLabel}
+                    aria-label={presenceLabel}
                   />
                 )}
               </div>
@@ -687,9 +792,7 @@ function PanelHeader({
                 {isTyping ? (
                   <span className="text-[10px] font-medium text-indigo-400">Typing…</span>
                 ) : showPresence ? (
-                  <span className={`text-[10px] ${isOnline ? 'text-emerald-500' : 'text-text-muted'}`}>
-                    {isOnline ? 'Online' : 'Offline'}
-                  </span>
+                  <span className={`text-[10px] ${presenceClass}`}>{presenceLabel}</span>
                 ) : null}
               </div>
             </button>
