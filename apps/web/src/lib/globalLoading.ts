@@ -10,10 +10,11 @@ const SILENT_URL_SUFFIXES = ['/api/me/session-tick'];
 /**
  * Instant user-interaction mutations: like, bookmark, comment, follow, etc.
  * These must not drive the full-screen overlay (Durable Object fan-out is separate).
- * Heavy writes (create/delete post, auth, admin, profile save) are intentionally excluded.
+ * Heavy writes (delete post, auth, admin, profile save) are intentionally excluded.
  */
 const SILENT_INTERACTION_RULES: Array<{ method: string; pattern: RegExp }> = [
-  // Posts: like / bookmark / share / pin / poll
+  // Posts: create (optimistic UI) / like / bookmark / share / pin / poll
+  { method: 'POST', pattern: /\/api\/posts(?:\?|$)/ },
   { method: 'POST', pattern: /\/api\/posts\/\d+\/like(?:\?|$)/ },
   { method: 'POST', pattern: /\/api\/posts\/\d+\/bookmark(?:\?|$)/ },
   { method: 'POST', pattern: /\/api\/posts\/\d+\/share(?:\?|$)/ },

@@ -2,8 +2,8 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { SILENT_LOADING_HEADER, SILENT_LOADING_VALUE } from './globalLoading';
 
 /**
- * Instant taps (like/comment/bookmark) are auto-silent so GlobalLoadingOverlay
- * does not block the UI. Data loads (GET) and heavy writes (create post) still
+ * Instant taps (like/comment/bookmark/create post) are auto-silent so GlobalLoadingOverlay
+ * does not block the UI. Data loads (GET) and heavy writes (delete post) still
  * drive the overlay after SHOW_DELAY_MS.
  */
 describe('global fetch loading', () => {
@@ -89,7 +89,7 @@ describe('global fetch loading', () => {
     expect(mod.isGlobalLoadingVisible()).toBe(false);
   });
 
-  it('shows overlay for heavy POST /api/posts create', async () => {
+  it('does NOT show overlay for optimistic POST /api/posts create', async () => {
     const mod = await loadFreshModule();
 
     let resolveFetch!: (r: Response) => void;
@@ -105,17 +105,12 @@ describe('global fetch loading', () => {
       body: '{}',
     });
 
-    await vi.advanceTimersByTimeAsync(150);
-    expect(mod.isGlobalLoadingVisible()).toBe(true);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(mod.isGlobalLoadingVisible()).toBe(false);
 
-    await vi.advanceTimersByTimeAsync(50);
     resolveFetch(new Response('{}', { status: 200 }));
     await pending;
-
-    expect(mod.isGlobalLoadingVisible()).toBe(true);
-    await vi.advanceTimersByTimeAsync(199);
-    expect(mod.isGlobalLoadingVisible()).toBe(true);
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(500);
     expect(mod.isGlobalLoadingVisible()).toBe(false);
   });
 

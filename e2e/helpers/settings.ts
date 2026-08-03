@@ -38,8 +38,9 @@ const NOTIFICATION_SWITCHES = [
   'Mute all toasts',
 ] as const;
 
-export async function openOwnProfile(page: Page, username: string) {
-  await page.locator('header').getByRole('button', { name: username, exact: true }).click();
+export async function openOwnProfile(page: Page, _username?: string) {
+  await page.locator('header').getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: 'View profile' }).click();
 }
 
 export async function openProfileSettings(page: Page) {

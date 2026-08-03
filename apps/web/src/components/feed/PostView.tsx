@@ -63,6 +63,7 @@ interface PostViewProps {
   onReportComment?: (commentId: number) => void;
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
+  onRetryPendingPost?: (postId: number) => void;
   onStartThreadReply?: (postId: number) => void;
   onCancelThreadReply?: () => void;
   onSubmitThreadReply?: (postId: number) => void;
@@ -132,6 +133,7 @@ export function PostView({
   onReportComment,
   onPinPost,
   onUnpinPost,
+  onRetryPendingPost,
   onStartThreadReply,
   onCancelThreadReply,
   onSubmitThreadReply,
@@ -199,8 +201,6 @@ export function PostView({
 
   if (!post) return null;
 
-  const postId = post.id;
-
   return (
     <div className="max-w-2xl mx-auto w-full p-4 pb-20 md:pb-4 space-y-4">
       {currentUser && (
@@ -237,7 +237,7 @@ export function PostView({
         isNewlyCreated={false}
         editingPostId={editingPostId}
         editingPostContent={editingPostContent}
-        newCommentText={newCommentText[postId] ?? ''}
+        newCommentText={newCommentText}
         replyingTo={replyingTo}
         editingCommentId={editingCommentId}
         editingCommentContent={editingCommentContent}
@@ -275,6 +275,7 @@ export function PostView({
         onReportComment={onReportComment}
         onPinPost={onPinPost}
         onUnpinPost={onUnpinPost}
+        onRetryPendingPost={onRetryPendingPost}
         onStartThreadReply={onStartThreadReply}
         onCancelThreadReply={onCancelThreadReply}
         onSubmitThreadReply={onSubmitThreadReply}

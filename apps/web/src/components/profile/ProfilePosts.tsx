@@ -44,6 +44,7 @@ interface ProfilePostsProps {
   onReportComment?: (commentId: number) => void;
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
+  onRetryPendingPost?: (postId: number) => void;
   onStartThreadReply?: (postId: number) => void;
   onCancelThreadReply?: () => void;
   onSubmitThreadReply?: (postId: number) => void;
@@ -95,6 +96,7 @@ export function ProfilePosts({
   onReportComment,
   onPinPost,
   onUnpinPost,
+  onRetryPendingPost,
   onStartThreadReply,
   onCancelThreadReply,
   onSubmitThreadReply,
@@ -153,6 +155,7 @@ export function ProfilePosts({
       onReportComment={onReportComment}
       onPinPost={onPinPost}
       onUnpinPost={onUnpinPost}
+      onRetryPendingPost={onRetryPendingPost}
       onStartThreadReply={onStartThreadReply}
       onCancelThreadReply={onCancelThreadReply}
       onSubmitThreadReply={onSubmitThreadReply}

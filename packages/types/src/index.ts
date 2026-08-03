@@ -174,6 +174,12 @@ export interface Post {
   threadReplyCount?: number;
   threadPosts?: Post[];
   linkPreview?: LinkPreview | null;
+  /** Client-only: optimistic create still in flight. */
+  isPending?: boolean;
+  /** Client-only: optimistic create failed; show inline retry. */
+  isError?: boolean;
+  /** Client-only: stable key to reconcile temp posts with server/WS payloads. */
+  clientPostKey?: string;
 }
 
 export interface TrendingHashtag {

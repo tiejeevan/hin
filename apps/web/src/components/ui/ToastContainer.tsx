@@ -55,7 +55,7 @@ function ToastItem({ toast, onToastClick, onDismiss }: ToastItemProps) {
   remainingRef.current = remainingMs;
   offsetXRef.current = offsetX;
 
-  const hasNavTarget = Boolean(toast.postId || toast.olabidItemId);
+  const hasNavTarget = Boolean(toast.postId || toast.olabidItemId || toast.retryKey);
   const progress = Math.max(0, Math.min(1, remainingMs / toast.duration));
 
   useEffect(() => {

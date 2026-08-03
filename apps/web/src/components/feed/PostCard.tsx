@@ -64,6 +64,7 @@ interface PostCardProps {
   onReportComment?: (commentId: number) => void;
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
+  onRetryPendingPost?: (postId: number) => void;
   onStartThreadReply?: (postId: number) => void;
   onCancelThreadReply?: () => void;
   onSubmitThreadReply?: (postId: number) => void;
@@ -123,6 +124,7 @@ export function PostCard({
   onReportComment,
   onPinPost,
   onUnpinPost,
+  onRetryPendingPost,
   onStartThreadReply,
   onCancelThreadReply,
   onSubmitThreadReply,
@@ -152,8 +154,12 @@ export function PostCard({
   const [visibleCommentCount, setVisibleCommentCount] = useState(COMMENTS_PAGE_SIZE);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const canManagePost = !readOnly && currentUser && (currentUser.role === 'admin' || currentUser.id === post.userId);
-  const canReportPost = !readOnly && currentUser && currentUser.id !== post.userId && onReport;
+  const canManagePost =
+    !readOnly &&
+    !post.isPending &&
+    currentUser &&
+    (currentUser.role === 'admin' || currentUser.id === post.userId);
+  const canReportPost = !readOnly && !post.isPending && currentUser && currentUser.id !== post.userId && onReport;
   const isRootPost = !post.parentPostId;
   const canPinPost = canManagePost && isRootPost && onPinPost && onUnpinPost;
   const canThreadReply = canManagePost && isRootPost && onStartThreadReply;
@@ -215,8 +221,26 @@ export function PostCard({
     <article
       className={`bg-bg-secondary border border-border-custom rounded-2xl p-4 space-y-4 shadow-sm hover:border-border-custom transition-all relative ${
         isNewlyCreated ? 'animate-blink-border' : ''
-      }`}
+      } ${post.isPending ? 'opacity-75' : ''} ${post.isError ? 'border-rose-500/40' : ''}`}
     >
+      {(post.isPending || post.isError) && (
+        <div className="absolute top-3 left-3 z-10 flex items-center gap-2">
+          {post.isPending && (
+            <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400">
+              Sending…
+            </span>
+          )}
+          {post.isError && (
+            <button
+              type="button"
+              onClick={() => onRetryPendingPost?.(post.id)}
+              className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-400 hover:bg-rose-500/25 cursor-pointer"
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )}
       {showPostMenu && (
         <div ref={menuRef} className="absolute top-4 right-4 z-10">
           <button
@@ -483,10 +507,20 @@ export function PostCard({
       {threadPosts.length > 0 && (
         <div className="space-y-3 border-l-2 border-indigo-500/30 pl-4 ml-2">
           {threadPosts.map(reply => (
-            <div key={reply.id} className="space-y-2">
-              <p className="text-[10px] text-text-muted">
-                {new Date(reply.createdAt).toLocaleString()}
-              </p>
+            <div
+              key={reply.clientPostKey || reply.id}
+              className={`space-y-2 ${reply.isPending ? 'opacity-75' : ''} ${reply.isError ? 'opacity-60' : ''}`}
+            >
+              <div className="flex items-center gap-2">
+                <p className="text-[10px] text-text-muted">
+                  {new Date(reply.createdAt).toLocaleString()}
+                </p>
+                {reply.isPending && (
+                  <span className="text-[9px] font-semibold uppercase tracking-wide text-indigo-400">
+                    Sending…
+                  </span>
+                )}
+              </div>
               <PostContentText
                 content={reply.content}
                 onViewProfile={onViewProfile}

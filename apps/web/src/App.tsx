@@ -34,6 +34,7 @@ import { API_URL, WS_URL } from './config';
 import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode, FeedMode } from './types/ui';
 import type { CreatePostSubmitPayload } from './components/feed/CreatePostForm';
 import { mergePollFromBroadcast } from './utils/pollVisibility';
+import { computeOptimisticPoll } from './utils/optimisticPoll';
 import { parseLocation, syncUrl, postPermalinkUrl, profilePermalinkUrl, type AdminSection } from './lib/appRoutes';
 import { randomId, uploadCompressedImage } from './lib/compressImage';
 import {
@@ -175,6 +176,7 @@ export default function App() {
   const connectWSRef = useRef<(() => void) | null>(null);
 
   const [threads, setThreads] = useState<import('@hin/types').ChatThread[]>([]);
+  const threadsRef = useRef(threads);
   const [typingUsers, setTypingUsers] = useState<Record<number, boolean>>({});
   const [lastSeenByUserId, setLastSeenByUserId] = useState<Record<number, string>>({});
   const typingTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
@@ -246,6 +248,10 @@ export default function App() {
   const appliedCommentDeletesRef = useRef(new Set<number>());
   const appliedItemCommentCreatesRef = useRef(new Set<number>());
   const appliedItemCommentDeletesRef = useRef(new Set<number>());
+  /** Dedupe unread badge bumps for the same incoming message (WS retries / StrictMode). */
+  const appliedIncomingUnreadRef = useRef(new Set<number>());
+  const retryHandlersRef = useRef(new Map<string, () => void>());
+  const pendingPostBodiesRef = useRef(new Map<string, Record<string, unknown>>());
   const showMessagesDropdownRef = useRef(showMessagesDropdown);
   const chatRecipientRef = useRef(chatRecipient);
   const handleSessionExpiredRef = useRef<() => void>(() => {});
@@ -263,6 +269,10 @@ export default function App() {
   useEffect(() => {
     chatDraftsRef.current = chatDrafts;
   }, [chatDrafts]);
+
+  useEffect(() => {
+    threadsRef.current = threads;
+  }, [threads]);
 
   useEffect(() => {
     chatMessagesRef.current = chatMessages;
@@ -387,7 +397,7 @@ export default function App() {
   const addToast = (
     content: string,
     type: Toast['type'],
-    target?: { postId?: number; commentId?: number; olabidItemId?: number },
+    target?: { postId?: number; commentId?: number; olabidItemId?: number; retryKey?: string },
     opts?: { skipPrefCheck?: boolean },
   ) => {
     const settings = userSettingsRef.current;
@@ -397,6 +407,15 @@ export default function App() {
     const id = Math.random().toString(36).substring(2, 9);
     const duration = type === 'system' ? 7000 : 4000;
     setToasts(prev => [...prev, { id, content, type, duration, ...target }]);
+  };
+
+  const showRetryToast = (message: string, retryFn: () => void) => {
+    const retryKey = Math.random().toString(36).substring(2, 11);
+    retryHandlersRef.current.set(retryKey, () => {
+      retryHandlersRef.current.delete(retryKey);
+      retryFn();
+    });
+    addToast(message, 'system', { retryKey }, { skipPrefCheck: true });
   };
 
   const goHome = (opts?: { skipUrlSync?: boolean }) => {
@@ -1159,6 +1178,11 @@ export default function App() {
   };
 
   const handleToastClick = (toast: Toast) => {
+    if (toast.retryKey) {
+      const handler = retryHandlersRef.current.get(toast.retryKey);
+      if (handler) handler();
+      return;
+    }
     if (toast.olabidItemId) {
       if (olabidEnabled) openOlabidItem(toast.olabidItemId);
       return;
@@ -1355,6 +1379,7 @@ export default function App() {
       setOnlineUserIds(new Set());
       setUnreadNotifsCount(0);
       setUnreadMessagesCount(0);
+      appliedIncomingUnreadRef.current.clear();
       setIntroWalkthroughCompleted(null);
     }
   }, [token]);
@@ -1487,31 +1512,42 @@ export default function App() {
               }
 
               if (isIncoming && !isViewingChat) {
-                setMessageIconPulseAt(Date.now());
-                setThreads(prev => {
-                  const idx = prev.findIndex(t => t.id === partnerId);
-                  if (idx === -1) {
-                    fetchThreads();
-                    return prev;
-                  }
-                  setUnreadMessagesCount(count => count + 1);
-                  return prev.map(t =>
-                    t.id === partnerId
-                      ? {
-                          ...t,
-                          unreadCount: t.unreadCount + 1,
-                          lastMessage: {
-                            id: msg.id,
-                            content: msg.content.trim() ? msg.content : msg.mediaUrl ? 'Photo' : '',
-                            createdAt: msg.createdAt,
-                            senderId: msg.senderId,
-                            read: false,
-                            status: msg.status,
-                          },
-                        }
-                      : t,
+                // Dedupe by message id (duplicate WS / reconnect). Never call setState
+                // setters as side effects inside another updater — Strict Mode re-runs
+                // updaters and was double-counting the badge.
+                const alreadyCounted =
+                  msg.id > 0 && appliedIncomingUnreadRef.current.has(msg.id);
+                if (msg.id > 0) appliedIncomingUnreadRef.current.add(msg.id);
+
+                const lastMessage = {
+                  id: msg.id,
+                  content: msg.content.trim() ? msg.content : msg.mediaUrl ? 'Photo' : '',
+                  createdAt: msg.createdAt,
+                  senderId: msg.senderId,
+                  read: false as const,
+                  status: msg.status,
+                };
+
+                if (alreadyCounted) {
+                  setThreads(prev =>
+                    prev.map(t => (t.id === partnerId ? { ...t, lastMessage } : t)),
                   );
-                });
+                } else {
+                  setMessageIconPulseAt(Date.now());
+                  const hasThread = threadsRef.current.some(t => t.id === partnerId);
+                  if (!hasThread) {
+                    void fetchThreads();
+                  } else {
+                    setUnreadMessagesCount(count => count + 1);
+                    setThreads(prev =>
+                      prev.map(t =>
+                        t.id === partnerId
+                          ? { ...t, unreadCount: t.unreadCount + 1, lastMessage }
+                          : t,
+                      ),
+                    );
+                  }
+                }
               } else {
                 setThreads(prev => {
                   const idx = prev.findIndex(t => t.id === partnerId);
@@ -1522,7 +1558,11 @@ export default function App() {
                           ...t,
                           lastMessage: {
                             id: msg.id,
-                            content: msg.content.trim() ? msg.content : msg.mediaUrl ? 'Photo' : '',
+                            content: msg.content.trim()
+                              ? msg.content
+                              : msg.mediaUrl
+                                ? 'Photo'
+                                : '',
                             createdAt: msg.createdAt,
                             senderId: msg.senderId,
                             read: msg.read,
@@ -1718,7 +1758,27 @@ export default function App() {
             case 'post_created': {
               const { post } = message.payload;
               if (!shouldShowPostInFeed(post, currentUser!.id)) break;
-              setPosts(prev => (prev.some(p => p.id === post.id) ? prev : [post, ...prev]));
+              setPosts(prev => {
+                if (prev.some(p => p.id === post.id)) return prev;
+                // Reconcile optimistic create: swap own pending row instead of duplicating.
+                const pendingIdx = prev.findIndex(
+                  p =>
+                    (p.isPending || p.isError) &&
+                    p.userId === post.userId &&
+                    p.userId === currentUser!.id,
+                );
+                if (pendingIdx >= 0) {
+                  const next = [...prev];
+                  next[pendingIdx] = {
+                    ...post,
+                    isPending: false,
+                    isError: false,
+                    clientPostKey: undefined,
+                  };
+                  return next;
+                }
+                return [post, ...prev];
+              });
               break;
             }
             case 'post_deleted': {
@@ -2112,52 +2172,204 @@ export default function App() {
     setPostViewPost(prev => (prev?.id === postId ? merge(prev) : prev));
   };
 
+  const replacePostByTempKey = (
+    tempId: number,
+    clientPostKey: string | undefined,
+    serverPost: import('@hin/types').Post,
+  ) => {
+    const merge = (p: import('@hin/types').Post) =>
+      p.id === tempId || (clientPostKey && p.clientPostKey === clientPostKey)
+        ? { ...serverPost, isPending: false, isError: false, clientPostKey: undefined }
+        : p;
+    setPosts(prev => {
+      if (prev.some(p => p.id === serverPost.id && p.id !== tempId)) {
+        return prev.filter(p => p.id !== tempId && p.clientPostKey !== clientPostKey);
+      }
+      return prev.map(merge);
+    });
+    setProfilePosts(prev => {
+      if (prev.some(p => p.id === serverPost.id && p.id !== tempId)) {
+        return prev.filter(p => p.id !== tempId && p.clientPostKey !== clientPostKey);
+      }
+      return prev.map(merge);
+    });
+    setPostViewPost(prev => (prev ? merge(prev) : prev));
+    setPostViewThreadReplies(prev => prev.map(merge));
+  };
+
+  const removeTempPost = (tempId: number, clientPostKey?: string) => {
+    const match = (p: import('@hin/types').Post) =>
+      p.id === tempId || (!!clientPostKey && p.clientPostKey === clientPostKey);
+    setPosts(prev => prev.filter(p => !match(p)));
+    setProfilePosts(prev => prev.filter(p => !match(p)));
+    setPostViewPost(prev => (prev && match(prev) ? null : prev));
+    setPostViewThreadReplies(prev => prev.filter(p => !match(p)));
+  };
+
+  const markTempPostError = (tempId: number, clientPostKey?: string) => {
+    const mark = (p: import('@hin/types').Post) =>
+      p.id === tempId || (clientPostKey && p.clientPostKey === clientPostKey)
+        ? { ...p, isPending: false, isError: true }
+        : p;
+    setPosts(prev => prev.map(mark));
+    setProfilePosts(prev => prev.map(mark));
+    setPostViewPost(prev => (prev ? mark(prev) : prev));
+    setPostViewThreadReplies(prev => prev.map(mark));
+  };
+
   const handleCreatePost = async (_e: React.FormEvent, payload: CreatePostSubmitPayload) => {
     if (!currentUser) return;
     if (payload.kind === 'text' && !newPostContent.trim()) return;
     if (payload.kind === 'poll' && !payload.poll.question.trim()) return;
 
+    const content =
+      payload.kind === 'poll' ? newPostContent.trim() : newPostContent;
     const body =
       payload.kind === 'poll'
         ? {
             type: 'poll' as const,
-            content: newPostContent.trim(),
+            content,
             mediaUrls: payload.mediaUrls.length ? payload.mediaUrls : undefined,
             visibility: payload.visibility,
             ...payload.poll,
           }
         : {
-            content: newPostContent,
+            content,
             mediaUrls: payload.mediaUrls.length ? payload.mediaUrls : undefined,
             visibility: payload.visibility,
           };
 
-    const res = await fetch(`${API_URL}/api/posts`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || 'Failed to create post');
-    }
-    const newPost = await res.json();
-    setPosts(prev => (prev.some(p => p.id === newPost.id) ? prev : [newPost, ...prev]));
+    const clientPostKey = randomId();
+    const tempId = -Date.now();
+    const optimisticPoll =
+      payload.kind === 'poll'
+        ? {
+            id: tempId,
+            postId: tempId,
+            question: payload.poll.question,
+            endsAt: payload.poll.endsAt ?? null,
+            maxSelections: payload.poll.maxSelections,
+            allowVoteChange: payload.poll.allowVoteChange,
+            allowVoteRetraction: payload.poll.allowVoteRetraction,
+            isAnonymous: payload.poll.isAnonymous,
+            resultsVisibility: payload.poll.resultsVisibility,
+            status: 'open' as const,
+            totalVotes: 0,
+            options: payload.poll.options.map((opt, i) => ({
+              id: -(i + 1),
+              position: i,
+              label: opt.label,
+              voteCount: 0,
+              votePercent: 0,
+            })),
+            userVoteOptionIds: [] as number[],
+            showResults: true,
+            isExpired: false,
+          }
+        : undefined;
+
+    const tempPost: import('@hin/types').Post = {
+      id: tempId,
+      userId: currentUser.id,
+      username: currentUser.username,
+      authorAvatarUrl: currentUser.avatarUrl,
+      authorRole: currentUser.role,
+      authorEquippedBadges: currentUser.equippedBadges,
+      type: payload.kind === 'poll' ? 'poll' : 'text',
+      content,
+      mediaUrls: payload.mediaUrls,
+      createdAt: new Date().toISOString(),
+      likesCount: 0,
+      commentsCount: 0,
+      hasLiked: false,
+      hasBookmarked: false,
+      visibility: payload.visibility,
+      poll: optimisticPoll,
+      linkPreview: postSeedPreview,
+      isPending: true,
+      clientPostKey,
+    };
+
+    setPosts(prev => [tempPost, ...prev]);
     if (profileUserId === currentUser.id) {
-      setProfilePosts(prev => (prev.some(p => p.id === newPost.id) ? prev : [newPost, ...prev]));
+      setProfilePosts(prev => [tempPost, ...prev]);
       setProfileUser(prev => (prev ? { ...prev, postCount: (prev.postCount || 0) + 1 } : prev));
     }
     setNewPostContent('');
     setPostSeedPreview(null);
     setShowNewPostForm(false);
-    setNewlyCreatedPostId(newPost.id);
-    setTimeout(() => setNewlyCreatedPostId(null), 3000);
-    if (newPost.g) {
-      void fetchMyGamification();
-      if ((newPost.g.pe ?? 0) > 0) {
-        addToast(`+${newPost.g.pe} points earned!`, 'badge_award', undefined, { skipPrefCheck: true });
+    pendingPostBodiesRef.current.set(clientPostKey, body as Record<string, unknown>);
+
+    await persistOptimisticPost(tempId, clientPostKey, body as Record<string, unknown>);
+  };
+
+  const persistOptimisticPost = async (
+    tempId: number,
+    clientPostKey: string | undefined,
+    body: Record<string, unknown>,
+  ) => {
+    if (!currentUser) return;
+    const markPending = (p: import('@hin/types').Post) =>
+      p.id === tempId || (clientPostKey && p.clientPostKey === clientPostKey)
+        ? { ...p, isPending: true, isError: false }
+        : p;
+    setPosts(prev => prev.map(markPending));
+    setProfilePosts(prev => prev.map(markPending));
+
+    try {
+      const res = await fetch(`${API_URL}/api/posts`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        markTempPostError(tempId, clientPostKey);
+        showRetryToast((data.error as string) || 'Failed to send — Tap to retry', () => {
+          void persistOptimisticPost(tempId, clientPostKey, body);
+        });
+        return;
       }
+      const newPost = await res.json();
+      if (clientPostKey) pendingPostBodiesRef.current.delete(clientPostKey);
+      replacePostByTempKey(tempId, clientPostKey, newPost);
+      setNewlyCreatedPostId(newPost.id);
+      setTimeout(() => setNewlyCreatedPostId(null), 3000);
+      if (newPost.g) {
+        void fetchMyGamification();
+        if ((newPost.g.pe ?? 0) > 0) {
+          addToast(`+${newPost.g.pe} points earned!`, 'badge_award', undefined, {
+            skipPrefCheck: true,
+          });
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      markTempPostError(tempId, clientPostKey);
+      showRetryToast('Failed to send — Tap to retry', () => {
+        void persistOptimisticPost(tempId, clientPostKey, body);
+      });
     }
+  };
+
+  const handleRetryPendingPost = (postId: number) => {
+    const source =
+      posts.find(p => p.id === postId) ||
+      profilePosts.find(p => p.id === postId);
+    if (!source?.isError || !source.clientPostKey) return;
+    const body = pendingPostBodiesRef.current.get(source.clientPostKey);
+    if (!body) {
+      removeTempPost(postId, source.clientPostKey);
+      if (profileUserId === currentUser?.id) {
+        setProfileUser(prev =>
+          prev ? { ...prev, postCount: Math.max(0, (prev.postCount || 0) - 1) } : prev,
+        );
+      }
+      setNewPostContent(source.content);
+      setShowNewPostForm(true);
+      return;
+    }
+    void persistOptimisticPost(postId, source.clientPostKey, body);
   };
 
   const updatePostInState = (updated: import('@hin/types').Post) => {
@@ -2168,70 +2380,171 @@ export default function App() {
   };
 
   const handlePinPost = async (postId: number) => {
-    const res = await fetch(`${API_URL}/api/posts/${postId}/pin`, {
-      method: 'POST',
-      headers: getHeaders(),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      addToast(data.error || 'Failed to pin post', 'system', undefined, { skipPrefCheck: true });
-      return;
+    const source =
+      posts.find(p => p.id === postId) ||
+      profilePosts.find(p => p.id === postId) ||
+      (postViewPost?.id === postId ? postViewPost : null);
+    if (!source || source.isPending) return;
+    const prevPinnedAt = source.pinnedAt ?? null;
+    const optimistic = { ...source, pinnedAt: new Date().toISOString() };
+    updatePostInState(optimistic);
+
+    try {
+      const res = await fetch(`${API_URL}/api/posts/${postId}/pin`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        updatePostInState({ ...source, pinnedAt: prevPinnedAt });
+        showRetryToast(data.error || 'Failed to pin — Tap to retry', () => {
+          void handlePinPost(postId);
+        });
+        return;
+      }
+      const updated = await res.json();
+      updatePostInState(updated);
+      if (profileUserId) fetchProfilePosts(profileUserId);
+      addToast('Post pinned to profile', 'system', undefined, { skipPrefCheck: true });
+    } catch (e) {
+      console.error(e);
+      updatePostInState({ ...source, pinnedAt: prevPinnedAt });
+      showRetryToast('Failed to pin — Tap to retry', () => {
+        void handlePinPost(postId);
+      });
     }
-    const updated = await res.json();
-    updatePostInState(updated);
-    if (profileUserId) fetchProfilePosts(profileUserId);
-    addToast('Post pinned to profile', 'system', undefined, { skipPrefCheck: true });
   };
 
   const handleUnpinPost = async (postId: number) => {
-    const res = await fetch(`${API_URL}/api/posts/${postId}/pin`, {
-      method: 'DELETE',
-      headers: getHeaders(),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      addToast(data.error || 'Failed to unpin post', 'system', undefined, { skipPrefCheck: true });
-      return;
+    const source =
+      posts.find(p => p.id === postId) ||
+      profilePosts.find(p => p.id === postId) ||
+      (postViewPost?.id === postId ? postViewPost : null);
+    if (!source || source.isPending) return;
+    const prevPinnedAt = source.pinnedAt ?? null;
+    const optimistic = { ...source, pinnedAt: null };
+    updatePostInState(optimistic);
+
+    try {
+      const res = await fetch(`${API_URL}/api/posts/${postId}/pin`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        updatePostInState({ ...source, pinnedAt: prevPinnedAt });
+        showRetryToast(data.error || 'Failed to unpin — Tap to retry', () => {
+          void handleUnpinPost(postId);
+        });
+        return;
+      }
+      const updated = await res.json();
+      updatePostInState(updated);
+      if (profileUserId) fetchProfilePosts(profileUserId);
+      addToast('Post unpinned', 'system', undefined, { skipPrefCheck: true });
+    } catch (e) {
+      console.error(e);
+      updatePostInState({ ...source, pinnedAt: prevPinnedAt });
+      showRetryToast('Failed to unpin — Tap to retry', () => {
+        void handleUnpinPost(postId);
+      });
     }
-    const updated = await res.json();
-    updatePostInState(updated);
-    if (profileUserId) fetchProfilePosts(profileUserId);
-    addToast('Post unpinned', 'system', undefined, { skipPrefCheck: true });
   };
 
-  const handleSubmitThreadReply = async (postId: number) => {
-    if (!threadReplyContent.trim()) return;
+  const handleSubmitThreadReply = async (postId: number, contentOverride?: string) => {
+    if (!currentUser) return;
+    const content = (contentOverride ?? threadReplyContent).trim();
+    if (!content) return;
     const limits = systemSettings ?? DEFAULT_SYSTEM_SETTINGS;
-    const limitError = validatePostLimits(threadReplyContent.trim(), 0, limits);
+    const limitError = validatePostLimits(content, 0, limits);
     if (limitError) {
       addToast(limitError, 'system', undefined, { skipPrefCheck: true });
       return;
     }
-    const res = await fetch(`${API_URL}/api/posts`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ content: threadReplyContent.trim(), replyToPostId: postId }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      addToast(data.error || 'Failed to add thread reply', 'system', undefined, { skipPrefCheck: true });
-      return;
-    }
-    const reply = await res.json();
-    setThreadReplyContent('');
-    setThreadReplyTargetId(null);
-    const rootId = postId;
+
+    const clientPostKey = randomId();
+    const tempId = -Date.now();
+    const tempReply: import('@hin/types').Post = {
+      id: tempId,
+      userId: currentUser.id,
+      username: currentUser.username,
+      authorAvatarUrl: currentUser.avatarUrl,
+      authorRole: currentUser.role,
+      authorEquippedBadges: currentUser.equippedBadges,
+      type: 'text',
+      content,
+      mediaUrls: [],
+      createdAt: new Date().toISOString(),
+      likesCount: 0,
+      commentsCount: 0,
+      hasLiked: false,
+      hasBookmarked: false,
+      parentPostId: postId,
+      threadRootId: postId,
+      isPending: true,
+      clientPostKey,
+    };
+
     const bumpThreadCount = (p: import('@hin/types').Post) =>
-      p.id === rootId
+      p.id === postId
         ? { ...p, threadReplyCount: (p.threadReplyCount ?? 0) + 1 }
         : p;
+    const unbumpThreadCount = (p: import('@hin/types').Post) =>
+      p.id === postId
+        ? { ...p, threadReplyCount: Math.max(0, (p.threadReplyCount ?? 0) - 1) }
+        : p;
+
+    setThreadReplyContent('');
+    setThreadReplyTargetId(null);
     setPosts(prev => prev.map(bumpThreadCount));
     setProfilePosts(prev => prev.map(bumpThreadCount));
-    setPostViewPost(prev => (prev?.id === rootId ? bumpThreadCount(prev) : prev));
-    if (postViewId === rootId) {
-      setPostViewThreadReplies(prev => [...prev, reply]);
+    setPostViewPost(prev => (prev?.id === postId ? bumpThreadCount(prev) : prev));
+    if (postViewId === postId) {
+      setPostViewThreadReplies(prev => [...prev, tempReply]);
     }
-    addToast('Thread reply posted', 'system', undefined, { skipPrefCheck: true });
+
+    try {
+      const res = await fetch(`${API_URL}/api/posts`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ content, replyToPostId: postId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setPosts(prev => prev.map(unbumpThreadCount));
+        setProfilePosts(prev => prev.map(unbumpThreadCount));
+        setPostViewPost(prev => (prev?.id === postId ? unbumpThreadCount(prev) : prev));
+        removeTempPost(tempId, clientPostKey);
+        showRetryToast(data.error || 'Failed to send — Tap to retry', () => {
+          void handleSubmitThreadReply(postId, content);
+        });
+        return;
+      }
+      const reply = await res.json();
+      replacePostByTempKey(tempId, clientPostKey, reply);
+      if (postViewId === postId) {
+        setPostViewThreadReplies(prev => {
+          if (prev.some(p => p.id === reply.id)) {
+            return prev.filter(p => p.id !== tempId && p.clientPostKey !== clientPostKey);
+          }
+          return prev.map(p =>
+            p.id === tempId || p.clientPostKey === clientPostKey
+              ? { ...reply, isPending: false, isError: false, clientPostKey: undefined }
+              : p,
+          );
+        });
+      }
+      addToast('Thread reply posted', 'system', undefined, { skipPrefCheck: true });
+    } catch (e) {
+      console.error(e);
+      setPosts(prev => prev.map(unbumpThreadCount));
+      setProfilePosts(prev => prev.map(unbumpThreadCount));
+      setPostViewPost(prev => (prev?.id === postId ? unbumpThreadCount(prev) : prev));
+      removeTempPost(tempId, clientPostKey);
+      showRetryToast('Failed to send — Tap to retry', () => {
+        void handleSubmitThreadReply(postId, content);
+      });
+    }
   };
 
   const handleDeleteAccount = async (password: string) => {
@@ -2253,30 +2566,80 @@ export default function App() {
   };
 
   const handleVotePoll = async (postId: number, optionIds: number[]) => {
-    const res = await fetch(`${API_URL}/api/posts/${postId}/poll/vote`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ optionIds }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || 'Failed to vote');
+    if (postId <= 0 || optionIds.some(id => id <= 0)) return;
+    const source =
+      posts.find(p => p.id === postId) ||
+      profilePosts.find(p => p.id === postId) ||
+      (postViewPost?.id === postId ? postViewPost : null);
+    const prevPoll = source?.poll;
+    if (!prevPoll || source.isPending) return;
+
+    const isAuthor = !!currentUser && source.userId === currentUser.id;
+    applyPollUpdate(postId, computeOptimisticPoll(prevPoll, optionIds, 'vote', isAuthor));
+
+    try {
+      const res = await fetch(`${API_URL}/api/posts/${postId}/poll/vote`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ optionIds }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        applyPollUpdate(postId, prevPoll);
+        showRetryToast(data.error || 'Failed to vote — Tap to retry', () => {
+          void handleVotePoll(postId, optionIds);
+        });
+        throw new Error(data.error || 'Failed to vote');
+      }
+      const { poll } = await res.json();
+      applyPollUpdate(postId, poll);
+    } catch (e) {
+      if (!(e instanceof Error) || e.name === 'TypeError') {
+        applyPollUpdate(postId, prevPoll);
+        showRetryToast('Failed to vote — Tap to retry', () => {
+          void handleVotePoll(postId, optionIds);
+        });
+      }
+      throw e instanceof Error ? e : new Error('Failed to vote');
     }
-    const { poll } = await res.json();
-    applyPollUpdate(postId, poll);
   };
 
   const handleRetractPollVote = async (postId: number) => {
-    const res = await fetch(`${API_URL}/api/posts/${postId}/poll/vote`, {
-      method: 'DELETE',
-      headers: getHeaders(),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || 'Failed to retract vote');
+    if (postId <= 0) return;
+    const source =
+      posts.find(p => p.id === postId) ||
+      profilePosts.find(p => p.id === postId) ||
+      (postViewPost?.id === postId ? postViewPost : null);
+    const prevPoll = source?.poll;
+    if (!prevPoll || source.isPending) return;
+
+    const isAuthor = !!currentUser && source.userId === currentUser.id;
+    applyPollUpdate(postId, computeOptimisticPoll(prevPoll, [], 'retract', isAuthor));
+
+    try {
+      const res = await fetch(`${API_URL}/api/posts/${postId}/poll/vote`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        applyPollUpdate(postId, prevPoll);
+        showRetryToast(data.error || 'Failed to retract — Tap to retry', () => {
+          void handleRetractPollVote(postId);
+        });
+        throw new Error(data.error || 'Failed to retract vote');
+      }
+      const { poll } = await res.json();
+      applyPollUpdate(postId, poll);
+    } catch (e) {
+      if (!(e instanceof Error) || e.name === 'TypeError') {
+        applyPollUpdate(postId, prevPoll);
+        showRetryToast('Failed to retract — Tap to retry', () => {
+          void handleRetractPollVote(postId);
+        });
+      }
+      throw e instanceof Error ? e : new Error('Failed to retract vote');
     }
-    const { poll } = await res.json();
-    applyPollUpdate(postId, poll);
   };
 
   const handleClosePoll = async (postId: number) => {
@@ -2843,7 +3206,7 @@ export default function App() {
       return;
     }
 
-    const clientMessageId = crypto.randomUUID();
+    const clientMessageId = randomId();
     const optimisticMsg: Message = {
       id: -Date.now(),
       senderId: currentUser.id,
@@ -2899,7 +3262,7 @@ export default function App() {
       return;
     }
     // Keep the same clientMessageId so the server returns the original row if it already committed.
-    const clientMessageId = failed.clientMessageId || crypto.randomUUID();
+    const clientMessageId = failed.clientMessageId || randomId();
     const retryMsg: Message = {
       ...failed,
       id: failed.id < 0 ? failed.id : -Date.now(),
@@ -3010,8 +3373,26 @@ export default function App() {
   };
 
   const handleFollow = async (userId: number) => {
-    if (!token || followBusy) return;
-    setFollowBusy(true);
+    if (!token) return;
+    const viewing = profileUser?.id === userId ? profileUser : null;
+    const prevStatus = viewing?.followStatus ?? 'none';
+    const prevFollowerCount = viewing?.followerCount ?? 0;
+    const prevFollowingCount = viewing?.followingCount;
+    const prevCanViewPosts = viewing?.canViewPosts;
+    const prevInSet = followedUserIds.has(userId);
+    const isPrivate = !!viewing?.isPrivate;
+    const optimisticStatus = isPrivate ? 'requested' : 'following';
+    const optimisticFollowerCount = isPrivate ? prevFollowerCount : prevFollowerCount + 1;
+
+    updateProfileFollowState(userId, {
+      followStatus: optimisticStatus,
+      followerCount: optimisticFollowerCount,
+      canViewPosts: optimisticStatus === 'following' ? true : prevCanViewPosts,
+    });
+    if (optimisticStatus === 'following') {
+      setFollowedUserIds(prev => new Set([...prev, userId]));
+    }
+
     try {
       const res = await fetch(`${API_URL}/api/follows/${userId}`, {
         method: 'POST',
@@ -3028,17 +3409,57 @@ export default function App() {
       if (data.followStatus === 'following') {
         setFollowedUserIds(prev => new Set([...prev, userId]));
         if (profileUserId === userId) fetchProfilePosts(userId);
+      } else {
+        setFollowedUserIds(prev => {
+          const next = new Set(prev);
+          next.delete(userId);
+          return next;
+        });
       }
     } catch (e) {
-      addToast(e instanceof Error ? e.message : 'Failed to follow', 'system', undefined, { skipPrefCheck: true });
-    } finally {
-      setFollowBusy(false);
+      updateProfileFollowState(userId, {
+        followStatus: prevStatus,
+        followerCount: prevFollowerCount,
+        followingCount: prevFollowingCount,
+        canViewPosts: prevCanViewPosts,
+      });
+      setFollowedUserIds(prev => {
+        const next = new Set(prev);
+        if (prevInSet) next.add(userId);
+        else next.delete(userId);
+        return next;
+      });
+      showRetryToast('Failed to follow — Tap to retry', () => {
+        void handleFollow(userId);
+      });
+      console.error(e);
     }
   };
 
   const handleUnfollow = async (userId: number) => {
-    if (!token || followBusy) return;
-    setFollowBusy(true);
+    if (!token) return;
+    const viewing = profileUser?.id === userId ? profileUser : null;
+    const prevStatus = viewing?.followStatus ?? 'following';
+    const prevFollowerCount = viewing?.followerCount ?? 0;
+    const prevCanViewPosts = viewing?.canViewPosts;
+    const prevInSet = followedUserIds.has(userId);
+    const prevProfilePosts = profilePosts;
+    const wasPrivate = !!viewing?.isPrivate;
+
+    updateProfileFollowState(userId, {
+      followStatus: 'none',
+      followerCount: Math.max(0, prevFollowerCount - 1),
+      canViewPosts: wasPrivate ? false : prevCanViewPosts,
+    });
+    setFollowedUserIds(prev => {
+      const next = new Set(prev);
+      next.delete(userId);
+      return next;
+    });
+    if (profileUserId === userId && wasPrivate) {
+      setProfilePosts([]);
+    }
+
     try {
       const res = await fetch(`${API_URL}/api/follows/${userId}`, {
         method: 'DELETE',
@@ -3049,27 +3470,45 @@ export default function App() {
       updateProfileFollowState(userId, {
         followStatus: data.followStatus,
         followerCount: data.followerCount,
-        canViewPosts: profileUser?.isPrivate ? false : profileUser?.canViewPosts,
+        canViewPosts: wasPrivate ? false : profileUser?.canViewPosts,
       });
       setFollowedUserIds(prev => {
         const next = new Set(prev);
         next.delete(userId);
         return next;
       });
-      if (profileUserId === userId && profileUser?.isPrivate) {
-        setProfilePosts([]);
+      if (profileUserId === userId && wasPrivate) {
         fetchProfilePosts(userId);
       }
     } catch (e) {
-      addToast(e instanceof Error ? e.message : 'Failed to unfollow', 'system', undefined, { skipPrefCheck: true });
-    } finally {
-      setFollowBusy(false);
+      updateProfileFollowState(userId, {
+        followStatus: prevStatus,
+        followerCount: prevFollowerCount,
+        canViewPosts: prevCanViewPosts,
+      });
+      setFollowedUserIds(prev => {
+        const next = new Set(prev);
+        if (prevInSet) next.add(userId);
+        else next.delete(userId);
+        return next;
+      });
+      if (profileUserId === userId && wasPrivate) {
+        setProfilePosts(prevProfilePosts);
+      }
+      showRetryToast('Failed to unfollow — Tap to retry', () => {
+        void handleUnfollow(userId);
+      });
+      console.error(e);
     }
   };
 
   const handleCancelFollowRequest = async (userId: number) => {
-    if (!token || followBusy) return;
-    setFollowBusy(true);
+    if (!token) return;
+    const viewing = profileUser?.id === userId ? profileUser : null;
+    const prevStatus = viewing?.followStatus ?? 'requested';
+
+    updateProfileFollowState(userId, { followStatus: 'none' });
+
     try {
       const res = await fetch(`${API_URL}/api/follows/${userId}/request`, {
         method: 'DELETE',
@@ -3079,9 +3518,11 @@ export default function App() {
       if (!res.ok) throw new Error(data.error || 'Failed to cancel request');
       updateProfileFollowState(userId, { followStatus: data.followStatus });
     } catch (e) {
-      addToast(e instanceof Error ? e.message : 'Failed to cancel request', 'system', undefined, { skipPrefCheck: true });
-    } finally {
-      setFollowBusy(false);
+      updateProfileFollowState(userId, { followStatus: prevStatus });
+      showRetryToast('Failed to cancel request — Tap to retry', () => {
+        void handleCancelFollowRequest(userId);
+      });
+      console.error(e);
     }
   };
 
@@ -3613,6 +4054,7 @@ export default function App() {
             onReportComment={(commentId) => handleOpenReport('comment', commentId)}
             onPinPost={handlePinPost}
             onUnpinPost={handleUnpinPost}
+            onRetryPendingPost={handleRetryPendingPost}
             onStartThreadReply={setThreadReplyTargetId}
             onCancelThreadReply={() => {
               setThreadReplyTargetId(null);
@@ -3771,6 +4213,7 @@ export default function App() {
             onReportComment={(commentId) => handleOpenReport('comment', commentId)}
             onPinPost={handlePinPost}
             onUnpinPost={handleUnpinPost}
+            onRetryPendingPost={handleRetryPendingPost}
             onStartThreadReply={setThreadReplyTargetId}
             onCancelThreadReply={() => {
               setThreadReplyTargetId(null);
@@ -3937,6 +4380,7 @@ export default function App() {
             onReportComment={(commentId) => handleOpenReport('comment', commentId)}
             onPinPost={handlePinPost}
             onUnpinPost={handleUnpinPost}
+            onRetryPendingPost={handleRetryPendingPost}
             onStartThreadReply={setThreadReplyTargetId}
             onCancelThreadReply={() => {
               setThreadReplyTargetId(null);
@@ -4018,6 +4462,7 @@ export default function App() {
             onReportComment={(commentId) => handleOpenReport('comment', commentId)}
             onPinPost={handlePinPost}
             onUnpinPost={handleUnpinPost}
+            onRetryPendingPost={handleRetryPendingPost}
             onStartThreadReply={setThreadReplyTargetId}
             onCancelThreadReply={() => {
               setThreadReplyTargetId(null);

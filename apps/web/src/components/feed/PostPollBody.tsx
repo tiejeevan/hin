@@ -39,7 +39,8 @@ export function PostPollBody({
   const isClosed = poll.status === 'closed' || poll.isExpired;
   const hasVoted = (poll.userVoteOptionIds?.length ?? 0) > 0;
   const isMulti = poll.maxSelections > 1;
-  const canVote = !isClosed && !submitting;
+  // Pending optimistic creates use temp ids — block votes until the server id exists.
+  const canVote = !isClosed && !post.isPending && post.id > 0;
   const showResults = poll.showResults;
 
   const toggleOption = (optionId: number) => {
@@ -136,13 +137,13 @@ export function PostPollBody({
             <button
               key={option.id}
               type="button"
-              disabled={!canVote && !showResults}
+              disabled={post.isPending || post.id <= 0 || (!canVote && !showResults)}
               onClick={() => toggleOption(option.id)}
               className={`w-full text-left relative overflow-hidden rounded-xl border transition-all cursor-pointer min-h-[44px] ${
                 displaySelected
                   ? 'border-indigo-500 bg-indigo-500/10'
                   : 'border-border-custom hover:border-indigo-500/50 bg-bg-primary/50'
-              } ${!canVote && !showResults ? 'opacity-60 cursor-not-allowed' : ''}`}
+              } ${post.isPending || post.id <= 0 || (!canVote && !showResults) ? 'opacity-60 cursor-not-allowed' : ''}`}
             >
               {showResults && poll.totalVotes > 0 && (
                 <div

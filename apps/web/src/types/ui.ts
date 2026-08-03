@@ -8,6 +8,8 @@ export interface Toast {
   postId?: number;
   commentId?: number;
   olabidItemId?: number;
+  /** When set, tapping the toast invokes the registered retry handler. */
+  retryKey?: string;
 }
 
 export interface AdminData {

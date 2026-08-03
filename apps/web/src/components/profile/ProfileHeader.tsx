@@ -124,7 +124,6 @@ export function ProfileHeader({
   const canInteract = blockStatus === 'none';
 
   const handleFollowClick = () => {
-    if (followBusy) return;
     if (isFollowing) onUnfollow(user.id);
     else if (isRequested) onCancelFollowRequest(user.id);
     else onFollow(user.id);
@@ -220,9 +219,8 @@ export function ProfileHeader({
               <>
                 <button
                   type="button"
-                  disabled={followBusy}
                   onClick={handleFollowClick}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer min-h-[44px] disabled:opacity-50 ${
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer min-h-[44px] ${
                     isFollowing || isRequested
                       ? 'border border-border-custom bg-bg-tertiary text-text-primary hover:bg-bg-tertiary/80'
                       : 'bg-indigo-600 hover:bg-indigo-500 text-white'
