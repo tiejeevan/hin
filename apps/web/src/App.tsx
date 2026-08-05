@@ -29,10 +29,12 @@ import {
   type GamificationPublic,
   type GamificationRewardPayload,
   type GamificationSettings,
+  isUnavailableRepostedPost,
 } from '@hin/types';
 import { API_URL, WS_URL } from './config';
 import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode, FeedMode } from './types/ui';
 import type { CreatePostSubmitPayload } from './components/feed/CreatePostForm';
+import { getPostEngagementId } from './components/feed/PostCard';
 import { mergePollFromBroadcast } from './utils/pollVisibility';
 import { computeOptimisticPoll } from './utils/optimisticPoll';
 import { parseLocation, syncUrl, postPermalinkUrl, profilePermalinkUrl, type AdminSection } from './lib/appRoutes';
@@ -232,13 +234,10 @@ export default function App() {
 
   const [postViewId, setPostViewId] = useState<number | null>(null);
   const [postViewPost, setPostViewPost] = useState<import('@hin/types').Post | null>(null);
-  const [postViewThreadReplies, setPostViewThreadReplies] = useState<import('@hin/types').Post[]>([]);
   const [postViewLoading, setPostViewLoading] = useState(false);
   const [postViewError, setPostViewError] = useState<{ status: number; message: string } | null>(null);
   const [highlightCommentId, setHighlightCommentId] = useState<number | null>(null);
   const [showGuestAuth, setShowGuestAuth] = useState(false);
-  const [threadReplyTargetId, setThreadReplyTargetId] = useState<number | null>(null);
-  const [threadReplyContent, setThreadReplyContent] = useState('');
 
   const ws = useRef<WebSocket | null>(null);
   const wsReadyRef = useRef(false);
@@ -1042,21 +1041,13 @@ export default function App() {
   const fetchPost = async (postId: number) => {
     setPostViewLoading(true);
     setPostViewError(null);
-    setPostViewThreadReplies([]);
     try {
-      const [postRes, threadRes] = await Promise.all([
-        fetch(`${API_URL}/api/posts/${postId}`, { headers: getHeaders() }),
-        fetch(`${API_URL}/api/posts/${postId}/thread`, { headers: getHeaders() }),
-      ]);
+      const postRes = await fetch(`${API_URL}/api/posts/${postId}`, { headers: getHeaders() });
       if (postRes.ok) {
         const post = await postRes.json();
         setPostViewPost(post);
         setExpandedComments(prev => ({ ...prev, [postId]: true }));
         fetchComments(postId);
-        if (threadRes.ok) {
-          const thread = await threadRes.json();
-          setPostViewThreadReplies(thread.replies ?? []);
-        }
       } else {
         const data = await postRes.json().catch(() => ({}));
         setPostViewPost(null);
@@ -1832,6 +1823,39 @@ export default function App() {
               setPostViewPost(prev => (prev ? mergeLike(prev) : prev));
               break;
             }
+            case 'repost_count_update': {
+              const { postId, repostsCount, userId, reposted } = message.payload;
+              const mergeRepost = (p: import('@hin/types').Post): import('@hin/types').Post => {
+                let next = p;
+                if (p.id === postId) {
+                  next = {
+                    ...p,
+                    repostsCount,
+                    hasReposted: userId === currentUser!.id ? reposted : p.hasReposted,
+                  };
+                }
+                if (
+                  p.repostedPost &&
+                  !isUnavailableRepostedPost(p.repostedPost) &&
+                  p.repostedPost.id === postId
+                ) {
+                  next = {
+                    ...next,
+                    repostedPost: {
+                      ...p.repostedPost,
+                      repostsCount,
+                      hasReposted:
+                        userId === currentUser!.id ? reposted : p.repostedPost.hasReposted,
+                    },
+                  };
+                }
+                return next;
+              };
+              setPosts(prev => prev.map(mergeRepost));
+              setProfilePosts(prev => prev.map(mergeRepost));
+              setPostViewPost(prev => (prev ? mergeRepost(prev) : prev));
+              break;
+            }
             case 'comment_like_update': {
               const { commentId, postId, likesCount, userId, liked } = message.payload;
               setPostComments(prev => ({
@@ -2194,7 +2218,6 @@ export default function App() {
       return prev.map(merge);
     });
     setPostViewPost(prev => (prev ? merge(prev) : prev));
-    setPostViewThreadReplies(prev => prev.map(merge));
   };
 
   const removeTempPost = (tempId: number, clientPostKey?: string) => {
@@ -2203,7 +2226,6 @@ export default function App() {
     setPosts(prev => prev.filter(p => !match(p)));
     setProfilePosts(prev => prev.filter(p => !match(p)));
     setPostViewPost(prev => (prev && match(prev) ? null : prev));
-    setPostViewThreadReplies(prev => prev.filter(p => !match(p)));
   };
 
   const markTempPostError = (tempId: number, clientPostKey?: string) => {
@@ -2214,7 +2236,6 @@ export default function App() {
     setPosts(prev => prev.map(mark));
     setProfilePosts(prev => prev.map(mark));
     setPostViewPost(prev => (prev ? mark(prev) : prev));
-    setPostViewThreadReplies(prev => prev.map(mark));
   };
 
   const handleCreatePost = async (_e: React.FormEvent, payload: CreatePostSubmitPayload) => {
@@ -2451,102 +2472,6 @@ export default function App() {
     }
   };
 
-  const handleSubmitThreadReply = async (postId: number, contentOverride?: string) => {
-    if (!currentUser) return;
-    const content = (contentOverride ?? threadReplyContent).trim();
-    if (!content) return;
-    const limits = systemSettings ?? DEFAULT_SYSTEM_SETTINGS;
-    const limitError = validatePostLimits(content, 0, limits);
-    if (limitError) {
-      addToast(limitError, 'system', undefined, { skipPrefCheck: true });
-      return;
-    }
-
-    const clientPostKey = randomId();
-    const tempId = -Date.now();
-    const tempReply: import('@hin/types').Post = {
-      id: tempId,
-      userId: currentUser.id,
-      username: currentUser.username,
-      authorAvatarUrl: currentUser.avatarUrl,
-      authorRole: currentUser.role,
-      authorEquippedBadges: currentUser.equippedBadges,
-      type: 'text',
-      content,
-      mediaUrls: [],
-      createdAt: new Date().toISOString(),
-      likesCount: 0,
-      commentsCount: 0,
-      hasLiked: false,
-      hasBookmarked: false,
-      parentPostId: postId,
-      threadRootId: postId,
-      isPending: true,
-      clientPostKey,
-    };
-
-    const bumpThreadCount = (p: import('@hin/types').Post) =>
-      p.id === postId
-        ? { ...p, threadReplyCount: (p.threadReplyCount ?? 0) + 1 }
-        : p;
-    const unbumpThreadCount = (p: import('@hin/types').Post) =>
-      p.id === postId
-        ? { ...p, threadReplyCount: Math.max(0, (p.threadReplyCount ?? 0) - 1) }
-        : p;
-
-    setThreadReplyContent('');
-    setThreadReplyTargetId(null);
-    setPosts(prev => prev.map(bumpThreadCount));
-    setProfilePosts(prev => prev.map(bumpThreadCount));
-    setPostViewPost(prev => (prev?.id === postId ? bumpThreadCount(prev) : prev));
-    if (postViewId === postId) {
-      setPostViewThreadReplies(prev => [...prev, tempReply]);
-    }
-
-    try {
-      const res = await fetch(`${API_URL}/api/posts`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ content, replyToPostId: postId }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setPosts(prev => prev.map(unbumpThreadCount));
-        setProfilePosts(prev => prev.map(unbumpThreadCount));
-        setPostViewPost(prev => (prev?.id === postId ? unbumpThreadCount(prev) : prev));
-        removeTempPost(tempId, clientPostKey);
-        showRetryToast(data.error || 'Failed to send — Tap to retry', () => {
-          void handleSubmitThreadReply(postId, content);
-        });
-        return;
-      }
-      const reply = await res.json();
-      replacePostByTempKey(tempId, clientPostKey, reply);
-      if (postViewId === postId) {
-        setPostViewThreadReplies(prev => {
-          if (prev.some(p => p.id === reply.id)) {
-            return prev.filter(p => p.id !== tempId && p.clientPostKey !== clientPostKey);
-          }
-          return prev.map(p =>
-            p.id === tempId || p.clientPostKey === clientPostKey
-              ? { ...reply, isPending: false, isError: false, clientPostKey: undefined }
-              : p,
-          );
-        });
-      }
-      addToast('Thread reply posted', 'system', undefined, { skipPrefCheck: true });
-    } catch (e) {
-      console.error(e);
-      setPosts(prev => prev.map(unbumpThreadCount));
-      setProfilePosts(prev => prev.map(unbumpThreadCount));
-      setPostViewPost(prev => (prev?.id === postId ? unbumpThreadCount(prev) : prev));
-      removeTempPost(tempId, clientPostKey);
-      showRetryToast('Failed to send — Tap to retry', () => {
-        void handleSubmitThreadReply(postId, content);
-      });
-    }
-  };
-
   const handleDeleteAccount = async (password: string) => {
     try {
       const res = await fetch(`${API_URL}/api/users/me`, {
@@ -2699,12 +2624,27 @@ export default function App() {
     }
   };
 
+  const findPost = (postId: number): import('@hin/types').Post | null => {
+    const scan = (list: import('@hin/types').Post[]): import('@hin/types').Post | null => {
+      for (const p of list) {
+        if (p.id === postId) return p;
+        const embedded = p.repostedPost;
+        if (embedded && !isUnavailableRepostedPost(embedded) && embedded.id === postId) {
+          return embedded;
+        }
+      }
+      return null;
+    };
+    return (
+      scan(posts) ||
+      scan(profilePosts) ||
+      (postViewPost ? scan([postViewPost]) : null)
+    );
+  };
+
   const handleToggleLike = async (postId: number) => {
     if (!currentUser) return;
-    const source =
-      posts.find((p) => p.id === postId) ||
-      profilePosts.find((p) => p.id === postId) ||
-      (postViewPost?.id === postId ? postViewPost : null);
+    const source = findPost(postId);
     if (!source) return;
 
     const prevLiked = !!source.hasLiked;
@@ -2713,15 +2653,26 @@ export default function App() {
     const nextCount = Math.max(0, prevCount + (nextLiked ? 1 : -1));
 
     const applyLike = (liked: boolean, likesCount: number) => {
-      setPosts((prev) =>
-        prev.map((p) => (p.id === postId ? { ...p, hasLiked: liked, likesCount } : p)),
-      );
-      setProfilePosts((prev) =>
-        prev.map((p) => (p.id === postId ? { ...p, hasLiked: liked, likesCount } : p)),
-      );
-      setPostViewPost((prev) =>
-        prev?.id === postId ? { ...prev, hasLiked: liked, likesCount } : prev,
-      );
+      const merge = (p: import('@hin/types').Post): import('@hin/types').Post => {
+        let next = p;
+        if (p.id === postId) {
+          next = { ...p, hasLiked: liked, likesCount };
+        }
+        if (
+          p.repostedPost &&
+          !isUnavailableRepostedPost(p.repostedPost) &&
+          p.repostedPost.id === postId
+        ) {
+          next = {
+            ...next,
+            repostedPost: { ...p.repostedPost, hasLiked: liked, likesCount },
+          };
+        }
+        return next;
+      };
+      setPosts(prev => prev.map(merge));
+      setProfilePosts(prev => prev.map(merge));
+      setPostViewPost(prev => (prev ? merge(prev) : prev));
     };
 
     applyLike(nextLiked, nextCount);
@@ -2807,8 +2758,107 @@ export default function App() {
     }
   };
 
-  const handleSharePost = async (postId: number) => {
-    const post = postViewPost?.id === postId ? postViewPost : null;
+  const applyRepostCount = (originalId: number, repostsCount: number, hasReposted: boolean) => {
+    const merge = (p: import('@hin/types').Post): import('@hin/types').Post => {
+      let next = p;
+      if (p.id === originalId) {
+        next = { ...p, repostsCount, hasReposted };
+      }
+      if (
+        p.repostedPost &&
+        !isUnavailableRepostedPost(p.repostedPost) &&
+        p.repostedPost.id === originalId
+      ) {
+        next = {
+          ...next,
+          repostedPost: { ...p.repostedPost, repostsCount, hasReposted },
+        };
+      }
+      return next;
+    };
+    setPosts(prev => prev.map(merge));
+    setProfilePosts(prev => prev.map(merge));
+    setPostViewPost(prev => (prev ? merge(prev) : prev));
+  };
+
+  const handleRepost = async (postId: number) => {
+    if (!currentUser) return;
+    try {
+      const res = await fetch(`${API_URL}/api/posts/${postId}/repost`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const repostRow = data as import('@hin/types').Post;
+      const rootId = repostRow.repostOfPostId ?? postId;
+      const repostsCount = (data.repostsCount as number) ?? 0;
+      applyRepostCount(rootId, repostsCount, true);
+
+      setPosts(prev => {
+        if (prev.some(p => p.id === repostRow.id)) return prev;
+        return [repostRow, ...prev];
+      });
+      if (profileUserId === currentUser.id) {
+        setProfilePosts(prev => {
+          if (prev.some(p => p.id === repostRow.id)) return prev;
+          return [repostRow, ...prev];
+        });
+      }
+      addToast('Reposted', 'system', undefined, { skipPrefCheck: true });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleUndoRepost = async (postId: number) => {
+    if (!currentUser) return;
+    try {
+      const res = await fetch(`${API_URL}/api/posts/${postId}/repost`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const rootId = (data.postId as number) ?? postId;
+      const repostsCount = data.repostsCount as number;
+      applyRepostCount(rootId, repostsCount, false);
+
+      const isViewerSilentRepost = (p: import('@hin/types').Post) =>
+        p.repostOfPostId === rootId && !p.isQuote && p.userId === currentUser.id;
+      setPosts(prev => prev.filter(p => !isViewerSilentRepost(p)));
+      setProfilePosts(prev => prev.filter(p => !isViewerSilentRepost(p)));
+      addToast('Removed repost', 'system', undefined, { skipPrefCheck: true });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleQuotePost = async (postId: number, content: string) => {
+    if (!currentUser) return;
+    try {
+      const res = await fetch(`${API_URL}/api/posts`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ content, quotePostId: postId }),
+      });
+      if (!res.ok) return;
+      const newPost = (await res.json()) as import('@hin/types').Post;
+      setPosts(prev => [newPost, ...prev]);
+      if (profileUserId === currentUser.id) {
+        setProfilePosts(prev => [newPost, ...prev]);
+        setProfileUser(prev =>
+          prev ? { ...prev, postCount: (prev.postCount || 0) + 1 } : prev,
+        );
+      }
+      addToast('Quote posted', 'system', undefined, { skipPrefCheck: true });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleShareExternal = async (postId: number) => {
+    const post = findPost(postId);
     if (!post) return;
     const url = postPermalinkUrl(postId);
     const shareText = post.content.trim().slice(0, 200) || `Post by ${post.username}`;
@@ -2821,8 +2871,12 @@ export default function App() {
         });
         if (res.ok) {
           const data = await res.json();
+          const mergeShare = (p: import('@hin/types').Post) =>
+            p.id === postId ? { ...p, sharesCount: data.sharesCount } : p;
+          setPosts(prev => prev.map(mergeShare));
+          setProfilePosts(prev => prev.map(mergeShare));
           setPostViewPost(prev =>
-            prev?.id === postId ? { ...prev, sharesCount: data.sharesCount } : prev
+            prev?.id === postId ? { ...prev, sharesCount: data.sharesCount } : prev,
           );
         }
       } catch (e) {
@@ -3897,11 +3951,8 @@ export default function App() {
     setProfileGamification(null);
     setPostViewId(null);
     setPostViewPost(null);
-    setPostViewThreadReplies([]);
     setPostViewError(null);
     setHighlightCommentId(null);
-    setThreadReplyTargetId(null);
-    setThreadReplyContent('');
     setMyGamification(null);
     setIntroWalkthroughCompleted(false);
     clearChatState();
@@ -4049,22 +4100,15 @@ export default function App() {
             onClosePoll={handleClosePoll}
             onCopyPermalink={handleCopyPostPermalink}
             onToggleBookmark={handleToggleBookmark}
-            onShare={handleSharePost}
+            onRepost={handleRepost}
+            onUndoRepost={handleUndoRepost}
+            onQuotePost={handleQuotePost}
+            onShareExternal={handleShareExternal}
             onReportPost={(postId) => handleOpenReport('post', postId)}
             onReportComment={(commentId) => handleOpenReport('comment', commentId)}
             onPinPost={handlePinPost}
             onUnpinPost={handleUnpinPost}
             onRetryPendingPost={handleRetryPendingPost}
-            onStartThreadReply={setThreadReplyTargetId}
-            onCancelThreadReply={() => {
-              setThreadReplyTargetId(null);
-              setThreadReplyContent('');
-            }}
-            onSubmitThreadReply={handleSubmitThreadReply}
-            threadReplyTargetId={threadReplyTargetId}
-            threadReplyContent={threadReplyContent}
-            onThreadReplyContentChange={setThreadReplyContent}
-            threadPosts={postViewThreadReplies}
           />
         ) : undefined
       }
@@ -4141,10 +4185,20 @@ export default function App() {
             readOnly={!currentUser}
             gamificationEnabled={gamificationEnabled}
             highlightCommentId={highlightCommentId}
-            commentsList={postViewId ? (postComments[postViewId] ?? []) : []}
-            isCommentsExpanded={postViewId ? !!expandedComments[postViewId] : false}
-            newCommentText={postViewId ? (newCommentText[postViewId] ?? '') : ''}
-            replyingTo={postViewId ? (replyingTo[postViewId] ?? null) : null}
+            commentsList={
+              postViewPost
+                ? (postComments[getPostEngagementId(postViewPost)] ?? [])
+                : []
+            }
+            isCommentsExpanded={
+              postViewPost ? !!expandedComments[getPostEngagementId(postViewPost)] : false
+            }
+            newCommentText={
+              postViewPost ? (newCommentText[getPostEngagementId(postViewPost)] ?? '') : ''
+            }
+            replyingTo={
+              postViewPost ? (replyingTo[getPostEngagementId(postViewPost)] ?? null) : null
+            }
             editingPostId={editingPostId}
             editingPostContent={editingPostContent}
             editingCommentId={editingCommentId}
@@ -4207,23 +4261,18 @@ export default function App() {
             onClosePoll={handleClosePoll}
             onCopyPermalink={() => postViewId && handleCopyPostPermalink(postViewId)}
             onOpenOlabidItem={olabidEnabled ? openOlabidItem : undefined}
-            onToggleBookmark={() => postViewId && handleToggleBookmark(postViewId)}
-            onShare={() => postViewId && handleSharePost(postViewId)}
+            onToggleBookmark={() =>
+              postViewPost && handleToggleBookmark(getPostEngagementId(postViewPost))
+            }
+            onRepost={handleRepost}
+            onUndoRepost={handleUndoRepost}
+            onQuotePost={handleQuotePost}
+            onShareExternal={handleShareExternal}
             onReportPost={(postId) => handleOpenReport('post', postId)}
             onReportComment={(commentId) => handleOpenReport('comment', commentId)}
             onPinPost={handlePinPost}
             onUnpinPost={handleUnpinPost}
             onRetryPendingPost={handleRetryPendingPost}
-            onStartThreadReply={setThreadReplyTargetId}
-            onCancelThreadReply={() => {
-              setThreadReplyTargetId(null);
-              setThreadReplyContent('');
-            }}
-            onSubmitThreadReply={handleSubmitThreadReply}
-            threadReplyTargetId={threadReplyTargetId}
-            threadReplyContent={threadReplyContent}
-            onThreadReplyContentChange={setThreadReplyContent}
-            threadPosts={postViewThreadReplies}
             postLimits={postLimits}
           />
         ) : activeTab === 'profile' ? (
@@ -4337,6 +4386,10 @@ export default function App() {
             onOpenSettings={openProfileSettings}
             onCloseSettings={closeProfileSettings}
             onToggleLike={handleToggleLike}
+            onRepost={handleRepost}
+            onUndoRepost={handleUndoRepost}
+            onQuotePost={handleQuotePost}
+            onShareExternal={handleShareExternal}
             onToggleComments={toggleComments}
             onDeletePost={handleDeletePost}
             onStartPostEdit={(id, content) => {
@@ -4381,15 +4434,6 @@ export default function App() {
             onPinPost={handlePinPost}
             onUnpinPost={handleUnpinPost}
             onRetryPendingPost={handleRetryPendingPost}
-            onStartThreadReply={setThreadReplyTargetId}
-            onCancelThreadReply={() => {
-              setThreadReplyTargetId(null);
-              setThreadReplyContent('');
-            }}
-            onSubmitThreadReply={handleSubmitThreadReply}
-            threadReplyTargetId={threadReplyTargetId}
-            threadReplyContent={threadReplyContent}
-            onThreadReplyContentChange={setThreadReplyContent}
             onDeleteAccount={handleDeleteAccount}
             onSimulateSessionExpired={() => handleSessionExpired({ force: true })}
             postLimits={postLimits}
@@ -4429,6 +4473,10 @@ export default function App() {
             onNewPostContentChange={setNewPostContent}
             onCreatePost={handleCreatePost}
             onToggleLike={handleToggleLike}
+            onRepost={handleRepost}
+            onUndoRepost={handleUndoRepost}
+            onQuotePost={handleQuotePost}
+            onShareExternal={handleShareExternal}
             onToggleComments={toggleComments}
             onDeletePost={handleDeletePost}
             onStartPostEdit={(id, content) => {
@@ -4463,15 +4511,6 @@ export default function App() {
             onPinPost={handlePinPost}
             onUnpinPost={handleUnpinPost}
             onRetryPendingPost={handleRetryPendingPost}
-            onStartThreadReply={setThreadReplyTargetId}
-            onCancelThreadReply={() => {
-              setThreadReplyTargetId(null);
-              setThreadReplyContent('');
-            }}
-            onSubmitThreadReply={handleSubmitThreadReply}
-            threadReplyTargetId={threadReplyTargetId}
-            threadReplyContent={threadReplyContent}
-            onThreadReplyContentChange={setThreadReplyContent}
             postLimits={postLimits}
             gamificationEnabled={gamificationEnabled}
             onGamificationRefresh={() => { void fetchMyGamification(); }}

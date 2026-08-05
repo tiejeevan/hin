@@ -51,9 +51,16 @@ const METRIC_DEFINITIONS: MetricDefinition[] = [
   {
     key: 'unique_posts_shared',
     label: 'Share unique posts',
-    description: 'Distinct posts the user has shared',
+    description: 'Distinct posts the user has shared externally',
     type: 'cumulative',
     actions: ['post_shared', 'post_unshared'],
+  },
+  {
+    key: 'unique_posts_reposted',
+    label: 'Repost unique posts',
+    description: 'Distinct posts the user has silently reposted',
+    type: 'cumulative',
+    actions: ['post_reposted', 'post_unreposted'],
   },
   {
     key: 'unique_posts_commented',

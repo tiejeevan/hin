@@ -31,7 +31,7 @@ const app = new Hono<{ Bindings: Env }>();
 // Enable CORS
 app.use('*', cors({
   origin: '*',
-  allowHeaders: ['Content-Type', 'Authorization'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Hin-Loading'],
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
 

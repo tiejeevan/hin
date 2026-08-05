@@ -148,6 +148,20 @@ export interface LinkPreview {
   siteName?: string | null;
 }
 
+/** Tombstone when the original post is deleted or not visible to the viewer. */
+export interface UnavailableRepostedPost {
+  id: number;
+  unavailable: true;
+}
+
+export type RepostedPostRef = Post | UnavailableRepostedPost;
+
+export function isUnavailableRepostedPost(
+  post: RepostedPostRef,
+): post is UnavailableRepostedPost {
+  return 'unavailable' in post && post.unavailable === true;
+}
+
 export interface Post {
   id: number;
   userId: number;
@@ -174,6 +188,16 @@ export interface Post {
   threadReplyCount?: number;
   threadPosts?: Post[];
   linkPreview?: LinkPreview | null;
+  /** Original post id this row reposts or quotes. */
+  repostOfPostId?: number | null;
+  /** True when this post is a quote (commentary + embed). Silent when false and repostOfPostId set. */
+  isQuote?: boolean;
+  /** Embedded original (1 level). Tombstone when unavailable. */
+  repostedPost?: RepostedPostRef | null;
+  /** Count of active silent reposts of this post. */
+  repostsCount?: number;
+  /** Viewer has an active silent repost of this post. */
+  hasReposted?: boolean;
   /** Client-only: optimistic create still in flight. */
   isPending?: boolean;
   /** Client-only: optimistic create failed; show inline retry. */
@@ -380,7 +404,7 @@ export interface Notification {
   userId: number;
   senderId: number;
   senderUsername: string;
-  type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted' | 'badge_award' | 'level_up' | 'event_win';
+  type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted' | 'badge_award' | 'level_up' | 'event_win' | 'repost' | 'quote';
   /** What entityId points at. Optional for older rows written before migration. */
   entityType?: 'post' | 'message' | 'system' | 'user' | 'badge' | 'event' | 'olabid_item' | null;
   entityId: number; // postId for likes/comments/mentions, messageId for messages, olabidItemId for item comments, system_broadcasts.id for system
@@ -428,7 +452,7 @@ export interface PostsPage {
 export function notificationPostTarget(
   n: Notification,
 ): { postId: number; commentId?: number } | null {
-  if (n.type === 'like' || n.type === 'comment' || n.type === 'mention') {
+  if (n.type === 'like' || n.type === 'comment' || n.type === 'mention' || n.type === 'repost' || n.type === 'quote') {
     if (n.entityType && n.entityType !== 'post') return null;
     return {
       postId: n.entityId,
@@ -461,7 +485,8 @@ export const CreateTextPostSchema = z.object({
   content: z.string().min(1, 'Post content cannot be empty').max(ABSOLUTE_MAX_POST_LENGTH, 'Post is too long'),
   mediaUrls: z.array(z.string().url()).max(ABSOLUTE_MAX_MEDIA_PER_POST, 'Too many images').optional(),
   visibility: z.enum(['public', 'followers', 'only_me']).optional().default('public'),
-  replyToPostId: z.number().int().positive().optional(),
+  /** Quote an existing post (requires non-empty commentary in `content`). */
+  quotePostId: z.number().int().positive().optional(),
 });
 
 export const CreatePollPostSchema = z.object({
@@ -538,7 +563,7 @@ export const UpdateProfileSchema = z.object({
 export type ChatIconMode = 'global' | 'selected_pages';
 export type ChatIconPage = 'feed' | 'profile' | 'post' | 'olabid';
 
-export type NotificationPrefType = 'like' | 'comment' | 'mention' | 'message' | 'system';
+export type NotificationPrefType = 'like' | 'comment' | 'mention' | 'message' | 'system' | 'repost';
 
 export interface UserSettings {
   isPrivate: boolean;
@@ -547,6 +572,8 @@ export interface UserSettings {
   notifyMentions: boolean;
   notifyDms: boolean;
   notifySystem: boolean;
+  /** Notify when someone reposts or quotes your posts. */
+  notifyReposts: boolean;
   /** Master switch for OS / Web Push alerts (inbox + WS still apply). */
   notifyPushEnabled: boolean;
   muteAllToasts: boolean;
@@ -561,6 +588,7 @@ export const DEFAULT_USER_SETTINGS: Omit<UserSettings, 'isPrivate' | 'updatedAt'
   notifyMentions: true,
   notifyDms: true,
   notifySystem: true,
+  notifyReposts: true,
   notifyPushEnabled: true,
   muteAllToasts: false,
   chatIconMode: 'global',
@@ -574,6 +602,7 @@ export const UpdateUserSettingsSchema = z.object({
   notifyMentions: z.boolean().optional(),
   notifyDms: z.boolean().optional(),
   notifySystem: z.boolean().optional(),
+  notifyReposts: z.boolean().optional(),
   notifyPushEnabled: z.boolean().optional(),
   muteAllToasts: z.boolean().optional(),
   chatIconMode: z.enum(['global', 'selected_pages']).optional(),
@@ -596,6 +625,9 @@ export function isNotificationEnabledForSettings(
       return settings.notifyDms;
     case 'system':
       return settings.notifySystem;
+    case 'repost':
+    case 'quote':
+      return settings.notifyReposts;
     case 'badge_award':
     case 'level_up':
     case 'event_win':
@@ -649,6 +681,7 @@ export type ServerMessage =
   | { type: 'post_created'; payload: { post: Post } }
   | { type: 'post_deleted'; payload: { postId: number } }
   | { type: 'like_update'; payload: { postId: number; likesCount: number; userId: number; liked: boolean } }
+  | { type: 'repost_count_update'; payload: { postId: number; repostsCount: number; userId: number; reposted: boolean } }
   | { type: 'comment_like_update'; payload: { commentId: number; postId: number; likesCount: number; userId: number; liked: boolean } }
   | { type: 'comment_created'; payload: { comment: Comment } }
   | { type: 'comment_deleted'; payload: { commentId: number; postId: number } }
@@ -783,6 +816,8 @@ export type GamificationActionType =
   | 'post_deleted'
   | 'post_shared'
   | 'post_unshared'
+  | 'post_reposted'
+  | 'post_unreposted'
   | 'comment_created'
   | 'comment_deleted'
   | 'user_followed'

@@ -1,5 +1,5 @@
 import { Post, Comment, User as UserType, SystemSettings } from '@hin/types';
-import { PostCard } from '../feed/PostCard';
+import { PostCard, getPostEngagementId } from '../feed/PostCard';
 import { CommentNode } from '../../types/ui';
 
 interface ProfilePostsProps {
@@ -16,6 +16,10 @@ interface ProfilePostsProps {
   editingCommentId: number | null;
   editingCommentContent: string;
   onToggleLike: (postId: number) => void;
+  onRepost?: (postId: number) => void;
+  onUndoRepost?: (postId: number) => void;
+  onQuotePost?: (postId: number, content: string) => void | Promise<void>;
+  onShareExternal?: (postId: number) => void;
   onToggleComments: (postId: number) => void;
   onDeletePost: (postId: number) => void;
   onStartPostEdit: (postId: number, content: string) => void;
@@ -45,12 +49,6 @@ interface ProfilePostsProps {
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
   onRetryPendingPost?: (postId: number) => void;
-  onStartThreadReply?: (postId: number) => void;
-  onCancelThreadReply?: () => void;
-  onSubmitThreadReply?: (postId: number) => void;
-  threadReplyTargetId?: number | null;
-  threadReplyContent?: string;
-  onThreadReplyContentChange?: (content: string) => void;
   postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
 }
 
@@ -68,6 +66,10 @@ export function ProfilePosts({
   editingCommentId,
   editingCommentContent,
   onToggleLike,
+  onRepost,
+  onUndoRepost,
+  onQuotePost,
+  onShareExternal,
   onToggleComments,
   onDeletePost,
   onStartPostEdit,
@@ -97,36 +99,36 @@ export function ProfilePosts({
   onPinPost,
   onUnpinPost,
   onRetryPendingPost,
-  onStartThreadReply,
-  onCancelThreadReply,
-  onSubmitThreadReply,
-  threadReplyTargetId,
-  threadReplyContent,
-  onThreadReplyContentChange,
   postLimits,
 }: ProfilePostsProps) {
   const pinnedPosts = posts.filter(p => p.pinnedAt);
   const regularPosts = posts.filter(p => !p.pinnedAt);
 
-  const renderPost = (post: Post) => (
+  const renderPost = (post: Post) => {
+    const engagementId = getPostEngagementId(post);
+    return (
     <PostCard
       key={post.id}
       post={post}
       currentUser={currentUser ?? null}
       readOnly={readOnly}
       gamificationEnabled={gamificationEnabled}
-      commentsList={postComments[post.id] || []}
-      isCommentsExpanded={expandedComments[post.id] || false}
+      commentsList={postComments[engagementId] || []}
+      isCommentsExpanded={expandedComments[engagementId] || false}
       isNewlyCreated={false}
       editingPostId={editingPostId}
       editingPostContent={editingPostContent}
-      newCommentText={newCommentText[post.id] || ''}
-      replyingTo={replyingTo[post.id] || null}
+      newCommentText={newCommentText[engagementId] || ''}
+      replyingTo={replyingTo[engagementId] || null}
       editingCommentId={editingCommentId}
       editingCommentContent={editingCommentContent}
       hideAuthorHeader
       showPinnedBadge
       onToggleLike={onToggleLike}
+      onRepost={onRepost}
+      onUndoRepost={onUndoRepost}
+      onQuotePost={onQuotePost}
+      onShareExternal={onShareExternal}
       onToggleComments={onToggleComments}
       onDeletePost={onDeletePost}
       onStartPostEdit={onStartPostEdit}
@@ -156,15 +158,10 @@ export function ProfilePosts({
       onPinPost={onPinPost}
       onUnpinPost={onUnpinPost}
       onRetryPendingPost={onRetryPendingPost}
-      onStartThreadReply={onStartThreadReply}
-      onCancelThreadReply={onCancelThreadReply}
-      onSubmitThreadReply={onSubmitThreadReply}
-      threadReplyTargetId={threadReplyTargetId}
-      threadReplyContent={threadReplyContent}
-      onThreadReplyContentChange={onThreadReplyContentChange}
       maxPostLength={postLimits?.maxPostLength}
     />
-  );
+    );
+  };
 
   return (
     <div className="space-y-3">

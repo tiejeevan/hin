@@ -59,6 +59,8 @@ export const userSettings = sqliteTable('user_settings', {
   notifyMentions: integer('notify_mentions').default(1).notNull(),
   notifyDms: integer('notify_dms').default(1).notNull(),
   notifySystem: integer('notify_system').default(1).notNull(),
+  /** Notify when someone reposts or quotes your post. */
+  notifyReposts: integer('notify_reposts').default(1).notNull(),
   /** Master switch for Web Push / OS alerts. */
   notifyPushEnabled: integer('notify_push_enabled').default(1).notNull(),
   muteAllToasts: integer('mute_all_toasts').default(0).notNull(),
@@ -99,6 +101,10 @@ export const posts = sqliteTable('posts', {
   pinnedAt: text('pinned_at'),
   threadRootId: integer('thread_root_id').references((): any => posts.id, { onDelete: 'set null' }),
   parentPostId: integer('parent_post_id').references((): any => posts.id, { onDelete: 'set null' }),
+  /** Original post this row reposts or quotes (`ON DELETE SET NULL`). */
+  repostOfPostId: integer('repost_of_post_id').references((): any => posts.id, { onDelete: 'set null' }),
+  /** 0 = silent repost, 1 = quote with commentary. */
+  isQuote: integer('is_quote').default(0).notNull(),
   /** First URL's cached Open Graph preview, if any (only one preview per post). */
   linkPreviewId: integer('link_preview_id').references(() => linkPreviews.id, { onDelete: 'set null' }),
 }, (table) => ({
@@ -110,6 +116,10 @@ export const posts = sqliteTable('posts', {
   userPinnedIdx: index('posts_user_pinned_idx').on(table.userId, table.pinnedAt),
   threadRootIdx: index('posts_thread_root_id_idx').on(table.threadRootId),
   parentPostIdx: index('posts_parent_post_id_idx').on(table.parentPostId),
+  repostOfPostIdx: index('posts_repost_of_post_id_idx').on(table.repostOfPostId),
+  uniqueSilentRepostIdx: uniqueIndex('posts_unique_silent_repost_idx')
+    .on(table.userId, table.repostOfPostId)
+    .where(sql`is_quote = 0 AND deleted_at IS NULL`),
 }));
 
 /** Normalized (lowercase, no leading '#') hashtag registry. */

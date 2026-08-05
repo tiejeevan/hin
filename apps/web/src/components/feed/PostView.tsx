@@ -58,19 +58,15 @@ interface PostViewProps {
   onCopyPermalink: () => void;
   onOpenOlabidItem?: (itemId: number) => void;
   onToggleBookmark: () => void;
-  onShare: () => void;
+  onRepost?: (postId: number) => void;
+  onUndoRepost?: (postId: number) => void;
+  onQuotePost?: (postId: number, content: string) => void | Promise<void>;
+  onShareExternal?: (postId: number) => void;
   onReportPost?: (postId: number) => void;
   onReportComment?: (commentId: number) => void;
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
   onRetryPendingPost?: (postId: number) => void;
-  onStartThreadReply?: (postId: number) => void;
-  onCancelThreadReply?: () => void;
-  onSubmitThreadReply?: (postId: number) => void;
-  threadReplyTargetId?: number | null;
-  threadReplyContent?: string;
-  onThreadReplyContentChange?: (content: string) => void;
-  threadPosts?: Post[];
   postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
 }
 
@@ -128,19 +124,15 @@ export function PostView({
   onCopyPermalink,
   onOpenOlabidItem,
   onToggleBookmark,
-  onShare,
+  onRepost,
+  onUndoRepost,
+  onQuotePost,
+  onShareExternal,
   onReportPost,
   onReportComment,
   onPinPost,
   onUnpinPost,
   onRetryPendingPost,
-  onStartThreadReply,
-  onCancelThreadReply,
-  onSubmitThreadReply,
-  threadReplyTargetId,
-  threadReplyContent,
-  onThreadReplyContentChange,
-  threadPosts,
   postLimits,
 }: PostViewProps) {
   if (isLoading) {
@@ -248,7 +240,10 @@ export function PostView({
         onCopyPermalink={onCopyPermalink}
         onOpenOlabidItem={onOpenOlabidItem}
         onToggleBookmark={onToggleBookmark}
-        onShare={onShare}
+        onRepost={onRepost}
+        onUndoRepost={onUndoRepost}
+        onQuotePost={onQuotePost}
+        onShareExternal={onShareExternal}
         onToggleLike={onToggleLike}
         onToggleComments={onToggleComments}
         onDeletePost={onDeletePost}
@@ -276,13 +271,6 @@ export function PostView({
         onPinPost={onPinPost}
         onUnpinPost={onUnpinPost}
         onRetryPendingPost={onRetryPendingPost}
-        onStartThreadReply={onStartThreadReply}
-        onCancelThreadReply={onCancelThreadReply}
-        onSubmitThreadReply={onSubmitThreadReply}
-        threadReplyTargetId={threadReplyTargetId}
-        threadReplyContent={threadReplyContent}
-        onThreadReplyContentChange={onThreadReplyContentChange}
-        threadPosts={threadPosts}
         maxPostLength={postLimits?.maxPostLength}
       />
     </div>

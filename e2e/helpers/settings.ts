@@ -11,6 +11,8 @@ export interface UserSettingsApi {
   notifyMentions: boolean;
   notifyDms: boolean;
   notifySystem: boolean;
+  notifyReposts: boolean;
+  notifyPushEnabled?: boolean;
   muteAllToasts: boolean;
   chatIconMode: 'global' | 'selected_pages';
   chatIconPages: ('feed' | 'profile' | 'post')[];
@@ -24,6 +26,7 @@ export const DEFAULT_SETTINGS: Omit<UserSettingsApi, 'updatedAt'> = {
   notifyMentions: true,
   notifyDms: true,
   notifySystem: true,
+  notifyReposts: true,
   muteAllToasts: false,
   chatIconMode: 'global',
   chatIconPages: [],
@@ -33,6 +36,7 @@ const NOTIFICATION_SWITCHES = [
   'Likes',
   'Comments',
   'Mentions',
+  'Reposts & quotes',
   'Direct messages',
   'System broadcasts',
   'Mute all toasts',

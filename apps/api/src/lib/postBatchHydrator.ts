@@ -1,11 +1,13 @@
 import { drizzle } from 'drizzle-orm/d1';
 import { and, count, eq, inArray, isNull, sql } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import type { Poll, Post, PostVisibility } from '@hin/types';
+import type { Poll, Post, PostVisibility, RepostedPostRef } from '@hin/types';
 import { parseMediaUrls } from './media';
 import { loadPollsForPosts } from './polls';
 import { isGamificationEnabled } from './gamification/settings';
 import { loadEquippedBadgesForUsers } from './gamification/equipped';
+import { canViewPost } from './postVisibility';
+import { getHiddenAuthorIds } from './blocks';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -21,9 +23,16 @@ export type PostHydrationRow = {
   threadRootId?: number | null;
   parentPostId?: number | null;
   linkPreviewId?: number | null;
+  repostOfPostId?: number | null;
+  isQuote?: number | null;
   username: string;
   authorAvatarUrl?: string | null;
   authorRole?: string;
+};
+
+export type BuildPostsOptions = {
+  /** When true, skip nested repost embeds and silent-repost filtering (1-level max). */
+  isNested?: boolean;
 };
 
 function toCountMap(rows: { postId: number; value: number }[]): Map<number, number> {
@@ -34,6 +43,25 @@ function toCountMap(rows: { postId: number; value: number }[]): Map<number, numb
   return map;
 }
 
+const postSelectFields = {
+  id: schema.posts.id,
+  userId: schema.posts.userId,
+  type: schema.posts.type,
+  content: schema.posts.content,
+  mediaUrls: schema.posts.mediaUrls,
+  visibility: schema.posts.visibility,
+  createdAt: schema.posts.createdAt,
+  pinnedAt: schema.posts.pinnedAt,
+  threadRootId: schema.posts.threadRootId,
+  parentPostId: schema.posts.parentPostId,
+  linkPreviewId: schema.posts.linkPreviewId,
+  repostOfPostId: schema.posts.repostOfPostId,
+  isQuote: schema.posts.isQuote,
+  username: schema.users.username,
+  authorAvatarUrl: schema.users.avatarUrl,
+  authorRole: schema.users.role,
+};
+
 /**
  * Batch-hydrates Post response objects for a page of rows.
  * Replaces per-post N+1 queries with grouped / IN lookups.
@@ -43,9 +71,11 @@ export async function buildPostsResponseBatch(
   posts: PostHydrationRow[],
   currentUserId: number | null,
   pollMap?: Map<number, Poll>,
+  options?: BuildPostsOptions,
 ): Promise<Post[]> {
   if (posts.length === 0) return [];
 
+  const isNested = options?.isNested === true;
   const postIds = posts.map((p) => p.id);
   const authorIds = [...new Set(posts.map((p) => p.userId))];
   const linkPreviewIds = [
@@ -55,7 +85,6 @@ export async function buildPostsResponseBatch(
         .filter((id): id is number => id != null),
     ),
   ];
-  const effectiveRootIds = [...new Set(posts.map((p) => p.threadRootId ?? p.id))];
 
   const likesCountPromise = db
     .select({ postId: schema.likes.postId, value: count() })
@@ -95,19 +124,20 @@ export async function buildPostsResponseBatch(
     .groupBy(schema.postShares.postId)
     .all();
 
-  const threadReplyCountPromise = db
+  const repostsCountPromise = db
     .select({
-      rootId: schema.posts.threadRootId,
+      postId: schema.posts.repostOfPostId,
       value: count(),
     })
     .from(schema.posts)
     .where(
       and(
-        inArray(schema.posts.threadRootId, effectiveRootIds),
+        inArray(schema.posts.repostOfPostId, postIds),
+        eq(schema.posts.isQuote, 0),
         isNull(schema.posts.deletedAt),
       ),
     )
-    .groupBy(schema.posts.threadRootId)
+    .groupBy(schema.posts.repostOfPostId)
     .all();
 
   const hasLikedPromise =
@@ -140,6 +170,22 @@ export async function buildPostsResponseBatch(
           .all()
       : Promise.resolve([] as { postId: number }[]);
 
+  const hasRepostedPromise =
+    currentUserId != null
+      ? db
+          .select({ postId: schema.posts.repostOfPostId })
+          .from(schema.posts)
+          .where(
+            and(
+              inArray(schema.posts.repostOfPostId, postIds),
+              eq(schema.posts.userId, currentUserId),
+              eq(schema.posts.isQuote, 0),
+              isNull(schema.posts.deletedAt),
+            ),
+          )
+          .all()
+      : Promise.resolve([] as { postId: number | null }[]);
+
   const linkPreviewsPromise =
     linkPreviewIds.length > 0
       ? db
@@ -156,9 +202,10 @@ export async function buildPostsResponseBatch(
     commentsCountRows,
     bookmarksCountRows,
     sharesCountRows,
-    threadReplyCountRows,
+    repostsCountRows,
     hasLikedRows,
     hasBookmarkedRows,
+    hasRepostedRows,
     linkPreviewRows,
     gamificationOn,
   ] = await Promise.all([
@@ -166,9 +213,10 @@ export async function buildPostsResponseBatch(
     commentsCountPromise,
     bookmarksCountPromise,
     sharesCountPromise,
-    threadReplyCountPromise,
+    repostsCountPromise,
     hasLikedPromise,
     hasBookmarkedPromise,
+    hasRepostedPromise,
     linkPreviewsPromise,
     gamificationPromise,
   ]);
@@ -191,15 +239,20 @@ export async function buildPostsResponseBatch(
   const bookmarksCountByPost = toCountMap(bookmarksCountRows);
   const sharesCountByPost = toCountMap(sharesCountRows);
 
-  const threadReplyCountByRoot = new Map<number, number>();
-  for (const row of threadReplyCountRows) {
-    if (row.rootId != null) {
-      threadReplyCountByRoot.set(row.rootId, Number(row.value) || 0);
+  const repostsCountByPost = new Map<number, number>();
+  for (const row of repostsCountRows) {
+    if (row.postId != null) {
+      repostsCountByPost.set(row.postId, Number(row.value) || 0);
     }
   }
 
   const likedSet = new Set(hasLikedRows.map((r) => r.postId));
   const bookmarkedSet = new Set(hasBookmarkedRows.map((r) => r.postId));
+  const repostedSet = new Set(
+    hasRepostedRows
+      .map((r) => r.postId)
+      .filter((id): id is number => id != null),
+  );
 
   const linkPreviewById = new Map<number, Post['linkPreview']>();
   for (const preview of linkPreviewRows) {
@@ -213,9 +266,95 @@ export async function buildPostsResponseBatch(
     });
   }
 
-  return posts.map((post) => {
+  // --- 1-level nested originals (skipped when already nesting) ---
+  const embedByOriginalId = new Map<number, RepostedPostRef>();
+  if (!isNested) {
+    const originalIds = [
+      ...new Set(
+        posts
+          .map((p) => p.repostOfPostId)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+
+    if (originalIds.length > 0) {
+      const originalRows = await db
+        .select(postSelectFields)
+        .from(schema.posts)
+        .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
+        .where(
+          and(
+            inArray(schema.posts.id, originalIds),
+            isNull(schema.posts.deletedAt),
+          ),
+        )
+        .all();
+
+      const hydratedOriginals = await buildPostsResponseBatch(
+        db,
+        originalRows,
+        currentUserId,
+        undefined,
+        { isNested: true },
+      );
+      const hydratedById = new Map(hydratedOriginals.map((p) => [p.id, p]));
+
+      const hiddenAuthorIds =
+        currentUserId != null
+          ? new Set(await getHiddenAuthorIds(db, currentUserId))
+          : new Set<number>();
+
+      for (const originalId of originalIds) {
+        const row = originalRows.find((r) => r.id === originalId);
+        if (!row) {
+          embedByOriginalId.set(originalId, { id: originalId, unavailable: true });
+          continue;
+        }
+        if (hiddenAuthorIds.has(row.userId)) {
+          embedByOriginalId.set(originalId, { id: originalId, unavailable: true });
+          continue;
+        }
+        const allowed = await canViewPost(db, currentUserId, {
+          userId: row.userId,
+          visibility: row.visibility,
+        });
+        if (!allowed) {
+          embedByOriginalId.set(originalId, { id: originalId, unavailable: true });
+          continue;
+        }
+        const hydrated = hydratedById.get(originalId);
+        if (hydrated) {
+          embedByOriginalId.set(originalId, hydrated);
+        } else {
+          embedByOriginalId.set(originalId, { id: originalId, unavailable: true });
+        }
+      }
+    }
+  }
+
+  const result: Post[] = [];
+
+  for (const post of posts) {
     const postType = (post.type ?? 'text') as Post['type'];
-    const effectiveRootId = post.threadRootId ?? post.id;
+    const isQuote = (post.isQuote ?? 0) === 1;
+    const repostOfPostId = post.repostOfPostId ?? null;
+
+    let repostedPost: RepostedPostRef | null | undefined;
+    if (!isNested && repostOfPostId != null) {
+      repostedPost =
+        embedByOriginalId.get(repostOfPostId) ?? { id: repostOfPostId, unavailable: true };
+    }
+
+    // Silent reposts whose original is unavailable are dropped from the feed.
+    if (!isNested && repostOfPostId != null && !isQuote) {
+      if (
+        !repostedPost ||
+        ('unavailable' in repostedPost && repostedPost.unavailable)
+      ) {
+        continue;
+      }
+    }
+
     const response: Post = {
       id: post.id,
       userId: post.userId,
@@ -237,16 +376,23 @@ export async function buildPostsResponseBatch(
       pinnedAt: post.pinnedAt ?? null,
       threadRootId: post.threadRootId ?? null,
       parentPostId: post.parentPostId ?? null,
-      threadReplyCount: threadReplyCountByRoot.get(effectiveRootId) ?? 0,
+      threadReplyCount: 0,
       linkPreview: post.linkPreviewId
         ? (linkPreviewById.get(post.linkPreviewId) ?? null)
         : null,
+      repostOfPostId,
+      isQuote: repostOfPostId != null ? isQuote : false,
+      repostedPost: repostedPost ?? null,
+      repostsCount: repostsCountByPost.get(post.id) ?? 0,
+      hasReposted: repostedSet.has(post.id),
     };
 
     if (postType === 'poll') {
       response.poll = resolvedPollMap.get(post.id) ?? undefined;
     }
 
-    return response;
-  });
+    result.push(response);
+  }
+
+  return result;
 }

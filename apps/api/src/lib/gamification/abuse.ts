@@ -13,8 +13,13 @@ export const SESSION_TICK_MINUTES = 5;
 export const SESSION_TICK_MIN_INTERVAL_SEC = 240;
 export const COMMENT_RATE_LIMIT_PER_HOUR = 30;
 export const SHARE_RATE_LIMIT_PER_HOUR = 60;
+export const REPOST_RATE_LIMIT_PER_HOUR = 60;
 
-const RATE_LIMITED_ACTIONS: GamificationActionType[] = ['comment_created', 'post_shared'];
+const RATE_LIMITED_ACTIONS: GamificationActionType[] = [
+  'comment_created',
+  'post_shared',
+  'post_reposted',
+];
 
 function dailyPointsKey(day: string = calendarDayUTC()): string {
   return `${INTERNAL_COUNTER_PREFIX}daily_points:${day}`;
@@ -50,7 +55,9 @@ export async function checkActionRateLimit(
 
   const limit = action === 'comment_created'
     ? COMMENT_RATE_LIMIT_PER_HOUR
-    : SHARE_RATE_LIMIT_PER_HOUR;
+    : action === 'post_reposted'
+      ? REPOST_RATE_LIMIT_PER_HOUR
+      : SHARE_RATE_LIMIT_PER_HOUR;
 
   const key = hourlyRateKey(action);
   const count = await getCounterValue(tx, userId, key);

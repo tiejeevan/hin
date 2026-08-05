@@ -71,6 +71,10 @@ interface ProfileViewProps {
   onOpenSettings: () => void;
   onCloseSettings: () => void;
   onToggleLike: (postId: number) => void;
+  onRepost?: (postId: number) => void;
+  onUndoRepost?: (postId: number) => void;
+  onQuotePost?: (postId: number, content: string) => void | Promise<void>;
+  onShareExternal?: (postId: number) => void;
   onToggleComments: (postId: number) => void;
   onDeletePost: (postId: number) => void;
   onStartPostEdit: (postId: number, content: string) => void;
@@ -101,13 +105,6 @@ interface ProfileViewProps {
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
   onRetryPendingPost?: (postId: number) => void;
-  onStartThreadReply?: (postId: number) => void;
-  onCancelThreadReply?: () => void;
-  onSubmitThreadReply?: (postId: number) => void;
-  threadReplyTargetId?: number | null;
-  threadReplyContent?: string;
-  onThreadReplyContentChange?: (content: string) => void;
-  threadPosts?: import('@hin/types').Post[];
   postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
   onDeleteAccount?: (password: string) => Promise<{ success: boolean; error?: string }>;
   onSimulateSessionExpired?: () => void;
@@ -179,6 +176,10 @@ export function ProfileView({
   onOpenSettings,
   onCloseSettings,
   onToggleLike,
+  onRepost,
+  onUndoRepost,
+  onQuotePost,
+  onShareExternal,
   onToggleComments,
   onDeletePost,
   onStartPostEdit,
@@ -209,12 +210,6 @@ export function ProfileView({
   onPinPost,
   onUnpinPost,
   onRetryPendingPost,
-  onStartThreadReply,
-  onCancelThreadReply,
-  onSubmitThreadReply,
-  threadReplyTargetId,
-  threadReplyContent,
-  onThreadReplyContentChange,
   postLimits,
   onDeleteAccount,
   onSimulateSessionExpired,
@@ -368,6 +363,10 @@ export function ProfileView({
                 editingCommentId={editingCommentId}
                 editingCommentContent={editingCommentContent}
                 onToggleLike={onToggleLike}
+                onRepost={onRepost}
+                onUndoRepost={onUndoRepost}
+                onQuotePost={onQuotePost}
+                onShareExternal={onShareExternal}
                 onToggleComments={onToggleComments}
                 onDeletePost={onDeletePost}
                 onStartPostEdit={onStartPostEdit}
@@ -397,12 +396,6 @@ export function ProfileView({
                 onPinPost={onPinPost}
                 onUnpinPost={onUnpinPost}
                 onRetryPendingPost={onRetryPendingPost}
-                onStartThreadReply={onStartThreadReply}
-                onCancelThreadReply={onCancelThreadReply}
-                onSubmitThreadReply={onSubmitThreadReply}
-                threadReplyTargetId={threadReplyTargetId}
-                threadReplyContent={threadReplyContent}
-                onThreadReplyContentChange={onThreadReplyContentChange}
                 postLimits={postLimits}
               />
             </>

@@ -1,4 +1,4 @@
-import { AtSign, Heart, Megaphone, MessageSquare, MessageCircle, UserPlus, UserCheck, Award, TrendingUp, Trophy } from 'lucide-react';
+import { AtSign, Heart, Megaphone, MessageSquare, MessageCircle, UserPlus, UserCheck, Award, TrendingUp, Trophy, Repeat2, Quote } from 'lucide-react';
 import { Notification } from '@hin/types';
 
 interface NotificationItemProps {
@@ -14,6 +14,10 @@ function iconForType(type: Notification['type']) {
       return <MessageSquare className="h-3 w-3 text-indigo-400" />;
     case 'mention':
       return <AtSign className="h-3 w-3 text-violet-400" />;
+    case 'repost':
+      return <Repeat2 className="h-3 w-3 text-sky-400" />;
+    case 'quote':
+      return <Quote className="h-3 w-3 text-indigo-400" />;
     case 'message':
       return <MessageCircle className="h-3 w-3 text-emerald-400" />;
     case 'system':
@@ -42,6 +46,10 @@ function bgForType(type: Notification['type']) {
       return 'bg-indigo-500/10';
     case 'mention':
       return 'bg-violet-500/10';
+    case 'repost':
+      return 'bg-sky-500/10';
+    case 'quote':
+      return 'bg-indigo-500/10';
     case 'message':
       return 'bg-emerald-500/10';
     case 'system':

@@ -241,6 +241,7 @@ admin.post('/broadcast', async (c) => {
         notifyMentions: 1,
         notifyDms: 1,
         notifySystem: 1,
+        notifyReposts: 1,
         notifyPushEnabled: 1,
         muteAllToasts: 0,
         chatIconMode: 'global',

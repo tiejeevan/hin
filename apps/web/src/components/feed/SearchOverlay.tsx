@@ -3,7 +3,7 @@ import { Search, X, ChevronRight, Hash, MessageSquare, Users, BookOpen, Loader2 
 import { Post, User, SearchResults, Comment } from '@hin/types';
 import { API_URL } from '../../config';
 import { UserAvatar } from '../profile/UserAvatar';
-import { PostCard } from './PostCard';
+import { PostCard, getPostEngagementId } from './PostCard';
 import { CommentNode } from '../../types/ui';
 
 interface SearchOverlayProps {
@@ -48,19 +48,15 @@ interface SearchOverlayProps {
   onClosePoll: (postId: number) => Promise<void>;
   onCopyPermalink?: (postId: number) => void;
   onToggleBookmark?: (postId: number) => void;
-  onShare?: (postId: number) => void;
+  onRepost?: (postId: number) => void;
+  onUndoRepost?: (postId: number) => void;
+  onQuotePost?: (postId: number, content: string) => void | Promise<void>;
+  onShareExternal?: (postId: number) => void;
   onReportPost?: (postId: number) => void;
   onReportComment?: (commentId: number) => void;
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
   onRetryPendingPost?: (postId: number) => void;
-  onStartThreadReply?: (postId: number) => void;
-  onCancelThreadReply?: () => void;
-  onSubmitThreadReply?: (postId: number) => void;
-  threadReplyTargetId?: number | null;
-  threadReplyContent?: string;
-  onThreadReplyContentChange?: (content: string) => void;
-  threadPosts?: Post[];
   maxPostLength?: number;
 }
 
@@ -113,19 +109,15 @@ export function SearchOverlay({
   onClosePoll,
   onCopyPermalink,
   onToggleBookmark,
-  onShare,
+  onRepost,
+  onUndoRepost,
+  onQuotePost,
+  onShareExternal,
   onReportPost,
   onReportComment,
   onPinPost,
   onUnpinPost,
   onRetryPendingPost,
-  onStartThreadReply,
-  onCancelThreadReply,
-  onSubmitThreadReply,
-  threadReplyTargetId,
-  threadReplyContent,
-  onThreadReplyContentChange,
-  threadPosts,
   maxPostLength,
 }: SearchOverlayProps) {
   const [query, setQuery] = useState('');
@@ -229,18 +221,20 @@ export function SearchOverlay({
     inputRef.current?.focus();
   };
 
-  const renderPostCard = (post: Post) => (
+  const renderPostCard = (post: Post) => {
+    const engagementId = getPostEngagementId(post);
+    return (
     <PostCard
       key={post.id}
       post={post}
       currentUser={currentUser}
       onViewProfile={onViewProfile}
       onViewHashtag={onViewHashtag}
-      commentsList={commentsList[post.id] ?? []}
-      isCommentsExpanded={!!expandedComments[post.id]}
+      commentsList={commentsList[engagementId] ?? []}
+      isCommentsExpanded={!!expandedComments[engagementId]}
       isNewlyCreated={false}
-      newCommentText={newCommentText[post.id] ?? ''}
-      replyingTo={replyingTo[post.id] ?? null}
+      newCommentText={newCommentText[engagementId] ?? ''}
+      replyingTo={replyingTo[engagementId] ?? null}
       editingPostId={editingPostId}
       editingPostContent={editingPostContent}
       editingCommentId={editingCommentId}
@@ -270,23 +264,20 @@ export function SearchOverlay({
       onCopyPermalink={onCopyPermalink ? () => onCopyPermalink(post.id) : undefined}
       onOpenPost={onOpenPost}
       onOpenOlabidItem={onOpenOlabidItem}
-      onToggleBookmark={onToggleBookmark ? () => onToggleBookmark(post.id) : undefined}
-      onShare={onShare ? () => onShare(post.id) : undefined}
+      onToggleBookmark={onToggleBookmark ? () => onToggleBookmark(engagementId) : undefined}
+      onRepost={onRepost}
+      onUndoRepost={onUndoRepost}
+      onQuotePost={onQuotePost}
+      onShareExternal={onShareExternal}
       onReport={onReportPost}
       onReportComment={onReportComment}
       onPinPost={onPinPost}
       onUnpinPost={onUnpinPost}
       onRetryPendingPost={onRetryPendingPost}
-      onStartThreadReply={onStartThreadReply}
-      onCancelThreadReply={onCancelThreadReply}
-      onSubmitThreadReply={onSubmitThreadReply}
-      threadReplyTargetId={threadReplyTargetId}
-      threadReplyContent={threadReplyContent}
-      onThreadReplyContentChange={onThreadReplyContentChange}
-      threadPosts={threadPosts}
       maxPostLength={maxPostLength}
     />
-  );
+    );
+  };
 
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {

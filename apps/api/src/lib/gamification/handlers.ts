@@ -94,6 +94,52 @@ function registerV2Handlers(): void {
     return [];
   });
 
+  registerActionHandler('post_reposted', async ({ tx, userId, metadata }) => {
+    const postId = num(metadata, 'postId');
+    if (postId === null) return [];
+
+    const res = await tx
+      .select({ value: count() })
+      .from(schema.posts)
+      .where(
+        and(
+          eq(schema.posts.userId, userId),
+          eq(schema.posts.repostOfPostId, postId),
+          eq(schema.posts.isQuote, 0),
+          isNull(schema.posts.deletedAt),
+        ),
+      )
+      .get();
+
+    if ((res?.value ?? 0) === 1) {
+      return [{ userId, metricKey: 'unique_posts_reposted', delta: 1 }];
+    }
+    return [];
+  });
+
+  registerActionHandler('post_unreposted', async ({ tx, userId, metadata }) => {
+    const postId = num(metadata, 'postId');
+    if (postId === null) return [];
+
+    const res = await tx
+      .select({ value: count() })
+      .from(schema.posts)
+      .where(
+        and(
+          eq(schema.posts.userId, userId),
+          eq(schema.posts.repostOfPostId, postId),
+          eq(schema.posts.isQuote, 0),
+          isNull(schema.posts.deletedAt),
+        ),
+      )
+      .get();
+
+    if ((res?.value ?? 0) === 0) {
+      return [{ userId, metricKey: 'unique_posts_reposted', delta: -1 }];
+    }
+    return [];
+  });
+
   registerActionHandler('user_followed', async ({ userId }) => {
     return [{ userId, metricKey: 'follower_count', delta: 1 }];
   });

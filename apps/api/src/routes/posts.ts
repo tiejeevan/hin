@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, desc, and, count, sql, isNull, lt, inArray, notInArray, asc } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { Post, Comment, Notification, PostsPage, PostThreadPage, parseCreatePostBody, VotePollSchema, validatePostLimits, type PostVisibility } from '@hin/types';
+import { Post, Comment, Notification, PostsPage, parseCreatePostBody, VotePollSchema, validatePostLimits, type PostVisibility } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { linkPostMedia, parseMediaUrls, serializeMediaUrls, validateOwnedPostMedia } from '../lib/media';
@@ -16,7 +16,12 @@ import { buildVisibilitySqlConditions, assertCanViewPost } from '../lib/postVisi
 import { getOrCreateUserSettings, isNotificationEnabled } from '../lib/user-settings';
 import { pinPost, unpinPost } from '../lib/post-pins';
 import { getSystemSettings } from '../lib/system-settings';
-import { validateThreadReply, assertCanViewThread, getThreadPostRows } from '../lib/post-threads';
+import {
+  countSilentReposts,
+  findSilentRepostRow,
+  notifyPostRedistribute,
+  resolveRepostRoot,
+} from '../lib/post-reposts';
 import { processUserActionSafe } from '../lib/gamification/hub';
 import { getGamificationVisibility, isGamificationEnabled } from '../lib/gamification/settings';
 import { toGamificationBlock } from '../lib/gamification/public';
@@ -156,6 +161,8 @@ posts.get('/', async (c) => {
     threadRootId: schema.posts.threadRootId,
     parentPostId: schema.posts.parentPostId,
     linkPreviewId: schema.posts.linkPreviewId,
+    repostOfPostId: schema.posts.repostOfPostId,
+    isQuote: schema.posts.isQuote,
     username: schema.users.username,
     authorAvatarUrl: schema.users.avatarUrl,
     authorRole: schema.users.role,
@@ -234,6 +241,8 @@ posts.get('/bookmarks', async (c) => {
       visibility: schema.posts.visibility,
       createdAt: schema.posts.createdAt,
       linkPreviewId: schema.posts.linkPreviewId,
+      repostOfPostId: schema.posts.repostOfPostId,
+      isQuote: schema.posts.isQuote,
       username: schema.users.username,
       authorAvatarUrl: schema.users.avatarUrl,
       authorRole: schema.users.role,
@@ -293,25 +302,22 @@ posts.post('/', async (c) => {
   const isPoll = 'type' in data && data.type === 'poll';
   const postType = isPoll ? 'poll' : 'text';
 
-  let threadRootId: number | null = null;
-  let parentPostId: number | null = null;
   let visibility: PostVisibility = data.visibility ?? 'public';
+  let repostOfPostId: number | null = null;
+  let isQuote = 0;
 
-  const replyToPostId = 'replyToPostId' in data ? data.replyToPostId : undefined;
-  if (replyToPostId) {
+  const quotePostId = 'quotePostId' in data ? data.quotePostId : undefined;
+  if (quotePostId) {
     if (isPoll) {
-      return c.json({ error: 'Poll replies in threads are not supported' }, 400);
+      return c.json({ error: 'Poll quotes are not supported' }, 400);
     }
-    const threadResult = await validateThreadReply(db, authUser.id, replyToPostId);
-    if (!threadResult.ok) {
-      return c.json({ error: threadResult.error }, threadResult.code as 400 | 403 | 404);
+    const access = await assertCanViewPost(db, authUser.id, quotePostId);
+    if (!access.ok) return c.json({ error: access.error }, access.status);
+    if (!(data.content ?? '').trim()) {
+      return c.json({ error: 'Quote commentary cannot be empty' }, 400);
     }
-    threadRootId = threadResult.fields.threadRootId;
-    parentPostId = threadResult.fields.parentPostId;
-    const parentPost = await db.select().from(schema.posts).where(eq(schema.posts.id, replyToPostId)).get();
-    if (parentPost) {
-      visibility = (parentPost.visibility ?? 'public') as PostVisibility;
-    }
+    repostOfPostId = quotePostId;
+    isQuote = 1;
   }
 
   const [inserted] = await db.insert(schema.posts).values({
@@ -320,8 +326,8 @@ posts.post('/', async (c) => {
     content: (data.content ?? '').trim(),
     mediaUrls: serializeMediaUrls(mediaUrls),
     visibility,
-    threadRootId,
-    parentPostId,
+    repostOfPostId,
+    isQuote,
   }).returning();
 
   if (mediaUrls.length > 0) {
@@ -368,24 +374,36 @@ posts.post('/', async (c) => {
     threadRootId: inserted.threadRootId,
     parentPostId: inserted.parentPostId,
     linkPreviewId: inserted.linkPreviewId,
+    repostOfPostId: inserted.repostOfPostId,
+    isQuote: inserted.isQuote,
     username: authUser.username,
     authorAvatarUrl: authUser.avatarUrl,
     authorRole: authUser.role,
   }, authUser.id);
 
-  if (!replyToPostId) {
-    await notifyMentions(db, c.env, {
-      content: inserted.content,
-      senderId: authUser.id,
-      senderUsername: authUser.username,
-      entityId: inserted.id,
-      context: 'post',
-    });
+  await notifyMentions(db, c.env, {
+    content: inserted.content,
+    senderId: authUser.id,
+    senderUsername: authUser.username,
+    entityId: inserted.id,
+    context: 'post',
+  });
 
-    await broadcastEvent(c.env, { type: 'post_created', payload: { post: responsePost } });
-  } else {
-    await broadcastEvent(c.env, { type: 'post_updated', payload: { post: responsePost } });
+  if (quotePostId) {
+    const original = await db.select().from(schema.posts).where(eq(schema.posts.id, quotePostId)).get();
+    if (original) {
+      await notifyPostRedistribute(db, c.env, {
+        type: 'quote',
+        originalAuthorId: original.userId,
+        originalPostId: quotePostId,
+        entityId: inserted.id,
+        senderId: authUser.id,
+        senderUsername: authUser.username,
+      });
+    }
   }
+
+  await broadcastEvent(c.env, { type: 'post_created', payload: { post: responsePost } });
 
   const gResult = await processUserActionSafe(
     db,
@@ -890,27 +908,161 @@ posts.delete('/:id/pin', async (c) => {
   return c.json(responsePost);
 });
 
-posts.get('/:id/thread', async (c) => {
+posts.post('/:id/repost', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
   const postId = parseInt(c.req.param('id'), 10);
   if (isNaN(postId)) return c.json({ error: 'Invalid post id' }, 400);
 
-  const db = drizzle(c.env.DB, { schema });
-  const authUser = await getAuthUser(c);
-  const currentUserId = authUser ? authUser.id : null;
-
-  const access = await assertCanViewThread(db, currentUserId, postId);
+  const access = await assertCanViewPost(db, authUser.id, postId);
   if (!access.ok) return c.json({ error: access.error }, access.status);
 
-  const rows = await getThreadPostRows(db, access.rootId);
-  if (rows.length === 0) return c.json({ error: 'Post not found' }, 404);
+  const rootId = resolveRepostRoot({
+    id: access.post.id,
+    repostOfPostId: access.post.repostOfPostId,
+    isQuote: access.post.isQuote ?? 0,
+  });
 
-  const postsWithMetadata = await buildPostsResponseBatch(db, rows, currentUserId);
+  let original = access.post;
+  if (rootId !== access.post.id) {
+    const rootAccess = await assertCanViewPost(db, authUser.id, rootId);
+    if (!rootAccess.ok) return c.json({ error: rootAccess.error }, rootAccess.status);
+    original = rootAccess.post;
+  }
 
-  const page: PostThreadPage = {
-    root: postsWithMetadata[0],
-    replies: postsWithMetadata.slice(1),
-  };
-  return c.json(page);
+  const existing = await findSilentRepostRow(db, authUser.id, rootId);
+  let inserted = existing;
+  let created = false;
+
+  if (existing && !existing.deletedAt) {
+    // idempotent — already reposted
+  } else if (existing && existing.deletedAt) {
+    const [updated] = await db
+      .update(schema.posts)
+      .set({ deletedAt: null })
+      .where(eq(schema.posts.id, existing.id))
+      .returning();
+    inserted = updated;
+    created = true;
+  } else {
+    const [row] = await db.insert(schema.posts).values({
+      userId: authUser.id,
+      type: 'text',
+      content: '',
+      mediaUrls: null,
+      visibility: (original.visibility ?? 'public') as PostVisibility,
+      repostOfPostId: rootId,
+      isQuote: 0,
+    }).returning();
+    inserted = row;
+    created = true;
+  }
+
+  if (!inserted) return c.json({ error: 'Failed to repost' }, 500);
+
+  const author = await db.select().from(schema.users).where(eq(schema.users.id, authUser.id)).get();
+  const responsePost = await buildPostResponse(db, {
+    id: inserted.id,
+    userId: authUser.id,
+    type: 'text',
+    content: inserted.content,
+    mediaUrls: inserted.mediaUrls,
+    visibility: inserted.visibility,
+    createdAt: inserted.createdAt,
+    pinnedAt: inserted.pinnedAt,
+    threadRootId: inserted.threadRootId,
+    parentPostId: inserted.parentPostId,
+    linkPreviewId: inserted.linkPreviewId,
+    repostOfPostId: inserted.repostOfPostId,
+    isQuote: inserted.isQuote,
+    username: author?.username || authUser.username,
+    authorAvatarUrl: author?.avatarUrl ?? authUser.avatarUrl,
+    authorRole: author?.role ?? authUser.role,
+  }, authUser.id);
+
+  const repostsCount = await countSilentReposts(db, rootId);
+
+  if (created) {
+    await notifyPostRedistribute(db, c.env, {
+      type: 'repost',
+      originalAuthorId: original.userId,
+      originalPostId: rootId,
+      entityId: rootId,
+      senderId: authUser.id,
+      senderUsername: authUser.username,
+    });
+
+    await broadcastEvent(c.env, { type: 'post_created', payload: { post: responsePost } });
+    await broadcastEvent(c.env, {
+      type: 'repost_count_update',
+      payload: { postId: rootId, repostsCount, userId: authUser.id, reposted: true },
+    });
+
+    const gResult = await processUserActionSafe(
+      db,
+      c.env,
+      authUser.id,
+      'post_reposted',
+      { postId: rootId },
+      authUser.username,
+    );
+    const g = toGamificationBlock(gResult, await getGamificationVisibility(db));
+    return c.json(g ? { ...responsePost, g, repostsCount } : { ...responsePost, repostsCount });
+  }
+
+  return c.json({ ...responsePost, repostsCount });
+});
+
+posts.delete('/:id/repost', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const db = drizzle(c.env.DB, { schema });
+  const postId = parseInt(c.req.param('id'), 10);
+  if (isNaN(postId)) return c.json({ error: 'Invalid post id' }, 400);
+
+  const target = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
+  if (!target || target.deletedAt) return c.json({ error: 'Post not found' }, 404);
+
+  const rootId = resolveRepostRoot({
+    id: target.id,
+    repostOfPostId: target.repostOfPostId,
+    isQuote: target.isQuote ?? 0,
+  });
+
+  const existing = await findSilentRepostRow(db, authUser.id, rootId);
+  if (!existing || existing.deletedAt) {
+    const repostsCount = await countSilentReposts(db, rootId);
+    return c.json({ ok: true, postId: rootId, repostsCount, reposted: false });
+  }
+
+  await db
+    .update(schema.posts)
+    .set({ deletedAt: new Date().toISOString() })
+    .where(eq(schema.posts.id, existing.id))
+    .run();
+
+  const repostsCount = await countSilentReposts(db, rootId);
+
+  await broadcastEvent(c.env, { type: 'post_deleted', payload: { postId: existing.id } });
+  await broadcastEvent(c.env, {
+    type: 'repost_count_update',
+    payload: { postId: rootId, repostsCount, userId: authUser.id, reposted: false },
+  });
+
+  const gResult = await processUserActionSafe(
+    db,
+    c.env,
+    authUser.id,
+    'post_unreposted',
+    { postId: rootId },
+    authUser.username,
+  );
+  const g = toGamificationBlock(gResult, await getGamificationVisibility(db));
+
+  return c.json(g ? { ok: true, postId: rootId, repostsCount, reposted: false, g } : { ok: true, postId: rootId, repostsCount, reposted: false });
 });
 
 // Get single post (permalink)
@@ -938,6 +1090,8 @@ posts.get('/:id', async (c) => {
       threadRootId: schema.posts.threadRootId,
       parentPostId: schema.posts.parentPostId,
       linkPreviewId: schema.posts.linkPreviewId,
+      repostOfPostId: schema.posts.repostOfPostId,
+      isQuote: schema.posts.isQuote,
       username: schema.users.username,
       authorAvatarUrl: schema.users.avatarUrl,
       authorRole: schema.users.role,
@@ -1203,6 +1357,27 @@ posts.delete('/:id', async (c) => {
       body: JSON.stringify({ type: 'post_deleted', payload: { postId } }),
     }));
   } catch (e) {}
+
+  if (post.repostOfPostId != null && (post.isQuote ?? 0) === 0) {
+    const repostsCount = await countSilentReposts(db, post.repostOfPostId);
+    await broadcastEvent(c.env, {
+      type: 'repost_count_update',
+      payload: {
+        postId: post.repostOfPostId,
+        repostsCount,
+        userId: authUser.id,
+        reposted: false,
+      },
+    });
+    await processUserActionSafe(
+      db,
+      c.env,
+      post.userId,
+      'post_unreposted',
+      { postId: post.repostOfPostId },
+      authUser.username,
+    );
+  }
 
   const owner = await db.select({ username: schema.users.username })
     .from(schema.users)

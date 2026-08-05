@@ -4,7 +4,7 @@ import { Post, Comment, User as UserType, SystemSettings, LinkPreview } from '@h
 import { CommentNode, FeedMode } from '../../types/ui';
 import { CreatePostForm } from './CreatePostForm';
 import type { CreatePostSubmitPayload } from './CreatePostForm';
-import { PostCard } from './PostCard';
+import { PostCard, getPostEngagementId } from './PostCard';
 import { FeedModeSelector } from './FeedModeSelector';
 import { ExploreHashtags } from './ExploreHashtags';
 import { ActiveEventsBanner } from '../gamification/ActiveEventsBanner';
@@ -36,6 +36,10 @@ interface FeedViewProps {
   onNewPostContentChange: (value: string) => void;
   onCreatePost: (e: React.FormEvent, payload: CreatePostSubmitPayload) => void | Promise<void>;
   onToggleLike: (postId: number) => void;
+  onRepost?: (postId: number) => void;
+  onUndoRepost?: (postId: number) => void;
+  onQuotePost?: (postId: number, content: string) => void | Promise<void>;
+  onShareExternal?: (postId: number) => void;
   onToggleComments: (postId: number) => void;
   onDeletePost: (postId: number) => void;
   onStartPostEdit: (postId: number, content: string) => void;
@@ -64,12 +68,6 @@ interface FeedViewProps {
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
   onRetryPendingPost?: (postId: number) => void;
-  onStartThreadReply?: (postId: number) => void;
-  onCancelThreadReply?: () => void;
-  onSubmitThreadReply?: (postId: number) => void;
-  threadReplyTargetId?: number | null;
-  threadReplyContent?: string;
-  onThreadReplyContentChange?: (content: string) => void;
   postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
   gamificationEnabled?: boolean;
   onGamificationRefresh?: () => void;
@@ -102,6 +100,10 @@ export function FeedView({
   onNewPostContentChange,
   onCreatePost,
   onToggleLike,
+  onRepost,
+  onUndoRepost,
+  onQuotePost,
+  onShareExternal,
   onToggleComments,
   onDeletePost,
   onStartPostEdit,
@@ -130,12 +132,6 @@ export function FeedView({
   onPinPost,
   onUnpinPost,
   onRetryPendingPost,
-  onStartThreadReply,
-  onCancelThreadReply,
-  onSubmitThreadReply,
-  threadReplyTargetId,
-  threadReplyContent,
-  onThreadReplyContentChange,
   postLimits,
   gamificationEnabled = false,
   onGamificationRefresh,
@@ -213,22 +209,28 @@ export function FeedView({
           </div>
         ) : (
           <>
-            {posts.map(post => (
+            {posts.map(post => {
+              const engagementId = getPostEngagementId(post);
+              return (
               <PostCard
                 key={post.id}
                 post={post}
                 currentUser={currentUser}
                 gamificationEnabled={gamificationEnabled}
-                commentsList={postComments[post.id] || []}
-                isCommentsExpanded={expandedComments[post.id] || false}
+                commentsList={postComments[engagementId] || []}
+                isCommentsExpanded={expandedComments[engagementId] || false}
                 isNewlyCreated={newlyCreatedPostId === post.id}
                 editingPostId={editingPostId}
                 editingPostContent={editingPostContent}
-                newCommentText={newCommentText[post.id] || ''}
-                replyingTo={replyingTo[post.id] || null}
+                newCommentText={newCommentText[engagementId] || ''}
+                replyingTo={replyingTo[engagementId] || null}
                 editingCommentId={editingCommentId}
                 editingCommentContent={editingCommentContent}
                 onToggleLike={onToggleLike}
+                onRepost={onRepost}
+                onUndoRepost={onUndoRepost}
+                onQuotePost={onQuotePost}
+                onShareExternal={onShareExternal}
                 onToggleComments={onToggleComments}
                 onDeletePost={onDeletePost}
                 onStartPostEdit={onStartPostEdit}
@@ -257,15 +259,10 @@ export function FeedView({
                 onPinPost={onPinPost}
                 onUnpinPost={onUnpinPost}
                 onRetryPendingPost={onRetryPendingPost}
-                onStartThreadReply={onStartThreadReply}
-                onCancelThreadReply={onCancelThreadReply}
-                onSubmitThreadReply={onSubmitThreadReply}
-                threadReplyTargetId={threadReplyTargetId}
-                threadReplyContent={threadReplyContent}
-                onThreadReplyContentChange={onThreadReplyContentChange}
                 maxPostLength={postLimits?.maxPostLength}
               />
-            ))}
+            );
+            })}
             <div ref={sentinelRef} className="h-1" aria-hidden />
             {isLoadingMore && (
               <div className="flex items-center justify-center gap-2 py-4 text-text-muted text-sm">

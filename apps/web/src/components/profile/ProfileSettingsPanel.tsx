@@ -269,6 +269,13 @@ export function ProfileSettingsPanel({
               onChange={checked => void patchSettings({ notifyMentions: checked }, 'notifyMentions')}
             />
             <SettingsToggle
+              label="Reposts & quotes"
+              description="When someone reposts or quotes your post."
+              checked={settings.notifyReposts}
+              disabled={savingKey === 'notifyReposts'}
+              onChange={checked => void patchSettings({ notifyReposts: checked }, 'notifyReposts')}
+            />
+            <SettingsToggle
               label="Direct messages"
               description="When you receive a new DM."
               checked={settings.notifyDms}

@@ -36,6 +36,7 @@ export function toPublicSettings(row: UserSettingsRow, isPrivate: boolean): User
     notifyMentions: row.notifyMentions === 1,
     notifyDms: row.notifyDms === 1,
     notifySystem: row.notifySystem === 1,
+    notifyReposts: row.notifyReposts === 1,
     notifyPushEnabled: row.notifyPushEnabled === 1,
     muteAllToasts: row.muteAllToasts === 1,
     chatIconMode: row.chatIconMode === 'selected_pages' ? 'selected_pages' : 'global',
@@ -86,6 +87,7 @@ export function settingsRowUpdatesFromPatch(
     notifyMentions: boolean;
     notifyDms: boolean;
     notifySystem: boolean;
+    notifyReposts: boolean;
     notifyPushEnabled: boolean;
     muteAllToasts: boolean;
     chatIconMode: 'global' | 'selected_pages';
@@ -99,6 +101,7 @@ export function settingsRowUpdatesFromPatch(
   if (patch.notifyMentions !== undefined) updates.notifyMentions = patch.notifyMentions ? 1 : 0;
   if (patch.notifyDms !== undefined) updates.notifyDms = patch.notifyDms ? 1 : 0;
   if (patch.notifySystem !== undefined) updates.notifySystem = patch.notifySystem ? 1 : 0;
+  if (patch.notifyReposts !== undefined) updates.notifyReposts = patch.notifyReposts ? 1 : 0;
   if (patch.notifyPushEnabled !== undefined) {
     updates.notifyPushEnabled = patch.notifyPushEnabled ? 1 : 0;
   }
