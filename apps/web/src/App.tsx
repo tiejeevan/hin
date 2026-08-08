@@ -52,6 +52,11 @@ import {
   applyMessagesRead,
   mergeAndSortMessages,
 } from './lib/chatMessages';
+import {
+  isWsAuthFailureCloseCode,
+  isWsAuthFailureMessage,
+  shouldReconnectAfterClose,
+} from './lib/wsReconnect';
 import { AppShell } from './components/layout/AppShell';
 import { AppHeader } from './components/layout/AppHeader';
 import { GuestHeader } from './components/layout/GuestHeader';
@@ -241,6 +246,8 @@ export default function App() {
 
   const ws = useRef<WebSocket | null>(null);
   const wsReadyRef = useRef(false);
+  const tokenRef = useRef(token);
+  const wsReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processedNotifIdsRef = useRef<Set<number>>(new Set());
   /** Sync dedupe for comment create/delete (HTTP + WS). setState updaters are async in React 18. */
   const appliedCommentCreatesRef = useRef(new Set<number>());
@@ -256,6 +263,31 @@ export default function App() {
   const handleSessionExpiredRef = useRef<() => void>(() => {});
   /** Prevents duplicate toasts when multiple in-flight requests (or StrictMode double-fetch) return 401. */
   const sessionExpiredHandledRef = useRef(false);
+
+  const clearWsReconnectTimer = useCallback(() => {
+    if (wsReconnectTimerRef.current != null) {
+      clearTimeout(wsReconnectTimerRef.current);
+      wsReconnectTimerRef.current = null;
+    }
+  }, []);
+
+  /** Disarm handlers + cancel reconnect so logout/unmount cannot ghost-rejoin. */
+  const disconnectWS = useCallback(() => {
+    clearWsReconnectTimer();
+    wsReadyRef.current = false;
+    const socket = ws.current;
+    if (!socket) return;
+    socket.onclose = null;
+    socket.onmessage = null;
+    socket.onopen = null;
+    socket.onerror = null;
+    try {
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        socket.close();
+      }
+    } catch (_) {}
+    ws.current = null;
+  }, [clearWsReconnectTimer]);
 
   useEffect(() => {
     showMessagesDropdownRef.current = showMessagesDropdown;
@@ -833,6 +865,7 @@ export default function App() {
   olabidFlagKnownRef.current = olabidFlagKnown;
   olabidEnabledRef.current = olabidEnabled;
   presenceEnabledRef.current = presenceEnabled;
+  tokenRef.current = token;
 
   useEffect(() => {
     if (!presenceEnabled) setOnlineUserIds(new Set());
@@ -1390,12 +1423,7 @@ export default function App() {
 
   useEffect(() => {
     if (!currentUser || !token) {
-      wsReadyRef.current = false;
-      if (ws.current) {
-        ws.current.onclose = null;
-        ws.current.close();
-        ws.current = null;
-      }
+      disconnectWS();
       return;
     }
 
@@ -1425,11 +1453,13 @@ export default function App() {
     };
 
     const connectWS = () => {
+      clearWsReconnectTimer();
       if (ws.current) {
         const prev = ws.current;
         prev.onclose = null;
         prev.onmessage = null;
         prev.onopen = null;
+        prev.onerror = null;
         if (prev.readyState === WebSocket.OPEN || prev.readyState === WebSocket.CONNECTING) {
           try {
             prev.close();
@@ -1441,7 +1471,12 @@ export default function App() {
       ws.current = socket;
 
       socket.onopen = () => {
-        socket.send(JSON.stringify({ type: 'join', payload: { token } }));
+        const liveToken = tokenRef.current;
+        if (!liveToken) {
+          disconnectWS();
+          return;
+        }
+        socket.send(JSON.stringify({ type: 'join', payload: { token: liveToken } }));
       };
 
       socket.onmessage = event => {
@@ -1453,6 +1488,12 @@ export default function App() {
               sendActiveChat();
               syncAfterReconnect();
               break;
+            case 'error': {
+              if (isWsAuthFailureMessage(message.payload?.message)) {
+                handleSessionExpiredRef.current();
+              }
+              break;
+            }
             case 'presence_snapshot': {
               if (!presenceEnabledRef.current) break;
               const ids: number[] = message.payload.onlineUserIds || [];
@@ -1998,11 +2039,20 @@ export default function App() {
         }
       };
 
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         wsReadyRef.current = false;
         markSendingFailed();
-        setTimeout(() => {
-          if (currentUser && token) connectWS();
+        if (isWsAuthFailureCloseCode(event.code)) {
+          handleSessionExpiredRef.current();
+          return;
+        }
+        if (!shouldReconnectAfterClose({ closeCode: event.code, hasToken: !!tokenRef.current })) {
+          return;
+        }
+        clearWsReconnectTimer();
+        wsReconnectTimerRef.current = setTimeout(() => {
+          wsReconnectTimerRef.current = null;
+          if (tokenRef.current) connectWS();
         }, 3000);
       };
     };
@@ -2018,15 +2068,11 @@ export default function App() {
     window.addEventListener('online', onOnline);
 
     return () => {
-      wsReadyRef.current = false;
       connectWSRef.current = null;
       window.removeEventListener('online', onOnline);
-      if (ws.current) {
-        ws.current.onclose = null;
-        ws.current.close();
-      }
+      disconnectWS();
     };
-  }, [currentUser, token]);
+  }, [currentUser, token, clearWsReconnectTimer, disconnectWS]);
 
   // Auto-scroll is owned by MessagesPanel (smart near-bottom + new-messages pill).
 
@@ -2172,7 +2218,7 @@ export default function App() {
     setActiveTab('feed');
     processedNotifIdsRef.current.clear();
     setOnlineUserIds(new Set());
-    ws.current?.close();
+    disconnectWS();
   };
 
   /** Stale/invalid JWT — clear local session and prompt sign-in. */
