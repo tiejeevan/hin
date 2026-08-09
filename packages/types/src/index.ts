@@ -328,6 +328,15 @@ export interface Comment {
 /** Server derives sent|delivered|read from DB timestamps; client may use sending|failed. */
 export type DeliveryStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
 
+export interface MessageReplyTo {
+  id: number;
+  senderId: number;
+  senderUsername: string;
+  content: string;
+  mediaUrl?: string | null;
+  deleted: boolean;
+}
+
 export interface Message {
   id: number;
   senderId: number;
@@ -347,6 +356,8 @@ export interface Message {
   linkPreview?: LinkPreview | null;
   mediaUrl?: string | null;
   mediaType?: string | null;
+  replyToMessageId?: number | null;
+  replyTo?: MessageReplyTo | null;
 }
 
 /** Discussion comment on an Olabid item, mirrors Comment but keyed by the external Olabid item id. */
@@ -540,6 +551,7 @@ export const CreateMessageSchema = z.object({
   content: z.string().max(1000, 'Message is too long').optional().default(''),
   mediaUrl: z.string().url().optional(),
   mediaType: z.enum(['image/jpeg', 'image/png', 'image/webp']).optional(),
+  replyToMessageId: z.number().int().positive().optional(),
 }).refine(data => !!(data.content?.trim() || data.mediaUrl), {
   message: 'Message cannot be empty',
 });
@@ -668,8 +680,10 @@ export type ClientMessage =
         mediaUrl?: string;
         mediaType?: string;
         clientMessageId?: string;
+        replyToMessageId?: number;
       };
     }
+  | { type: 'delete_message'; payload: { messageId: number } }
   | { type: 'typing'; payload: { receiverId: number; isTyping: boolean } }
   | { type: 'ack_delivered'; payload: { messageIds: number[] } };
 
@@ -677,6 +691,7 @@ export type ServerMessage =
   | { type: 'joined'; payload: { userId: number } }
   | { type: 'error'; payload: { message: string } }
   | { type: 'message'; payload: Message }
+  | { type: 'message_deleted'; payload: { messageId: number; conversationPeerId: number } }
   | { type: 'notification'; payload: Notification }
   | { type: 'post_created'; payload: { post: Post } }
   | { type: 'post_deleted'; payload: { postId: number } }

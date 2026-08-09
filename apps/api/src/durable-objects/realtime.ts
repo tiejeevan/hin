@@ -1,14 +1,14 @@
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and, inArray, sql, isNull } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { Message, Notification } from '@hin/types';
+import { Message, Notification, type MessageReplyTo } from '@hin/types';
 import { verify } from 'hono/jwt';
 import type { Env } from '../types';
 import { getJwtSecret } from '../lib/auth';
 import { isBlocked } from '../lib/blocks';
 import { parseFirstUrl, getOrFetchLinkPreview } from '../lib/linkPreview';
 import { isPresenceEnabled } from '../lib/system-settings';
-import { markMessagesReadSet, toMessageDto } from '../lib/messages';
+import { markMessagesReadSet, toMessageDto, loadReplyToMap } from '../lib/messages';
 
 export interface RealtimeSession {
   userId: number;
@@ -349,6 +349,7 @@ export class RealtimeDO implements DurableObject {
         mediaUrl: rawMediaUrl,
         mediaType: rawMediaType,
         clientMessageId: rawClientMessageId,
+        replyToMessageId: rawReplyToMessageId,
       } = message.payload as {
         receiverId: number;
         content?: string;
@@ -356,6 +357,7 @@ export class RealtimeDO implements DurableObject {
         mediaUrl?: string;
         mediaType?: string;
         clientMessageId?: string;
+        replyToMessageId?: number;
       };
 
       const content = typeof rawContent === 'string' ? rawContent.trim() : '';
@@ -366,6 +368,10 @@ export class RealtimeDO implements DurableObject {
       const clientMessageId =
         typeof rawClientMessageId === 'string' && rawClientMessageId.trim()
           ? rawClientMessageId.trim().slice(0, 64)
+          : null;
+      const replyToMessageId =
+        typeof rawReplyToMessageId === 'number' && Number.isFinite(rawReplyToMessageId) && rawReplyToMessageId > 0
+          ? rawReplyToMessageId
           : null;
 
       if (!content && !mediaUrl) {
@@ -421,6 +427,11 @@ export class RealtimeDO implements DurableObject {
           const linkPreviewRow = existing.linkPreviewId
             ? await db.select().from(schema.linkPreviews).where(eq(schema.linkPreviews.id, existing.linkPreviewId)).get()
             : null;
+          let existingReplyTo: MessageReplyTo | null = null;
+          if (existing.replyToMessageId) {
+            const replyMap = await loadReplyToMap(db, [existing.replyToMessageId]);
+            existingReplyTo = replyMap.get(existing.replyToMessageId) ?? null;
+          }
           const messagePayload: Message = toMessageDto({
             id: existing.id,
             senderId: session.userId,
@@ -444,8 +455,40 @@ export class RealtimeDO implements DurableObject {
             mediaUrl: existing.mediaUrl,
             mediaType: existing.mediaType,
             clientMessageId: existing.clientMessageId ?? clientMessageId,
+            replyToMessageId: existing.replyToMessageId ?? null,
+            replyTo: existingReplyTo,
           });
           this.sendSafely(ws, { type: 'message', payload: messagePayload });
+          return;
+        }
+      }
+
+      let replyTo: MessageReplyTo | null = null;
+      if (replyToMessageId) {
+        const parent = await db
+          .select({
+            id: schema.messages.id,
+            senderId: schema.messages.senderId,
+            receiverId: schema.messages.receiverId,
+            deletedAt: schema.messages.deletedAt,
+          })
+          .from(schema.messages)
+          .where(eq(schema.messages.id, replyToMessageId))
+          .get();
+
+        const sameConversation = !!parent && (
+          (parent.senderId === session.userId && parent.receiverId === receiverId) ||
+          (parent.senderId === receiverId && parent.receiverId === session.userId)
+        );
+        if (!parent || parent.deletedAt || !sameConversation) {
+          this.sendSafely(ws, { type: 'error', payload: { message: 'Invalid reply target' } });
+          return;
+        }
+
+        const replyMap = await loadReplyToMap(db, [replyToMessageId]);
+        replyTo = replyMap.get(replyToMessageId) ?? null;
+        if (!replyTo) {
+          this.sendSafely(ws, { type: 'error', payload: { message: 'Invalid reply target' } });
           return;
         }
       }
@@ -488,6 +531,7 @@ export class RealtimeDO implements DurableObject {
         mediaUrl,
         mediaType: resolvedMediaType,
         clientMessageId,
+        replyToMessageId,
       }).returning();
 
       const receiverUser = await db.select().from(schema.users).where(eq(schema.users.id, receiverId)).get();
@@ -518,10 +562,60 @@ export class RealtimeDO implements DurableObject {
         mediaUrl: inserted.mediaUrl,
         mediaType: inserted.mediaType,
         clientMessageId: inserted.clientMessageId ?? clientMessageId,
+        replyToMessageId: inserted.replyToMessageId ?? replyToMessageId,
+        replyTo,
       });
 
       this.sendSafely(ws, { type: 'message', payload: messagePayload });
       this.broadcastToUser(receiverId, { type: 'message', payload: messagePayload });
+    }
+
+    else if (message.type === 'delete_message') {
+      const session = this.getSession(ws);
+      if (!session) return;
+
+      const rawMessageId = message.payload?.messageId;
+      const messageId =
+        typeof rawMessageId === 'number' && Number.isFinite(rawMessageId) && rawMessageId > 0
+          ? rawMessageId
+          : null;
+      if (!messageId) {
+        this.sendSafely(ws, { type: 'error', payload: { message: 'Invalid message id' } });
+        return;
+      }
+
+      const existing = await db
+        .select({
+          id: schema.messages.id,
+          senderId: schema.messages.senderId,
+          receiverId: schema.messages.receiverId,
+          deletedAt: schema.messages.deletedAt,
+        })
+        .from(schema.messages)
+        .where(eq(schema.messages.id, messageId))
+        .get();
+
+      if (!existing || existing.senderId !== session.userId) {
+        this.sendSafely(ws, { type: 'error', payload: { message: 'Cannot delete this message' } });
+        return;
+      }
+
+      if (!existing.deletedAt) {
+        await db.update(schema.messages)
+          .set({ deletedAt: new Date().toISOString() })
+          .where(eq(schema.messages.id, messageId))
+          .run();
+      }
+
+      // conversationPeerId is the other party from each recipient's perspective.
+      this.broadcastToUser(existing.senderId, {
+        type: 'message_deleted',
+        payload: { messageId, conversationPeerId: existing.receiverId },
+      });
+      this.broadcastToUser(existing.receiverId, {
+        type: 'message_deleted',
+        payload: { messageId, conversationPeerId: existing.senderId },
+      });
     }
 
     else if (message.type === 'ack_delivered') {

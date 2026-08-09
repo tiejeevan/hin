@@ -136,7 +136,7 @@
 @keyframes panel-pop-anchor {
   from {
     opacity: 0;
-    transform: scale(0.88) translateY(10px) translateX(4px);
+    transform: scale(0.86) translateY(14px) translateX(6px);
   }
   to {
     opacity: 1;
@@ -145,8 +145,57 @@
 }
 
 .animate-panel-pop-anchor {
-  animation: panel-pop-anchor 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: panel-pop-anchor 0.32s cubic-bezier(0.34, 1.35, 0.64, 1) forwards;
   transform-origin: bottom right;
+}
+
+@keyframes message-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-message-menu-in {
+  animation: message-menu-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  transform-origin: top center;
+}
+
+@keyframes reply-quote-in {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    max-height: 72px;
+    transform: translateY(0);
+  }
+}
+
+.animate-reply-quote-in {
+  animation: reply-quote-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  overflow: hidden;
+}
+
+@keyframes thread-enter {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-thread-enter {
+  animation: thread-enter 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 @keyframes backdrop-fade-in {
@@ -179,7 +228,19 @@
 }
 
 .animate-message-fade-in {
-  animation: message-fade-in 0.22s ease-out;
+  animation: message-fade-in 0.22s ease-out both;
+  animation-delay: calc(var(--stagger, 0) * 40ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-panel-pop-anchor,
+  .animate-message-menu-in,
+  .animate-reply-quote-in,
+  .animate-thread-enter,
+  .animate-message-fade-in {
+    animation-duration: 0.01ms;
+    animation-delay: 0ms;
+  }
 }
 
 @keyframes slide-up-sheet {

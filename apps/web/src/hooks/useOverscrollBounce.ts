@@ -1,4 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
+import { prefersReducedMotion } from '../lib/panelMorph';
+import { rubberBand } from '../lib/chatWasmBridge';
+
+export type OverscrollBounceRef<T extends HTMLElement> = ((node: T | null) => void) & {
+  current: T | null;
+};
 
 /**
  * Gives a scrollable element a rubber-band "bump" when the user scrolls past
@@ -7,19 +13,36 @@ import { useEffect, useRef } from 'react';
  *
  * Works for both desktop (wheel) and touch devices (touch drag).
  *
- * The returned ref must be attached to the element that has `overflow-y: auto`.
+ * Bindings attach/detach via a callback ref whenever the scroll node mounts or
+ * unmounts (e.g. thread list ↔ conversation), and rebind when `enabled` flips.
+ *
+ * The returned ref is both a callback ref and a `{ current }` object so callers
+ * can use `ref={scrollRef}` and `scrollRef.current` interchangeably.
  * Its parent should clip overflow (e.g. `overflow-hidden`) so the bump is contained.
  */
-export function useOverscrollBounce<T extends HTMLElement>(enabled = true) {
-  const ref = useRef<T | null>(null);
+export function useOverscrollBounce<T extends HTMLElement>(
+  enabled = true,
+): OverscrollBounceRef<T> {
+  const elementRef = useRef<T | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
   const resetTimer = useRef<number | null>(null);
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
 
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || !enabled) return;
+  const attachRef = useRef<(el: T) => void>(() => {});
+  const detachRef = useRef<() => void>(() => {});
 
-    const settle = (duration = 0.32) => {
-      el.style.transition = `transform ${duration}s cubic-bezier(0.22, 1, 0.36, 1)`;
+  detachRef.current = () => {
+    cleanupRef.current?.();
+    cleanupRef.current = null;
+  };
+
+  attachRef.current = (el: T) => {
+    detachRef.current();
+    if (!enabledRef.current || prefersReducedMotion()) return;
+
+    const settle = (duration = 0.38) => {
+      el.style.transition = `transform ${duration}s cubic-bezier(0.22, 1.2, 0.36, 1)`;
       el.style.transform = 'translateY(0)';
     };
 
@@ -33,7 +56,6 @@ export function useOverscrollBounce<T extends HTMLElement>(enabled = true) {
       };
     };
 
-    // --- Desktop: wheel ---
     const onWheel = (e: WheelEvent) => {
       if (e.deltaY === 0) return;
       const { nonScrollable, atTop, atBottom } = boundaries();
@@ -43,7 +65,7 @@ export function useOverscrollBounce<T extends HTMLElement>(enabled = true) {
 
       e.preventDefault();
       const dir = hitStart ? 1 : -1;
-      const magnitude = Math.min(12, 4 + Math.abs(e.deltaY) * 0.18);
+      const magnitude = Math.min(18, 5 + Math.abs(e.deltaY) * 0.22);
       el.style.transition = 'transform 0.08s ease-out';
       el.style.transform = `translateY(${dir * magnitude}px)`;
 
@@ -51,7 +73,6 @@ export function useOverscrollBounce<T extends HTMLElement>(enabled = true) {
       resetTimer.current = window.setTimeout(() => settle(), 90);
     };
 
-    // --- Touch: drag ---
     let lastY = 0;
     let overscroll = 0;
     let pulling = false;
@@ -74,7 +95,7 @@ export function useOverscrollBounce<T extends HTMLElement>(enabled = true) {
         const { nonScrollable, atTop, atBottom } = boundaries();
         const hitStart = dy > 0 && (atTop || nonScrollable);
         const hitEnd = dy < 0 && (atBottom || nonScrollable);
-        if (!hitStart && !hitEnd) return; // let the list scroll natively
+        if (!hitStart && !hitEnd) return;
         pulling = true;
         pullDir = hitStart ? 1 : -1;
         overscroll = 0;
@@ -82,7 +103,6 @@ export function useOverscrollBounce<T extends HTMLElement>(enabled = true) {
       }
 
       overscroll += dy;
-      // Released back toward neutral: hand control back to native scrolling.
       if ((pullDir === 1 && overscroll <= 0) || (pullDir === -1 && overscroll >= 0)) {
         pulling = false;
         el.style.transform = 'translateY(0)';
@@ -90,7 +110,7 @@ export function useOverscrollBounce<T extends HTMLElement>(enabled = true) {
       }
 
       e.preventDefault();
-      const damped = Math.sign(overscroll) * Math.min(90, Math.abs(overscroll) * 0.4);
+      const damped = rubberBand(overscroll * 0.55, 120);
       el.style.transform = `translateY(${damped}px)`;
     };
 
@@ -105,17 +125,51 @@ export function useOverscrollBounce<T extends HTMLElement>(enabled = true) {
     el.addEventListener('touchend', onTouchEnd, { passive: true });
     el.addEventListener('touchcancel', onTouchEnd, { passive: true });
 
-    return () => {
+    cleanupRef.current = () => {
       el.removeEventListener('wheel', onWheel);
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchcancel', onTouchEnd);
-      if (resetTimer.current) window.clearTimeout(resetTimer.current);
+      if (resetTimer.current) {
+        window.clearTimeout(resetTimer.current);
+        resetTimer.current = null;
+      }
       el.style.transform = '';
       el.style.transition = '';
     };
+  };
+
+  const setRef = useCallback((node: T | null) => {
+    if (elementRef.current === node) return;
+    detachRef.current();
+    elementRef.current = node;
+    if (node) attachRef.current(node);
+  }, []);
+
+  // Rebind when `enabled` flips while a node is already mounted.
+  useEffect(() => {
+    const el = elementRef.current;
+    detachRef.current();
+    if (el && enabled) attachRef.current(el);
   }, [enabled]);
 
-  return ref;
+  // Stable hybrid: callback ref + `.current` for scroll helpers.
+  const hybridRef = useRef<OverscrollBounceRef<T> | null>(null);
+  if (hybridRef.current === null) {
+    const fn = ((node: T | null) => {
+      setRef(node);
+    }) as OverscrollBounceRef<T>;
+    Object.defineProperty(fn, 'current', {
+      enumerable: true,
+      configurable: true,
+      get: () => elementRef.current,
+      set: (value: T | null) => {
+        setRef(value);
+      },
+    });
+    hybridRef.current = fn;
+  }
+
+  return hybridRef.current;
 }

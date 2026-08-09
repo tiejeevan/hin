@@ -1,7 +1,7 @@
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, and, count, sql, inArray, notInArray } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import type { ChatThread, DeliveryStatus, LinkPreview, Message } from '@hin/types';
+import type { ChatThread, DeliveryStatus, LinkPreview, Message, MessageReplyTo } from '@hin/types';
 import { getBlockedUserIds, getBlockerUserIds } from './blocks';
 import { isGamificationEnabled } from './gamification/settings';
 import { loadEquippedBadgesForUsers } from './gamification/equipped';
@@ -36,6 +36,8 @@ export type MessageRowInput = {
   mediaUrl?: string | null;
   mediaType?: string | null;
   clientMessageId?: string | null;
+  replyToMessageId?: number | null;
+  replyTo?: MessageReplyTo | null;
 };
 
 export function toMessageDto(row: MessageRowInput): Message {
@@ -57,7 +59,45 @@ export function toMessageDto(row: MessageRowInput): Message {
     mediaUrl: row.mediaUrl ?? null,
     mediaType: row.mediaType ?? null,
     clientMessageId: row.clientMessageId ?? null,
+    replyToMessageId: row.replyToMessageId ?? null,
+    replyTo: row.replyTo ?? null,
   };
+}
+
+/** Batch-load reply quotes for message history / WS payloads (includes soft-deleted parents). */
+export async function loadReplyToMap(
+  db: Db,
+  ids: number[],
+): Promise<Map<number, MessageReplyTo>> {
+  const unique = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
+  if (unique.length === 0) return new Map();
+
+  const rows = await db
+    .select({
+      id: schema.messages.id,
+      senderId: schema.messages.senderId,
+      content: schema.messages.content,
+      mediaUrl: schema.messages.mediaUrl,
+      deletedAt: schema.messages.deletedAt,
+      senderUsername: schema.users.username,
+    })
+    .from(schema.messages)
+    .innerJoin(schema.users, eq(schema.messages.senderId, schema.users.id))
+    .where(inArray(schema.messages.id, unique))
+    .all();
+
+  const map = new Map<number, MessageReplyTo>();
+  for (const row of rows) {
+    map.set(row.id, {
+      id: row.id,
+      senderId: row.senderId,
+      senderUsername: row.senderUsername,
+      content: row.content,
+      mediaUrl: row.mediaUrl ?? null,
+      deleted: !!row.deletedAt,
+    });
+  }
+  return map;
 }
 
 async function getHiddenMessagePartnerIds(db: Db, userId: number): Promise<Set<number>> {

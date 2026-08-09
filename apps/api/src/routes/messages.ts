@@ -6,7 +6,7 @@ import { Message } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { isBlocked } from '../lib/blocks';
-import { countUnreadMessages, listMessageThreads, markMessagesReadSet, toMessageDto } from '../lib/messages';
+import { countUnreadMessages, listMessageThreads, loadReplyToMap, markMessagesReadSet, toMessageDto } from '../lib/messages';
 
 const messages = new Hono<{ Bindings: Env }>();
 
@@ -162,6 +162,7 @@ messages.get('/:otherUserId', async (c) => {
       deliveredAt: schema.messages.deliveredAt,
       readAt: schema.messages.readAt,
       clientMessageId: schema.messages.clientMessageId,
+      replyToMessageId: schema.messages.replyToMessageId,
     })
     .from(schema.messages)
     .where(and(...conditions))
@@ -221,6 +222,11 @@ messages.get('/:otherUserId', async (c) => {
     : [];
   const usernameById = new Map(userRows.map(u => [u.id, u.username]));
 
+  const replyIds = chatMessages
+    .map(m => m.replyToMessageId)
+    .filter((id): id is number => typeof id === 'number' && id > 0);
+  const replyToById = await loadReplyToMap(db, replyIds);
+
   const populatedMessages: Message[] = chatMessages.map((msg) => {
     const preview = msg.linkPreviewId ? previewById.get(msg.linkPreviewId) : null;
     return toMessageDto({
@@ -240,6 +246,8 @@ messages.get('/:otherUserId', async (c) => {
       mediaUrl: msg.mediaUrl,
       mediaType: msg.mediaType,
       clientMessageId: msg.clientMessageId,
+      replyToMessageId: msg.replyToMessageId,
+      replyTo: msg.replyToMessageId ? replyToById.get(msg.replyToMessageId) ?? null : null,
     });
   });
 

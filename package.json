@@ -8,7 +8,11 @@
   ],
   "scripts": {
     "dev": "concurrently --kill-others \"npm run dev --workspace=apps/api\" \"npm run dev --workspace=apps/web\"",
-    "build": "npm run build --workspaces --if-present",
+    "build:wasm": "wasm-pack build crates/hin-chat-wasm --target web --out-dir ../../apps/web/src/wasm/chat --release",
+    "build": "npm run build:wasm && npm run build --workspaces --if-present",
+    "test:wasm": "cargo test -p hin-chat-core && cargo test -p hin-chat-wasm",
+    "test:e2e:messages": "playwright test e2e/messages.spec.ts",
+    "test:smoke:chat": "playwright test e2e/chat-smoke.spec.ts",
     "db:generate": "npm run db:generate --workspace=packages/db",
     "db:migrate:local": "npm run db:migrate:local --workspace=packages/db",
     "db:migrate:prod": "npm run db:migrate:prod --workspace=packages/db",

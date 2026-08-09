@@ -108,6 +108,7 @@ function createDbMock(options?: {
   const self = () => chain;
   chain.select = vi.fn(self);
   chain.from = vi.fn(self);
+  chain.innerJoin = vi.fn(self);
   chain.where = vi.fn(self);
   chain.set = vi.fn((values: Record<string, unknown>) => {
     if (options?.lastUpdateSet) options.lastUpdateSet.current = values;
@@ -531,6 +532,173 @@ describe('RealtimeDO hibernation session routing', () => {
       status: 'read',
       read: true,
     });
+  });
+
+  it('includes replyTo on send_message when replyToMessageId is valid', async () => {
+    const lastInsertValues: { current: Record<string, unknown> | null } = { current: null };
+    const mock = createDbMock({
+      insertReturning: {
+        id: 11,
+        content: 'reply',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        read: 0,
+        mediaUrl: null,
+        mediaType: null,
+        deliveredAt: null,
+        readAt: null,
+        clientMessageId: null,
+        replyToMessageId: 10,
+      },
+      getQueue: [
+        { id: 10, senderId: 2, receiverId: 1, deletedAt: null },
+      ],
+      selectAll: [
+        {
+          id: 10,
+          senderId: 2,
+          content: 'parent',
+          mediaUrl: null,
+          deletedAt: null,
+          senderUsername: 'bob',
+        },
+      ],
+      receiverUser: { id: 2, username: 'bob' },
+    });
+    const originalValues = mock.values;
+    mock.values = vi.fn((vals: Record<string, unknown>) => {
+      lastInsertValues.current = vals;
+      return originalValues(vals);
+    });
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mock);
+
+    const alice = dob.addSocket();
+    const bob = dob.addSocket();
+    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
+    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+
+    await dob.handleClientMessage(alice as unknown as WebSocket, {
+      type: 'send_message',
+      payload: { receiverId: 2, content: 'reply', replyToMessageId: 10 },
+    });
+
+    expect(lastInsertValues.current).toMatchObject({ replyToMessageId: 10 });
+    expect(alice.eventsOfType('message')[0]?.payload).toMatchObject({
+      id: 11,
+      content: 'reply',
+      replyToMessageId: 10,
+      replyTo: {
+        id: 10,
+        senderId: 2,
+        senderUsername: 'bob',
+        content: 'parent',
+        deleted: false,
+      },
+    });
+    expect(bob.eventsOfType('message')[0]?.payload).toMatchObject({
+      replyToMessageId: 10,
+      replyTo: expect.objectContaining({ id: 10 }),
+    });
+  });
+
+  it('rejects send_message when reply target is outside the conversation', async () => {
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      createDbMock({
+        getQueue: [
+          { id: 10, senderId: 3, receiverId: 4, deletedAt: null },
+        ],
+        receiverUser: { id: 2, username: 'bob' },
+      }),
+    );
+
+    const alice = dob.addSocket();
+    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
+
+    await dob.handleClientMessage(alice as unknown as WebSocket, {
+      type: 'send_message',
+      payload: { receiverId: 2, content: 'reply', replyToMessageId: 10 },
+    });
+
+    expect(alice.eventsOfType('message')).toHaveLength(0);
+    expect(alice.eventsOfType('error')[0]?.payload).toEqual({ message: 'Invalid reply target' });
+  });
+
+  it('soft-deletes via delete_message and fans out peer-scoped events', async () => {
+    const lastUpdateSet: { current: Record<string, unknown> | null } = { current: null };
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      createDbMock({
+        getQueue: [
+          { id: 77, senderId: 1, receiverId: 2, deletedAt: null },
+        ],
+        lastUpdateSet,
+      }),
+    );
+
+    const alice = dob.addSocket();
+    const bob = dob.addSocket();
+    const carol = dob.addSocket();
+    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
+    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    carol.serializeAttachment({ userId: 3, username: 'carol', activeChatId: null });
+
+    await dob.handleClientMessage(alice as unknown as WebSocket, {
+      type: 'delete_message',
+      payload: { messageId: 77 },
+    });
+
+    expect(lastUpdateSet.current).toMatchObject({ deletedAt: expect.any(String) });
+    expect(alice.eventsOfType('message_deleted')).toEqual([
+      { type: 'message_deleted', payload: { messageId: 77, conversationPeerId: 2 } },
+    ]);
+    expect(bob.eventsOfType('message_deleted')).toEqual([
+      { type: 'message_deleted', payload: { messageId: 77, conversationPeerId: 1 } },
+    ]);
+    expect(carol.eventsOfType('message_deleted')).toHaveLength(0);
+  });
+
+  it('delete_message is idempotent when already soft-deleted', async () => {
+    const lastUpdateSet: { current: Record<string, unknown> | null } = { current: null };
+    const mock = createDbMock({
+      getQueue: [
+        { id: 77, senderId: 1, receiverId: 2, deletedAt: '2026-01-01T00:00:00.000Z' },
+      ],
+      lastUpdateSet,
+    });
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mock);
+
+    const alice = dob.addSocket();
+    const bob = dob.addSocket();
+    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
+    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+
+    await dob.handleClientMessage(alice as unknown as WebSocket, {
+      type: 'delete_message',
+      payload: { messageId: 77 },
+    });
+
+    expect(mock.update).not.toHaveBeenCalled();
+    expect(alice.eventsOfType('message_deleted')).toHaveLength(1);
+    expect(bob.eventsOfType('message_deleted')).toHaveLength(1);
+  });
+
+  it('rejects delete_message from non-sender', async () => {
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      createDbMock({
+        getQueue: [
+          { id: 77, senderId: 1, receiverId: 2, deletedAt: null },
+        ],
+      }),
+    );
+
+    const bob = dob.addSocket();
+    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+
+    await dob.handleClientMessage(bob as unknown as WebSocket, {
+      type: 'delete_message',
+      payload: { messageId: 77 },
+    });
+
+    expect(bob.eventsOfType('message_deleted')).toHaveLength(0);
+    expect(bob.eventsOfType('error')[0]?.payload).toEqual({ message: 'Cannot delete this message' });
   });
 
   it('ack_delivered upgrades undelivered messages and notifies senders', async () => {

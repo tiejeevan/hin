@@ -5,6 +5,7 @@ import { ChatRecipient } from '../../types/ui';
 import { API_URL } from '../../config';
 import { SILENT_LOADING_HEADER, SILENT_LOADING_VALUE } from '../../lib/globalLoading';
 import { UserAvatar } from '../profile/UserAvatar';
+import { sortThreads } from '../../lib/chatWasmBridge';
 
 interface ShareToChatModalProps {
   itemId: number;
@@ -28,16 +29,7 @@ export function ShareToChatModal({
   const [searchResults, setSearchResults] = useState<UserType[]>([]);
   const [searching, setSearching] = useState(false);
 
-  const sortedThreads = useMemo(() => {
-    return [...threads].sort((a, b) => {
-      if (a.lastMessage && b.lastMessage) {
-        return new Date(b.lastMessage.createdAt).getTime() - new Date(a.lastMessage.createdAt).getTime();
-      }
-      if (a.lastMessage) return -1;
-      if (b.lastMessage) return 1;
-      return a.username.localeCompare(b.username);
-    });
-  }, [threads]);
+  const sortedThreads = useMemo(() => sortThreads(threads), [threads]);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {

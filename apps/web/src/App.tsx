@@ -50,8 +50,9 @@ import {
 import {
   applyDelivered,
   applyMessagesRead,
+  initChatWasmBridge,
   mergeAndSortMessages,
-} from './lib/chatMessages';
+} from './lib/chatWasmBridge';
 import {
   isWsAuthFailureCloseCode,
   isWsAuthFailureMessage,
@@ -177,6 +178,7 @@ export default function App() {
   });
   const [pendingChatMedia, setPendingChatMedia] = useState<{ file: File; previewUrl: string } | null>(null);
   const [sendingChatMedia, setSendingChatMedia] = useState(false);
+  const [replyingToMessage, setReplyingToMessage] = useState<Message | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const chatDraftsRef = useRef(chatDrafts);
   const chatMessagesRef = useRef<Message[]>([]);
@@ -369,6 +371,11 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
+    if (!token) return;
+    void initChatWasmBridge();
+  }, [token]);
+
+  useEffect(() => {
     feedModeRef.current = feedMode;
   }, [feedMode]);
 
@@ -518,6 +525,7 @@ export default function App() {
       return null;
     });
     setChatRecipient(recipient);
+    setReplyingToMessage(null);
     setNewMsgText(draft.text);
     setDraftLinkPreview(draft.preview);
     fetchMessages(recipient.id);
@@ -539,6 +547,7 @@ export default function App() {
     });
     setChatRecipient(null);
     setChatMessages([]);
+    setReplyingToMessage(null);
     setNewMsgText('');
     setDraftLinkPreview(null);
   };
@@ -1625,6 +1634,21 @@ export default function App() {
                   };
                 }),
               );
+              break;
+            }
+            case 'message_deleted': {
+              const { messageId, conversationPeerId } = message.payload as {
+                messageId: number;
+                conversationPeerId: number;
+              };
+              setChatMessages(prev => prev.filter(m => m.id !== messageId));
+              setReplyingToMessage(prev => (prev?.id === messageId ? null : prev));
+              setThreads(prev => {
+                const hit = prev.find(t => t.id === conversationPeerId);
+                if (!hit?.lastMessage || hit.lastMessage.id !== messageId) return prev;
+                void fetchThreads();
+                return prev;
+              });
               break;
             }
             case 'messages_read': {
@@ -3307,6 +3331,7 @@ export default function App() {
     }
 
     const clientMessageId = randomId();
+    const replyParent = replyingToMessage;
     const optimisticMsg: Message = {
       id: -Date.now(),
       senderId: currentUser.id,
@@ -3321,6 +3346,17 @@ export default function App() {
       linkPreview: optimisticPreview,
       mediaUrl: optimisticMediaUrl,
       mediaType: mediaType ?? null,
+      replyToMessageId: replyParent && replyParent.id > 0 ? replyParent.id : null,
+      replyTo: replyParent
+        ? {
+            id: replyParent.id,
+            senderId: replyParent.senderId,
+            senderUsername: replyParent.senderUsername,
+            content: replyParent.content,
+            mediaUrl: replyParent.mediaUrl ?? null,
+            deleted: false,
+          }
+        : null,
     };
 
     setChatMessages(prev => mergeAndSortMessages(prev, [optimisticMsg]));
@@ -3335,6 +3371,8 @@ export default function App() {
           mediaUrl,
           mediaType,
           clientMessageId,
+          replyToMessageId:
+            replyParent && replyParent.id > 0 ? replyParent.id : undefined,
         },
       })
     );
@@ -3353,6 +3391,7 @@ export default function App() {
     });
     setNewMsgText('');
     setDraftLinkPreview(null);
+    setReplyingToMessage(null);
   };
 
   const handleRetryFailedMessage = (failed: Message) => {
@@ -3387,7 +3426,42 @@ export default function App() {
           mediaType: failed.mediaType || undefined,
           clientMessageId,
           suppressLinkPreview: !failed.linkPreview,
+          replyToMessageId: failed.replyToMessageId || undefined,
         },
+      }),
+    );
+  };
+
+  const handleDeleteMessage = (msg: Message) => {
+    if (!currentUser) return;
+    if (msg.senderId !== currentUser.id) return;
+
+    // Optimistic / failed local-only rows
+    if (msg.id < 0 || msg.status === 'failed') {
+      setChatMessages(prev =>
+        prev.filter(
+          m =>
+            !(
+              m.id === msg.id ||
+              (msg.clientMessageId && m.clientMessageId === msg.clientMessageId)
+            ),
+        ),
+      );
+      setReplyingToMessage(prev => (prev?.id === msg.id ? null : prev));
+      return;
+    }
+
+    if (!(ws.current?.readyState === WebSocket.OPEN && wsReadyRef.current)) {
+      alert('Real-time connection is not ready yet. Please wait a moment and try again.');
+      return;
+    }
+
+    setChatMessages(prev => prev.filter(m => m.id !== msg.id));
+    setReplyingToMessage(prev => (prev?.id === msg.id ? null : prev));
+    ws.current.send(
+      JSON.stringify({
+        type: 'delete_message',
+        payload: { messageId: msg.id },
       }),
     );
   };
@@ -4675,6 +4749,10 @@ export default function App() {
             onNewMsgTextChange={setNewMsgText}
             onSendDM={handleSendDM}
             onRetryFailedMessage={handleRetryFailedMessage}
+            replyingToMessage={replyingToMessage}
+            onReplyToMessage={setReplyingToMessage}
+            onClearReply={() => setReplyingToMessage(null)}
+            onDeleteMessage={handleDeleteMessage}
             onTyping={handleUserTyping}
             onOpenProfile={openProfile}
             onOpenOlabidItem={olabidEnabled ? openOlabidItem : undefined}

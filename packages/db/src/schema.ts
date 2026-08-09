@@ -395,6 +395,8 @@ export const messages = sqliteTable('messages', {
   readAt: text('read_at'),
   /** Client-generated idempotency key; unique per sender when set. */
   clientMessageId: text('client_message_id'),
+  /** Optional parent message being replied to (same conversation). */
+  replyToMessageId: integer('reply_to_message_id').references((): any => messages.id, { onDelete: 'set null' }),
 }, (table) => ({
   senderIdIdx: index('messages_sender_id_idx').on(table.senderId),
   receiverIdIdx: index('messages_receiver_id_idx').on(table.receiverId),
@@ -404,6 +406,7 @@ export const messages = sqliteTable('messages', {
     table.senderId,
     table.clientMessageId,
   ),
+  replyToMessageIdIdx: index('messages_reply_to_message_id_idx').on(table.replyToMessageId),
 }));
 
 export const notifications = sqliteTable('notifications', {

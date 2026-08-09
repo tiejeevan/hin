@@ -6,6 +6,11 @@ node_modules
 dist
 .turbo
 
+# Rust / WASM
+crates/*/target/
+target/
+apps/web/src/wasm/chat/
+
 # Cloudflare Wrangler files
 .wrangler
 .dev.vars

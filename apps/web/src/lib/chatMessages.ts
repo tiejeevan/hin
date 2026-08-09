@@ -43,6 +43,9 @@ export function mergeMessagePreferHigherStatus(existing: Message | undefined, in
     linkPreview: incoming.linkPreview !== undefined ? incoming.linkPreview : existing.linkPreview,
     mediaUrl: incoming.mediaUrl !== undefined ? incoming.mediaUrl : existing.mediaUrl,
     mediaType: incoming.mediaType !== undefined ? incoming.mediaType : existing.mediaType,
+    replyToMessageId:
+      incoming.replyToMessageId !== undefined ? incoming.replyToMessageId : existing.replyToMessageId,
+    replyTo: incoming.replyTo !== undefined ? incoming.replyTo : existing.replyTo,
   };
 }
 

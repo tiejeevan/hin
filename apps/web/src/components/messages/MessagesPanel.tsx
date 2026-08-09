@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { X, Shield, SquarePen, ChevronLeft, Maximize2, Minimize2, Send, MessageCircle, ImagePlus, Camera, Loader2, Check, CheckCheck } from 'lucide-react';
-import { ChatThread, DeliveryStatus, LinkPreview, Message, User as UserType } from '@hin/types';
+import { X, Shield, SquarePen, ChevronLeft, Maximize2, Minimize2, Send, MessageCircle, ImagePlus, Camera, Loader2 } from 'lucide-react';
+import { ChatThread, LinkPreview, Message, User as UserType } from '@hin/types';
 import { ChatRecipient } from '../../types/ui';
 import { UserAvatar } from '../profile/UserAvatar';
 import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
 import { useOverscrollBounce } from '../../hooks/useOverscrollBounce';
 import { LinkPreviewCard } from '../feed/LinkPreviewCard';
-import { getOlabidItemIdFromUrl } from '../../lib/appRoutes';
-import { deriveLocalStatus } from '../../lib/chatMessages';
+import { sortThreads } from '../../lib/chatWasmBridge';
+import { ChatMessageBubble, ReplyQuoteBar } from '../chat';
 import { formatLastSeen } from '../../lib/formatRelativeTime';
 
 const TEXTAREA_MAX_HEIGHT_PX = 120;
@@ -16,22 +16,6 @@ const NEAR_BOTTOM_PX = 100;
 function prefersTouchComposer(): boolean {
   if (typeof window === 'undefined') return false;
   return window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
-}
-
-function DeliveryTicks({ status }: { status: DeliveryStatus }) {
-  if (status === 'sending') {
-    return <Loader2 className="h-3 w-3 animate-spin text-text-muted" aria-label="Sending" />;
-  }
-  if (status === 'failed') {
-    return <span className="text-red-400 text-[10px] font-medium">Failed</span>;
-  }
-  if (status === 'sent') {
-    return <Check className="h-3 w-3 text-text-muted" aria-label="Sent" />;
-  }
-  if (status === 'delivered') {
-    return <CheckCheck className="h-3 w-3 text-text-muted" aria-label="Delivered" />;
-  }
-  return <CheckCheck className="h-3 w-3 text-sky-400" aria-label="Read" />;
 }
 
 interface MessagesPanelProps {
@@ -56,6 +40,10 @@ interface MessagesPanelProps {
   onNewMsgTextChange: (text: string) => void;
   onSendDM: (e: React.FormEvent) => void;
   onRetryFailedMessage?: (msg: Message) => void;
+  replyingToMessage?: Message | null;
+  onReplyToMessage?: (msg: Message) => void;
+  onClearReply?: () => void;
+  onDeleteMessage?: (msg: Message) => void;
   onTyping: (recipientId: number) => void;
   onOpenProfile: (userId: number, opts?: { username?: string }) => void;
   onOpenOlabidItem?: (itemId: number) => void;
@@ -89,6 +77,10 @@ export function MessagesPanel({
   onNewMsgTextChange,
   onSendDM,
   onRetryFailedMessage,
+  replyingToMessage = null,
+  onReplyToMessage,
+  onClearReply,
+  onDeleteMessage,
   onTyping,
   onOpenProfile,
   onOpenOlabidItem,
@@ -98,28 +90,23 @@ export function MessagesPanel({
   olabidEnabled = true,
   presenceEnabled = false,
 }: MessagesPanelProps) {
-  const sorted = useMemo(() => {
-    return [...threads].sort((a, b) => {
-      if (a.lastMessage && b.lastMessage) {
-        return new Date(b.lastMessage.createdAt).getTime() - new Date(a.lastMessage.createdAt).getTime();
-      }
-      if (a.lastMessage) return -1;
-      if (b.lastMessage) return 1;
-      return a.username.localeCompare(b.username);
-    });
-  }, [threads]);
+  const sorted = useMemo(() => sortThreads(threads), [threads]);
 
   useEffect(() => {
     if (!isOpen) return;
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (replyingToMessage && onClearReply) {
+          onClearReply();
+          return;
+        }
         if (isExpanded) onToggleExpand();
         else onClose();
       }
     };
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, isExpanded, onClose, onToggleExpand]);
+  }, [isOpen, isExpanded, onClose, onToggleExpand, replyingToMessage, onClearReply]);
 
   // Scroll stays wherever the pointer is (no page lock). These give the chat and
   // conversation lists a rubber-band bump at the start/end and stop scroll from
@@ -291,6 +278,11 @@ export function MessagesPanel({
   }, [newMsgText, chatRecipient?.id, isOpen]);
 
   useEffect(() => {
+    if (!replyingToMessage || !isOpen) return;
+    composerRef.current?.focus();
+  }, [replyingToMessage, isOpen]);
+
+  useEffect(() => {
     if (!isOpen || isExpanded) return;
     const handleClickOutside = (e: MouseEvent) => {
       const panel = document.getElementById('messages-panel');
@@ -344,8 +336,8 @@ export function MessagesPanel({
 
         {showingChat && chatRecipient ? (
           <>
-            <div className="relative flex-1 min-h-0 flex flex-col">
-            <div ref={chatScrollRef} className="flex-1 overflow-y-auto overscroll-contain p-3 space-y-2 bg-chat-bg min-h-0">
+            <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden bg-chat-bg animate-thread-enter">
+            <div ref={chatScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-3 space-y-2 min-h-0">
               {chatMessages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-text-muted text-[11px] gap-1.5 py-8">
                   <MessageCircle className="h-7 w-7 opacity-40" />
@@ -355,13 +347,16 @@ export function MessagesPanel({
                 chatMessages.map((msg, index) => {
                   const isMe = msg.senderId === currentUser.id;
                   const prevMsg = index > 0 ? chatMessages[index - 1] : null;
-                  const status = deriveLocalStatus(msg);
                   const showTime =
                     !prevMsg ||
                     new Date(msg.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() > 15 * 60 * 1000;
 
                   return (
-                    <div key={msg.id} className="flex flex-col animate-message-fade-in">
+                    <div
+                      key={msg.id}
+                      className="flex flex-col min-w-0 animate-message-fade-in"
+                      style={{ ['--stagger' as string]: `${Math.min(index, 12) * 28}ms` }}
+                    >
                       {showTime && (
                         <div className="text-[10px] text-text-muted font-medium text-center my-2">
                           {new Date(msg.createdAt).toLocaleDateString([], {
@@ -371,65 +366,18 @@ export function MessagesPanel({
                           })}
                         </div>
                       )}
-                      <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                        <div
-                          className={`max-w-[80%] rounded-[18px] px-3 py-2 text-[12px] leading-snug ${
-                            isMe
-                              ? 'bg-msg-me text-msg-me-text rounded-br-[4px]'
-                              : 'bg-msg-other text-msg-other-text rounded-bl-[4px] border border-border-custom'
-                          }`}
-                        >
-                          {msg.mediaUrl && (
-                            <a
-                              href={msg.mediaUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="block mb-1.5 -mx-0.5 rounded-xl overflow-hidden bg-black/10"
-                            >
-                              <img
-                                src={msg.mediaUrl}
-                                alt="Attachment"
-                                className="max-w-full max-h-56 object-cover"
-                                loading="lazy"
-                              />
-                            </a>
-                          )}
-                          {msg.content ? (
-                            <p className="break-words whitespace-pre-wrap text-left">{msg.content}</p>
-                          ) : null}
-                          {msg.linkPreview && (
-                            <div className="mt-1.5 -mx-0.5">
-                              <LinkPreviewCard
-                                preview={msg.linkPreview}
-                                compact
-                                inAppOlabidLinks={olabidEnabled}
-                                onClick={e => {
-                                  const itemId = getOlabidItemIdFromUrl(msg.linkPreview!.url);
-                                  if (itemId !== null && onOpenOlabidItem) {
-                                    e.preventDefault();
-                                    onOpenOlabidItem(itemId);
-                                    onClose();
-                                  }
-                                }}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      {isMe && (
-                        <div className="flex items-center justify-end gap-1.5 pr-1 mt-0.5 min-h-[14px]">
-                          {status === 'failed' && onRetryFailedMessage ? (
-                            <button
-                              type="button"
-                              onClick={() => onRetryFailedMessage(msg)}
-                              className="text-[10px] text-red-400 hover:text-red-300 font-medium cursor-pointer underline-offset-2 hover:underline"
-                            >
-                              Retry
-                            </button>
-                          ) : null}
-                          <DeliveryTicks status={status} />
-                        </div>
-                      )}
+                      <ChatMessageBubble
+                        msg={msg}
+                        isMe={isMe}
+                        currentUserId={currentUser.id}
+                        olabidEnabled={olabidEnabled}
+                        onOpenOlabidItem={onOpenOlabidItem}
+                        onClosePanel={onClose}
+                        onRetryFailedMessage={onRetryFailedMessage}
+                        onReply={m => onReplyToMessage?.(m)}
+                        onDelete={m => onDeleteMessage?.(m)}
+                        staggerIndex={index}
+                      />
                     </div>
                   );
                 })
@@ -446,6 +394,10 @@ export function MessagesPanel({
               </button>
             )}
             </div>
+
+            {replyingToMessage && onClearReply ? (
+              <ReplyQuoteBar message={replyingToMessage} onDismiss={onClearReply} />
+            ) : null}
 
             {(draftLinkPreview || draftMediaPreviewUrl) && (
               <div className="px-2.5 pt-2 bg-chat-input border-t border-border-custom shrink-0 space-y-2">
@@ -573,7 +525,7 @@ export function MessagesPanel({
                   if (!canSend) return;
                   e.currentTarget.form?.requestSubmit();
                 }}
-                className="flex-grow bg-input-bg border border-border-custom rounded-2xl px-3 py-2 text-[12px] text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-indigo-500/20 min-h-[40px] max-h-[120px] resize-none leading-snug overflow-y-auto"
+                className="flex-grow min-w-0 bg-input-bg border border-border-custom rounded-2xl px-3 py-2 text-[12px] text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-indigo-500/20 min-h-[40px] max-h-[120px] resize-none leading-snug overflow-y-auto"
               />
               <button
                 type="submit"
@@ -623,7 +575,8 @@ export function MessagesPanel({
             )}
           </>
         ) : (
-          <div ref={listScrollRef} className="overflow-y-auto overscroll-contain divide-y divide-border-custom/50 flex-1 min-h-0">
+          <div className="flex-1 min-h-0 overflow-hidden">
+          <div ref={listScrollRef} className="h-full overflow-y-auto overflow-x-hidden overscroll-contain divide-y divide-border-custom/50">
             {sorted.length === 0 ? (
               <div className="px-3 py-10 text-center text-[11px] text-text-muted leading-snug flex flex-col items-center gap-2">
                 <SquarePen className="h-4 w-4 opacity-50" />
@@ -712,6 +665,7 @@ export function MessagesPanel({
                 );
               })
             )}
+          </div>
           </div>
         )}
       </div>

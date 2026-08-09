@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/hin-chat-core", "crates/hin-chat-wasm"]
+resolver = "2"
