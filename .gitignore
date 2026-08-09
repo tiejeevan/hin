@@ -9,7 +9,8 @@ dist
 # Rust / WASM
 crates/*/target/
 target/
-apps/web/src/wasm/chat/
+# Generated chat WASM pkg is committed so Cloudflare Pages (no Rust) can build.
+# Regenerate with: PATH="$HOME/.cargo/bin:$PATH" npm run build:wasm
 
 # Cloudflare Wrangler files
 .wrangler

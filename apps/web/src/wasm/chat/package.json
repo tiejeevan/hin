@@ -1,0 +1,15 @@
+{
+  "name": "hin-chat-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "hin_chat_wasm_bg.wasm",
+    "hin_chat_wasm.js",
+    "hin_chat_wasm.d.ts"
+  ],
+  "main": "hin_chat_wasm.js",
+  "types": "hin_chat_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
