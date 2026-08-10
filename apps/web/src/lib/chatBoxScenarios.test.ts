@@ -3,15 +3,11 @@ import type { ChatThread, Message } from '@hin/types';
 import {
   deriveLocalStatus,
   mergeAndSortMessages,
-  applyDelivered,
   applyMessagesRead,
 } from './chatMessages';
 import {
   loadChatState,
   saveChatState,
-  pruneDraftEntry,
-  pruneDrafts,
-  getDraftForRecipient,
   clearChatState,
 } from './chatStorage';
 import {
@@ -57,7 +53,13 @@ describe('ChatBox 1,500 Real-Time Scenario Validation Suite', () => {
             username: `group_chat_${i}`,
             role: i % 2 === 0 ? 'admin' : 'user',
             unreadCount: i % 5,
-            equippedBadges: i % 3 === 0 ? ['founder', 'vip'] : [],
+            equippedBadges:
+              i % 3 === 0
+                ? [
+                    { id: 1, name: 'founder', imageUrl: null },
+                    { id: 2, name: 'vip', imageUrl: null },
+                  ]
+                : [],
             lastMessage: {
               id: i * 10,
               content: `Group message ${i}`,

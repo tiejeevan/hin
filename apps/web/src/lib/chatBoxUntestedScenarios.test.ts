@@ -192,7 +192,7 @@ describe('Previously UNTESTED Chat Box scenarios', () => {
       saveChatState({
         isOpen: true,
         isExpanded: false,
-        recipient: { id: 7, username: 'u', displayName: 'U', avatarUrl: null },
+        recipient: { id: 7, username: 'u', role: 'user', avatarUrl: null },
         drafts: {
           7: { text: `${emoji} ${rtl}`, preview: null },
         },
