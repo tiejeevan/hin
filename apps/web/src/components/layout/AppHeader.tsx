@@ -82,7 +82,7 @@ export function AppHeader({
         </button>
         {currentUser && typeof onlineCount === 'number' && onlineCount > 0 && (
           <span
-            className="inline-flex items-center gap-1.5 text-[11px] text-text-muted tabular-nums"
+            className="inline-flex items-center gap-1 text-[11px] text-text-muted tabular-nums"
             title={`${onlineCount} ${onlineCount === 1 ? 'person' : 'people'} online`}
             aria-label={`${onlineCount} ${onlineCount === 1 ? 'person' : 'people'} online`}
           >
@@ -90,7 +90,7 @@ export function AppHeader({
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
             </span>
-            {onlineCount} online
+            {onlineCount}
           </span>
         )}
       </div>
