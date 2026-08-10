@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { X, Shield, SquarePen, ChevronLeft, Maximize2, Minimize2, Send, MessageCircle, ImagePlus, Camera, Loader2 } from 'lucide-react';
 import { ChatThread, LinkPreview, Message, User as UserType } from '@hin/types';
 import { ChatRecipient } from '../../types/ui';
@@ -6,16 +6,40 @@ import { UserAvatar } from '../profile/UserAvatar';
 import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
 import { useOverscrollBounce } from '../../hooks/useOverscrollBounce';
 import { LinkPreviewCard } from '../feed/LinkPreviewCard';
-import { sortThreads } from '../../lib/chatWasmBridge';
+import { prefersReducedMotion, sortThreads } from '../../lib/chatWasmBridge';
 import { ChatMessageBubble, ReplyQuoteBar } from '../chat';
 import { formatLastSeen } from '../../lib/formatRelativeTime';
+import { chatStrings } from '../../lib/chatStrings';
+import { getFocusableElements, trapFocus } from '../../lib/focusTrap';
+import { isAllowedChatImageFile } from '../../lib/chatMediaMime';
+import { usePanelExpandFlip } from '../../hooks/usePanelExpandFlip';
 
 const TEXTAREA_MAX_HEIGHT_PX = 120;
 const NEAR_BOTTOM_PX = 100;
 
 function prefersTouchComposer(): boolean {
   if (typeof window === 'undefined') return false;
-  return window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+  // CM-008/009: do not treat all touch-capable devices as soft-keyboard only
+  return window.matchMedia('(pointer: coarse)').matches;
+}
+
+function formatMessageDivider(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return chatStrings.unknownDate;
+  return d.toLocaleDateString([], {
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatThreadTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 interface MessagesPanelProps {
@@ -34,6 +58,8 @@ interface MessagesPanelProps {
   onlineUserIds: Set<number>;
   lastSeenByUserId?: Record<number, string>;
   chatBottomRef: React.RefObject<HTMLDivElement>;
+  /** Optional element to restore focus to when the panel closes (e.g. FAB). */
+  focusReturnRef?: React.RefObject<HTMLElement | null>;
   onClose: () => void;
   onSelectThread: (thread: ChatRecipient) => void;
   onBackToList: () => void;
@@ -71,6 +97,7 @@ export function MessagesPanel({
   onlineUserIds,
   lastSeenByUserId = {},
   chatBottomRef,
+  focusReturnRef,
   onClose,
   onSelectThread,
   onBackToList,
@@ -91,6 +118,11 @@ export function MessagesPanel({
   presenceEnabled = false,
 }: MessagesPanelProps) {
   const sorted = useMemo(() => sortThreads(threads), [threads]);
+  const panelRef = useRef<HTMLDivElement>(null);
+  usePanelExpandFlip(isExpanded, panelRef);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const [liveAnnouncement, setLiveAnnouncement] = useState('');
+  const reduceMotion = prefersReducedMotion();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -143,6 +175,23 @@ export function MessagesPanel({
   };
 
   useEffect(() => {
+    if (!isOpen) return;
+    previousFocusRef.current = (document.activeElement as HTMLElement | null) ?? null;
+    const panel = panelRef.current ?? document.getElementById('messages-panel');
+    if (!panel) return;
+    const releaseTrap = trapFocus(panel);
+    const focusable = getFocusableElements(panel);
+    (focusable[0] ?? panel).focus();
+    return () => {
+      releaseTrap();
+      const restore = focusReturnRef?.current ?? previousFocusRef.current;
+      if (restore && typeof restore.focus === 'function') {
+        restore.focus();
+      }
+    };
+  }, [isOpen, focusReturnRef]);
+
+  useEffect(() => {
     const el = chatScrollRef.current;
     if (!el) return;
     const onScroll = () => {
@@ -175,7 +224,18 @@ export function MessagesPanel({
     } else if (grew) {
       setShowNewMessagesPill(true);
     }
+
+    if (grew && !ownSend && prevCount > 0) {
+      setLiveAnnouncement(chatStrings.newIncomingMessages(nextCount - prevCount));
+    }
   }, [chatMessages, chatRecipient?.id, currentUser.id]);
+
+  useEffect(() => {
+    if (!chatRecipient) return;
+    if (peerIsTyping) {
+      setLiveAnnouncement(chatStrings.peerTyping(chatRecipient.username));
+    }
+  }, [peerIsTyping, chatRecipient?.id, chatRecipient?.username]);
 
   const stopCameraStream = () => {
     streamRef.current?.getTracks().forEach(track => track.stop());
@@ -311,15 +371,22 @@ export function MessagesPanel({
       )}
 
       <div
+        ref={panelRef}
         id="messages-panel"
+        tabIndex={-1}
         className={
           isExpanded
-            ? 'fixed inset-0 z-50 flex flex-col bg-bg-secondary border border-border-custom shadow-2xl overflow-hidden animate-panel-pop-anchor'
-            : `fixed right-4 ${anchorBottom} z-50 flex flex-col w-[min(380px,calc(100vw-2rem))] h-[min(520px,62vh)] bg-bg-secondary border border-border-custom shadow-[0_20px_50px_-12px_rgba(0,0,0,0.45)] overflow-hidden animate-panel-pop-anchor rounded-2xl rounded-br-xl`
+            ? 'fixed inset-0 z-50 flex flex-col bg-bg-secondary border border-border-custom shadow-2xl overflow-hidden animate-panel-pop-anchor outline-none'
+            : `fixed right-4 ${anchorBottom} z-50 flex flex-col w-[min(380px,calc(100vw-2rem))] h-[min(520px,62vh)] bg-bg-secondary border border-border-custom shadow-[0_20px_50px_-12px_rgba(0,0,0,0.45)] overflow-hidden animate-panel-pop-anchor rounded-2xl rounded-br-xl outline-none`
         }
         role="dialog"
-        aria-label="Messages"
+        aria-modal="true"
+        aria-label={chatStrings.messages}
       >
+        <div className="sr-only" aria-live="polite" aria-atomic="true">
+          {liveAnnouncement}
+        </div>
+
         <PanelHeader
           showingChat={showingChat}
           chatRecipient={chatRecipient}
@@ -337,50 +404,57 @@ export function MessagesPanel({
         {showingChat && chatRecipient ? (
           <>
             <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden bg-chat-bg animate-thread-enter">
-            <div ref={chatScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-3 space-y-2 min-h-0">
+            <div ref={chatScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-3 min-h-0">
               {chatMessages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-text-muted text-[11px] gap-1.5 py-8">
                   <MessageCircle className="h-7 w-7 opacity-40" />
-                  <span>No messages yet. Say hello!</span>
+                  <span>{chatStrings.noMessagesYetHello}</span>
                 </div>
               ) : (
-                chatMessages.map((msg, index) => {
-                  const isMe = msg.senderId === currentUser.id;
-                  const prevMsg = index > 0 ? chatMessages[index - 1] : null;
-                  const showTime =
-                    !prevMsg ||
-                    new Date(msg.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() > 15 * 60 * 1000;
+                // Document flow (not absolute virtualization): useOverscrollBounce applies
+                // transform on this scroll parent, which creates a containing block and
+                // stacks absolutely positioned rows on top of each other.
+                <div className="flex flex-col gap-2 min-w-0">
+                  {chatMessages.map((msg, index) => {
+                    const isMe = msg.senderId === currentUser.id;
+                    const prevMsg = index > 0 ? chatMessages[index - 1] : null;
+                    const showTime =
+                      !prevMsg ||
+                      new Date(msg.createdAt).getTime() - new Date(prevMsg.createdAt).getTime() >
+                        15 * 60 * 1000;
+                    const dividerLabel = showTime ? formatMessageDivider(msg.createdAt) : '';
 
-                  return (
-                    <div
-                      key={msg.id}
-                      className="flex flex-col min-w-0 animate-message-fade-in"
-                      style={{ ['--stagger' as string]: `${Math.min(index, 12) * 28}ms` }}
-                    >
-                      {showTime && (
-                        <div className="text-[10px] text-text-muted font-medium text-center my-2">
-                          {new Date(msg.createdAt).toLocaleDateString([], {
-                            weekday: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </div>
-                      )}
-                      <ChatMessageBubble
-                        msg={msg}
-                        isMe={isMe}
-                        currentUserId={currentUser.id}
-                        olabidEnabled={olabidEnabled}
-                        onOpenOlabidItem={onOpenOlabidItem}
-                        onClosePanel={onClose}
-                        onRetryFailedMessage={onRetryFailedMessage}
-                        onReply={m => onReplyToMessage?.(m)}
-                        onDelete={m => onDeleteMessage?.(m)}
-                        staggerIndex={index}
-                      />
-                    </div>
-                  );
-                })
+                    return (
+                      <div
+                        key={msg.id}
+                        className={`flex flex-col min-w-0 ${reduceMotion ? '' : 'animate-message-fade-in'}`}
+                        style={
+                          reduceMotion
+                            ? undefined
+                            : ({ '--stagger': `${Math.min(index, 12) * 28}ms` } as CSSProperties)
+                        }
+                      >
+                        {showTime && dividerLabel ? (
+                          <div className="text-[10px] text-text-muted font-medium text-center my-2">
+                            {dividerLabel}
+                          </div>
+                        ) : null}
+                        <ChatMessageBubble
+                          msg={msg}
+                          isMe={isMe}
+                          currentUserId={currentUser.id}
+                          olabidEnabled={olabidEnabled}
+                          onOpenOlabidItem={onOpenOlabidItem}
+                          onClosePanel={onClose}
+                          onRetryFailedMessage={onRetryFailedMessage}
+                          onReply={m => onReplyToMessage?.(m)}
+                          onDelete={m => onDeleteMessage?.(m)}
+                          staggerIndex={reduceMotion ? undefined : index}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
               )}
               <div ref={chatBottomRef} />
             </div>
@@ -390,7 +464,7 @@ export function MessagesPanel({
                 onClick={() => scrollToBottom('smooth')}
                 className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 rounded-full bg-bg-tertiary border border-border-custom text-[11px] font-medium text-text-primary shadow-lg cursor-pointer hover:bg-bg-secondary"
               >
-                New messages ↓
+                {chatStrings.newMessagesPill}
               </button>
             )}
             </div>
@@ -405,7 +479,7 @@ export function MessagesPanel({
                   <div className="relative inline-block">
                     <img
                       src={draftMediaPreviewUrl}
-                      alt="Attachment preview"
+                      alt={chatStrings.attachmentPreview}
                       className="h-20 w-20 rounded-xl object-cover border border-border-custom"
                     />
                     {onClearDraftMedia && (
@@ -413,7 +487,7 @@ export function MessagesPanel({
                         type="button"
                         onClick={onClearDraftMedia}
                         className="absolute -top-1.5 -right-1.5 h-6 w-6 rounded-full bg-bg-tertiary border border-border-custom text-text-muted hover:text-text-primary flex items-center justify-center cursor-pointer"
-                        aria-label="Remove image"
+                        aria-label={chatStrings.removeImage}
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -438,6 +512,18 @@ export function MessagesPanel({
                   return;
                 }
                 onSendDM(e);
+              }}
+              onDragOver={e => {
+                if (!onPickChatImage) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+              }}
+              onDrop={e => {
+                if (!onPickChatImage) return;
+                e.preventDefault();
+                const file = e.dataTransfer.files?.[0];
+                if (!file || !isAllowedChatImageFile(file)) return;
+                onPickChatImage(file);
               }}
               className={`p-2.5 bg-chat-input flex items-end gap-2 shrink-0 pb-safe ${draftLinkPreview || draftMediaPreviewUrl ? '' : 'border-t border-border-custom'}`}
             >
@@ -471,10 +557,10 @@ export function MessagesPanel({
                     onClick={() => setAttachMenuOpen(prev => !prev)}
                     disabled={sendingMedia}
                     className="h-10 w-10 rounded-full border border-border-custom bg-input-bg text-text-muted hover:text-text-primary hover:bg-bg-tertiary flex items-center justify-center cursor-pointer disabled:opacity-40"
-                    aria-label="Attach image"
+                    aria-label={chatStrings.attachImage}
                     aria-haspopup="menu"
                     aria-expanded={attachMenuOpen}
-                    title="Attach image"
+                    title={chatStrings.attachImage}
                   >
                     <ImagePlus className="h-4 w-4" />
                   </button>
@@ -490,7 +576,7 @@ export function MessagesPanel({
                         className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-text-secondary hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer min-h-[44px]"
                       >
                         <ImagePlus className="h-3.5 w-3.5 shrink-0" />
-                        Choose photo
+                        {chatStrings.choosePhoto}
                       </button>
                       <button
                         type="button"
@@ -499,7 +585,7 @@ export function MessagesPanel({
                         className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-text-secondary hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer min-h-[44px]"
                       >
                         <Camera className="h-3.5 w-3.5 shrink-0" />
-                        Take photo
+                        {chatStrings.takePhoto}
                       </button>
                     </div>
                   )}
@@ -508,16 +594,18 @@ export function MessagesPanel({
               <textarea
                 ref={composerRef}
                 rows={1}
-                placeholder="Message"
+                placeholder={chatStrings.messagePlaceholder}
                 value={newMsgText}
-                aria-label="Message"
+                aria-label={chatStrings.messagePlaceholder}
                 onChange={e => {
                   onNewMsgTextChange(e.target.value);
                   onTyping(chatRecipient.id);
                 }}
                 onKeyDown={(e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
                   if (e.key !== 'Enter') return;
-                  // Mobile / touch: Return inserts a newline; Send button sends.
+                  // CM-020 / #1024: never submit while IME is composing
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                  // Mobile / coarse pointer: Return inserts a newline; Send button sends.
                   if (prefersTouchComposer()) return;
                   // Desktop: Enter sends, Shift+Enter inserts a newline.
                   if (e.shiftKey) return;
@@ -525,11 +613,21 @@ export function MessagesPanel({
                   if (!canSend) return;
                   e.currentTarget.form?.requestSubmit();
                 }}
+                onPaste={e => {
+                  if (!onPickChatImage) return;
+                  const items = e.clipboardData?.files;
+                  if (!items?.length) return;
+                  const file = items[0];
+                  if (!file || !isAllowedChatImageFile(file)) return;
+                  e.preventDefault();
+                  onPickChatImage(file);
+                }}
                 className="flex-grow min-w-0 bg-input-bg border border-border-custom rounded-2xl px-3 py-2 text-[12px] text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-indigo-500/20 min-h-[40px] max-h-[120px] resize-none leading-snug overflow-y-auto"
               />
               <button
                 type="submit"
                 disabled={!canSend}
+                aria-label={chatStrings.sendMessage}
                 className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:pointer-events-none text-white p-2 rounded-full shrink-0 min-h-[40px] min-w-[40px] flex items-center justify-center cursor-pointer"
               >
                 <Send className="h-4 w-4" />
@@ -537,7 +635,12 @@ export function MessagesPanel({
             </form>
 
             {cameraOpen && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+              <div
+                className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-label={chatStrings.cameraDialog}
+              >
                 <div className="w-full max-w-md rounded-2xl border border-border-custom bg-bg-secondary overflow-hidden shadow-xl">
                   <div className="relative aspect-[4/3] bg-black">
                     <video
@@ -558,16 +661,17 @@ export function MessagesPanel({
                       onClick={closeCamera}
                       className="px-3 py-2 rounded-xl text-xs text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer min-h-[44px]"
                     >
-                      Cancel
+                      {chatStrings.cancel}
                     </button>
                     <button
                       type="button"
                       onClick={capturePhoto}
                       disabled={cameraStarting}
+                      aria-label={chatStrings.capture}
                       className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer min-h-[44px]"
                     >
                       <Camera className="h-3.5 w-3.5" />
-                      Capture
+                      {chatStrings.capture}
                     </button>
                   </div>
                 </div>
@@ -576,21 +680,33 @@ export function MessagesPanel({
           </>
         ) : (
           <div className="flex-1 min-h-0 overflow-hidden">
-          <div ref={listScrollRef} className="h-full overflow-y-auto overflow-x-hidden overscroll-contain divide-y divide-border-custom/50">
+          <div ref={listScrollRef} className="h-full overflow-y-auto overflow-x-hidden overscroll-contain">
             {sorted.length === 0 ? (
               <div className="px-3 py-10 text-center text-[11px] text-text-muted leading-snug flex flex-col items-center gap-2">
                 <SquarePen className="h-4 w-4 opacity-50" />
-                No messages yet.
+                {chatStrings.noMessagesYet}
               </div>
             ) : (
               sorted.map(t => {
                 const hasUnread = t.unreadCount > 0;
                 const isOnline = presenceEnabled && onlineUserIds.has(t.id);
+                const previewText = t.lastMessage?.content?.trim()
+                  ? t.lastMessage.content
+                  : chatStrings.photo;
+                const threadTime = t.lastMessage ? formatThreadTime(t.lastMessage.createdAt) : '';
                 return (
                   <button
                     key={t.id}
-                    onClick={() => onSelectThread({ id: t.id, username: t.username, role: t.role, avatarUrl: t.avatarUrl })}
-                    className={`w-full px-3 py-2.5 flex gap-2.5 text-left cursor-pointer transition-colors min-h-[52px] ${
+                    type="button"
+                    onClick={() =>
+                      onSelectThread({
+                        id: t.id,
+                        username: t.username,
+                        role: t.role,
+                        avatarUrl: t.avatarUrl,
+                      })
+                    }
+                    className={`w-full px-3 py-2.5 flex gap-2.5 text-left cursor-pointer transition-colors min-h-[52px] border-b border-border-custom/50 ${
                       hasUnread
                         ? 'bg-indigo-950/20 hover:bg-indigo-950/30 border-l-2 border-l-indigo-500'
                         : 'hover:bg-bg-tertiary/50'
@@ -608,13 +724,14 @@ export function MessagesPanel({
                           className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-bg-secondary ${
                             isOnline ? 'bg-emerald-500' : 'bg-text-muted/60'
                           }`}
-                          title={isOnline ? 'Online' : 'Offline'}
-                          aria-label={isOnline ? 'Online' : 'Offline'}
+                          title={isOnline ? chatStrings.online : chatStrings.offline}
+                          aria-label={isOnline ? chatStrings.online : chatStrings.offline}
                         />
                       )}
                       {hasUnread && (
                         <span className="absolute -top-0.5 -right-0.5 h-[18px] min-w-[18px] px-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center border-2 border-bg-secondary">
                           {t.unreadCount > 9 ? '9+' : t.unreadCount}
+                          <span className="sr-only">{chatStrings.unreadMessages(t.unreadCount)}</span>
                         </span>
                       )}
                     </div>
@@ -635,29 +752,26 @@ export function MessagesPanel({
                             <Shield className="h-3 w-3 text-amber-500 inline ml-0.5 align-text-bottom" />
                           )}
                         </p>
-                        {t.lastMessage && (
+                        {t.lastMessage && threadTime ? (
                           <span
                             className={`text-[10px] shrink-0 leading-none ${hasUnread ? 'text-indigo-400 font-medium' : 'text-text-muted'}`}
                           >
-                            {new Date(t.lastMessage.createdAt).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
+                            {threadTime}
                           </span>
-                        )}
+                        ) : null}
                       </div>
                       <div className="flex items-center justify-between gap-1 mt-0.5">
                         {typingUsers[t.id] ? (
-                          <p className="text-[10px] font-medium text-indigo-400">Typing…</p>
+                          <p className="text-[10px] font-medium text-indigo-400">{chatStrings.typing}</p>
                         ) : t.lastMessage ? (
                           <p
                             className={`text-[10px] truncate leading-snug ${hasUnread ? 'text-text-primary font-semibold' : 'text-text-muted'}`}
                           >
-                            {t.lastMessage.senderId === currentUser.id ? 'You: ' : ''}
-                            {t.lastMessage.content}
+                            {t.lastMessage.senderId === currentUser.id ? chatStrings.youPrefix : ''}
+                            {previewText}
                           </p>
                         ) : (
-                          <p className="text-[10px] text-text-muted italic">No messages yet</p>
+                          <p className="text-[10px] text-text-muted italic">{chatStrings.noMessagesYet}</p>
                         )}
                       </div>
                     </div>
@@ -699,10 +813,10 @@ function PanelHeader({
   onOpenProfile: (userId: number, opts?: { username?: string }) => void;
 }) {
   const presenceLabel = isOnline
-    ? 'Online'
+    ? chatStrings.online
     : lastSeenAt
       ? `Last seen ${formatLastSeen(lastSeenAt)}`
-      : 'Offline';
+      : chatStrings.offline;
   const presenceClass = isOnline ? 'text-emerald-500' : 'text-text-muted';
 
   return (
@@ -713,7 +827,7 @@ function PanelHeader({
             <button
               onClick={onBack}
               className="h-8 w-8 flex items-center justify-center rounded-lg text-indigo-400 hover:bg-bg-tertiary cursor-pointer shrink-0"
-              aria-label="Back to conversations"
+              aria-label={chatStrings.backToConversations}
             >
               <ChevronLeft className="h-5 w-5" />
             </button>
@@ -744,7 +858,7 @@ function PanelHeader({
                   {chatRecipient.username}
                 </span>
                 {isTyping ? (
-                  <span className="text-[10px] font-medium text-indigo-400">Typing…</span>
+                  <span className="text-[10px] font-medium text-indigo-400">{chatStrings.typing}</span>
                 ) : showPresence ? (
                   <span className={`text-[10px] ${presenceClass}`}>{presenceLabel}</span>
                 ) : null}
@@ -752,7 +866,7 @@ function PanelHeader({
             </button>
           </>
         ) : (
-          <span className="text-[11px] font-semibold text-text-secondary tracking-wide">Messages</span>
+          <span className="text-[11px] font-semibold text-text-secondary tracking-wide">{chatStrings.messages}</span>
         )}
       </div>
 
@@ -760,7 +874,7 @@ function PanelHeader({
         <button
           onClick={onToggleExpand}
           className="h-8 w-8 flex items-center justify-center rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary cursor-pointer transition-colors"
-          aria-label={isExpanded ? 'Collapse messages' : 'Expand messages'}
+          aria-label={isExpanded ? chatStrings.collapseMessages : chatStrings.expandMessages}
           title={isExpanded ? 'Collapse' : 'Expand'}
         >
           {isExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
@@ -768,7 +882,7 @@ function PanelHeader({
         <button
           onClick={onClose}
           className="h-8 w-8 flex items-center justify-center rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary cursor-pointer transition-colors"
-          aria-label="Dismiss messages"
+          aria-label={chatStrings.dismissMessages}
           title="Dismiss"
         >
           <X className="h-4 w-4" />

@@ -4,17 +4,68 @@
 import type { ChatThread, Message } from '@hin/types';
 import * as tsMessages from './chatMessages';
 import * as tsMorph from './panelMorph';
+import { extractFirstUrl } from './extractUrl';
 import { ensureChatWasm, getChatWasmModule, isChatWasmEnabled } from '../wasm/chatClient';
 
 export type ReleaseSnapAction = tsMorph.ReleaseSnapAction;
 export type RectLike = tsMorph.RectLike;
 
+/** Bridge API version — bump when the WASM/TS contract changes. */
+export const CHAT_WASM_BRIDGE_VERSION = '1';
+
+export { extractFirstUrl };
+
 let warnedFallback = false;
+let warnedVersionSkew = false;
+let warnedMissingWasmVersion = false;
 
 function noteFallback(reason: string) {
   if (warnedFallback || !isChatWasmEnabled()) return;
   warnedFallback = true;
   console.info(`[chat:wasm] using TS fallback (${reason})`);
+}
+
+/** Core version reported by the WASM module, or null if unavailable / no export. */
+export function getChatWasmCoreVersion(): string | null {
+  const wasm = getChatWasmModule();
+  if (!wasm) return null;
+  try {
+    if (typeof wasm.chat_core_version === 'function') {
+      const v = wasm.chat_core_version();
+      return typeof v === 'string' ? v : String(v);
+    }
+  } catch {
+    /* missing / threw */
+  }
+  return null;
+}
+
+/**
+ * True when WASM is absent, or bridge/core versions match.
+ * Missing WASM version is treated as compatible (throttled warning).
+ */
+export function assertChatWasmVersionCompatible(): boolean {
+  const wasm = getChatWasmModule();
+  if (!wasm) return true;
+  const core = getChatWasmCoreVersion();
+  if (core == null) {
+    if (!warnedMissingWasmVersion) {
+      warnedMissingWasmVersion = true;
+      console.warn(
+        '[chat:wasm] core version export missing; treating as compatible with bridge',
+        CHAT_WASM_BRIDGE_VERSION,
+      );
+    }
+    return true;
+  }
+  if (core === CHAT_WASM_BRIDGE_VERSION) return true;
+  if (!warnedVersionSkew) {
+    warnedVersionSkew = true;
+    console.warn(
+      `[chat:wasm] version skew: bridge=${CHAT_WASM_BRIDGE_VERSION} core=${core}`,
+    );
+  }
+  return false;
 }
 
 export async function initChatWasmBridge(): Promise<boolean> {

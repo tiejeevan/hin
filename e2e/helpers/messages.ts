@@ -11,8 +11,17 @@ export async function closeChatBox(page: Page) {
   await page.keyboard.press('Escape');
 }
 
+/** Open another user's profile (from feed username) and start a DM via Message. */
+export async function startChatWithUser(page: Page, username: string) {
+  await page.getByRole('button', { name: username, exact: true }).first().click();
+  await page.getByRole('button', { name: 'Message' }).click();
+  await expect(page.getByRole('dialog', { name: /messages/i })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('button', { name: /Send message/i })).toBeVisible();
+}
+
 export async function sendMessage(page: Page, text: string) {
-  const composer = page.locator('textarea').last();
+  const dialog = page.getByRole('dialog', { name: /messages/i });
+  const composer = dialog.getByRole('textbox').or(dialog.locator('textarea')).last();
   await composer.fill(text);
-  await page.getByRole('button', { name: /send/i }).or(page.locator('button[type="submit"]').last()).click();
+  await dialog.getByRole('button', { name: /Send message/i }).click();
 }

@@ -1,15 +1,24 @@
-import { useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { Reply } from 'lucide-react';
 import type { Message } from '@hin/types';
 import { LinkPreviewCard } from '../feed/LinkPreviewCard';
 import { getOlabidItemIdFromUrl } from '../../lib/appRoutes';
 import { deriveLocalStatus } from '../../lib/chatMessages';
+import { safeMediaUrl } from '../../lib/safeUrl';
 import { DeliveryTicks } from './DeliveryTicks';
 import { MessageActionMenu } from './MessageActionMenu';
 
 const SWIPE_THRESHOLD = 48;
 const AXIS_LOCK_PX = 6;
 const DOUBLE_TAP_MS = 300;
+const LONG_PRESS_MS = 500;
 const MAX_PULL = 80;
 
 export interface ChatMessageBubbleProps {
@@ -77,6 +86,8 @@ export function ChatMessageBubble({
 
   // Sent → swipe left (−1). Received → swipe right (+1).
   const replyDir: 1 | -1 = isMe ? -1 : 1;
+  // RP-010: optimistic / unacked messages cannot swipe-to-reply.
+  const canSwipeReply = msg.id > 0;
 
   const rowRef = useRef<HTMLDivElement | null>(null);
   const pointerIdRef = useRef<number | null>(null);
@@ -84,16 +95,28 @@ export function ChatMessageBubble({
   const axisRef = useRef<'h' | 'v' | null>(null);
   const dragXRef = useRef(0);
   const lastTapRef = useRef(0);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
 
   const openMenu = () => setMenuOpen(true);
 
+  const clearLongPress = () => {
+    if (longPressTimerRef.current !== null) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
   const resetGesture = () => {
+    clearLongPress();
     pointerIdRef.current = null;
     axisRef.current = null;
     dragXRef.current = 0;
     setDragX(0);
     setDragging(false);
   };
+
+  useEffect(() => () => clearLongPress(), []);
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -102,24 +125,47 @@ export function ChatMessageBubble({
     startRef.current = { x: e.clientX, y: e.clientY };
     axisRef.current = null;
     dragXRef.current = 0;
+    longPressFiredRef.current = false;
     setDragX(0);
     setDragging(true);
+
+    // SW-015: long-press opens menu if hold stays within AXIS_LOCK_PX.
+    clearLongPress();
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      if (axisRef.current === 'h') return;
+      longPressFiredRef.current = true;
+      lastTapRef.current = 0;
+      dragXRef.current = 0;
+      setDragX(0);
+      setDragging(false);
+      openMenu();
+    }, LONG_PRESS_MS);
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (pointerIdRef.current !== e.pointerId) return;
+    // Menu already opened via long-press — ignore residual drag.
+    if (longPressFiredRef.current) return;
+
     const dx = e.clientX - startRef.current.x;
     const dy = e.clientY - startRef.current.y;
+
+    // Cancel long-press once movement exceeds the axis-lock dead zone.
+    if (Math.abs(dx) >= AXIS_LOCK_PX || Math.abs(dy) >= AXIS_LOCK_PX) {
+      clearLongPress();
+    }
 
     if (!axisRef.current) {
       if (Math.abs(dx) < AXIS_LOCK_PX && Math.abs(dy) < AXIS_LOCK_PX) return;
       axisRef.current = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
-      if (axisRef.current === 'v') {
-        // Let the list scroll; abandon reply drag.
+      if (axisRef.current === 'v' || (axisRef.current === 'h' && !canSwipeReply)) {
+        // Vertical scroll, or RP-010: no horizontal reply swipe for pending ids.
         resetGesture();
         return;
       }
-      // Locked horizontal — own the pointer so the scroll parent can't cancel mid-swipe.
+      // Locked horizontal — cancel long-press and own the pointer.
+      clearLongPress();
       try {
         rowRef.current?.setPointerCapture(e.pointerId);
       } catch {
@@ -143,6 +189,7 @@ export function ChatMessageBubble({
     const axis = axisRef.current;
     const pull = dragXRef.current;
     const along = pull * replyDir;
+    const longPressFired = longPressFiredRef.current;
 
     try {
       if (rowRef.current?.hasPointerCapture(e.pointerId)) {
@@ -152,9 +199,16 @@ export function ChatMessageBubble({
       /* ignore */
     }
 
+    longPressFiredRef.current = false;
     resetGesture();
 
-    if (axis === 'h' && along >= SWIPE_THRESHOLD) {
+    if (longPressFired) {
+      lastTapRef.current = 0;
+      return;
+    }
+
+    // RP-010: only committed messages (id > 0) can swipe-to-reply.
+    if (canSwipeReply && axis === 'h' && along >= SWIPE_THRESHOLD) {
       onReply(msg);
       lastTapRef.current = 0;
       return;
@@ -172,7 +226,16 @@ export function ChatMessageBubble({
         }
       }
     } else {
+      // Prevent double-tap menu during / after horizontal swipe.
       lastTapRef.current = 0;
+    }
+  };
+
+  const onBubbleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    // SW-014 / AX-005: ContextMenu or Shift+F10 opens the action menu.
+    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      e.preventDefault();
+      openMenu();
     }
   };
 
@@ -181,12 +244,20 @@ export function ChatMessageBubble({
     staggerIndex !== undefined
       ? ({ '--stagger': String(staggerIndex) } as CSSProperties)
       : undefined;
+  const mediaSrc = safeMediaUrl(msg.mediaUrl);
+  const previewUrl = msg.linkPreview ? safeMediaUrl(msg.linkPreview.url) : null;
+  const previewImageUrl = msg.linkPreview
+    ? safeMediaUrl(msg.linkPreview.imageUrl)
+    : null;
 
   return (
     <div
-      className="relative flex flex-col w-full min-w-0 animate-message-fade-in select-none"
+      role="article"
+      tabIndex={0}
+      className="relative flex flex-col w-full min-w-0 animate-message-fade-in select-none outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60 focus-visible:ring-offset-1 rounded-sm"
       style={staggerStyle}
       data-testid={`chat-msg-${msg.id}`}
+      onKeyDown={onBubbleKeyDown}
       onDoubleClick={e => {
         e.preventDefault();
         openMenu();
@@ -200,7 +271,7 @@ export function ChatMessageBubble({
           transition: dragging ? 'none' : 'transform 0.22s cubic-bezier(0.22, 1, 0.36, 1)',
           // Allow vertical list scroll; claim horizontal pans for reply swipe.
           touchAction: 'pan-y',
-          cursor: 'grab',
+          cursor: canSwipeReply ? 'grab' : 'default',
         }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -209,15 +280,17 @@ export function ChatMessageBubble({
       >
         <div className="relative max-w-[80%] min-w-0">
           {/* Reply affordance sits on the side we pull away from (clipped by chat overflow-x-hidden) */}
-          <div
-            className={`pointer-events-none absolute top-1/2 -translate-y-1/2 text-sky-400 ${
-              isMe ? 'left-full ml-2' : 'right-full mr-2'
-            }`}
-            style={{ opacity: iconOpacity }}
-            aria-hidden
-          >
-            <Reply className="h-4 w-4" />
-          </div>
+          {canSwipeReply ? (
+            <div
+              className={`pointer-events-none absolute top-1/2 -translate-y-1/2 text-sky-400 ${
+                isMe ? 'left-full ml-2' : 'right-full mr-2'
+              }`}
+              style={{ opacity: iconOpacity }}
+              aria-hidden
+            >
+              <Reply className="h-4 w-4" />
+            </div>
+          ) : null}
 
           <div
             className={`rounded-[18px] px-3 py-2 text-[12px] leading-snug min-w-0 overflow-hidden ${
@@ -227,9 +300,9 @@ export function ChatMessageBubble({
             }`}
           >
             {msg.replyTo ? <ReplyQuoteChip reply={msg.replyTo} isMe={isMe} /> : null}
-            {msg.mediaUrl && (
+            {mediaSrc && (
               <a
-                href={msg.mediaUrl}
+                href={mediaSrc}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="block mb-1.5 -mx-0.5 rounded-xl overflow-hidden bg-black/10"
@@ -237,7 +310,7 @@ export function ChatMessageBubble({
                 onPointerDown={e => e.stopPropagation()}
               >
                 <img
-                  src={msg.mediaUrl}
+                  src={mediaSrc}
                   alt="Attachment"
                   className="max-w-full max-h-56 object-cover"
                   loading="lazy"
@@ -246,16 +319,25 @@ export function ChatMessageBubble({
               </a>
             )}
             {msg.content ? (
-              <p className="break-words [overflow-wrap:anywhere] whitespace-pre-wrap text-left">{msg.content}</p>
+              <p
+                dir="auto"
+                className="break-words [overflow-wrap:anywhere] whitespace-pre-wrap text-left"
+              >
+                {msg.content}
+              </p>
             ) : null}
-            {msg.linkPreview && (
+            {msg.linkPreview && previewUrl && (
               <div className="mt-1.5 -mx-0.5">
                 <LinkPreviewCard
-                  preview={msg.linkPreview}
+                  preview={{
+                    ...msg.linkPreview,
+                    url: previewUrl,
+                    imageUrl: previewImageUrl,
+                  }}
                   compact
                   inAppOlabidLinks={olabidEnabled}
                   onClick={e => {
-                    const itemId = getOlabidItemIdFromUrl(msg.linkPreview!.url);
+                    const itemId = getOlabidItemIdFromUrl(previewUrl);
                     if (itemId !== null && onOpenOlabidItem) {
                       e.preventDefault();
                       onOpenOlabidItem(itemId);

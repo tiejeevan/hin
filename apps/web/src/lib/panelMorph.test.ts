@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { easeScrollTo, invertFlipUniform, releaseSnap, rubberBand } from './panelMorph';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import {
+  easeScrollTo,
+  invertFlipUniform,
+  prefersReducedMotion,
+  releaseSnap,
+  rubberBand,
+} from './panelMorph';
 
 describe('rubberBand', () => {
   it('passthrough within limit', () => {
@@ -44,5 +50,27 @@ describe('easeScrollTo', () => {
     expect(easeScrollTo(0)).toBe(0);
     expect(easeScrollTo(1)).toBe(1);
     expect(easeScrollTo(0.5)).toBeGreaterThan(0.5);
+  });
+});
+
+describe('prefersReducedMotion', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('returns false when matchMedia reports no preference', () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn().mockReturnValue({ matches: false, media: '(prefers-reduced-motion: reduce)' }),
+    );
+    expect(prefersReducedMotion()).toBe(false);
+  });
+
+  it('returns true when prefers-reduced-motion: reduce matches', () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn().mockReturnValue({ matches: true, media: '(prefers-reduced-motion: reduce)' }),
+    );
+    expect(prefersReducedMotion()).toBe(true);
   });
 });

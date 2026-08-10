@@ -9,6 +9,9 @@
 /** Hand-maintained surface so TypeScript does not require generated pkg files. */
 export type ChatWasmModule = {
   default?: (input?: unknown) => Promise<unknown>;
+  /** Optional — compare with `CHAT_WASM_BRIDGE_VERSION` when present. */
+  chat_core_version?: () => string;
+  extract_first_url?: (text: string) => string | undefined;
   merge_and_sort_messages: (existingJson: string, incomingJson: string) => string;
   apply_delivered: (messagesJson: string, idsJson: string, deliveredAt: string) => string;
   apply_messages_read: (

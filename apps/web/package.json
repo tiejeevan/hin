@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@hin/types": "*",
+    "@tanstack/react-virtual": "^3.14.9",
     "browser-image-compression": "^2.0.2",
     "disable-devtool": "^0.3.9",
     "lucide-react": "^0.395.0",

@@ -8,17 +8,24 @@ import {
 
 /**
  * Shell drag math via WASM bridge (TS fallback). DOM apply stays in caller.
+ * When prefers-reduced-motion is on, drag offset and snap animations short-circuit
+ * (no rubber-band transform, release always `'none'`).
  */
 export function useChatShellMotion(expanded: boolean) {
   const offsetYRef = useRef(0);
 
   const dampOffset = useCallback((raw: number, limit = 320) => {
-    if (prefersReducedMotion()) return Math.max(-limit * 0.2, Math.min(limit * 0.2, raw));
+    // Instant / zero visual pull — caller can still track intent if needed via offsetYRef.
+    if (prefersReducedMotion()) return 0;
     return rubberBand(raw, limit);
   }, []);
 
   const onDrag = useCallback(
     (deltaY: number) => {
+      if (prefersReducedMotion()) {
+        offsetYRef.current = 0;
+        return 0;
+      }
       offsetYRef.current += deltaY;
       return dampOffset(offsetYRef.current);
     },

@@ -101,6 +101,29 @@ export function mergeAndSortMessages(existing: Message[], incoming: Message[]): 
   });
 }
 
+/** Filter messages excluding suppressed (pending/confirmed deleted) ids. */
+export function excludeDeletedIds(messages: Message[], deletedIds: Iterable<number>): Message[] {
+  const deleted = deletedIds instanceof Set ? deletedIds : new Set(deletedIds);
+  if (deleted.size === 0) return messages;
+  return messages.filter(m => !deleted.has(m.id));
+}
+
+/** Merge then exclude — convenience for history/WS merges (does not alter mergeAndSortMessages). */
+export function mergeAndSortMessagesExcludingDeleted(
+  existing: Message[],
+  incoming: Message[],
+  deletedIds: Iterable<number>,
+): Message[] {
+  return excludeDeletedIds(mergeAndSortMessages(existing, incoming), deletedIds);
+}
+
+/** Cap list to last maxCount messages (by sort order already applied) — PF memory cap. */
+export function capMessageWindow(messages: Message[], maxCount = 2000): Message[] {
+  if (maxCount <= 0) return [];
+  if (messages.length <= maxCount) return messages;
+  return messages.slice(messages.length - maxCount);
+}
+
 /** Upgrade delivery status for matching positive ids (never downgrade). */
 export function applyDelivered(
   messages: Message[],

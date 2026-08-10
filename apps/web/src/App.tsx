@@ -45,14 +45,33 @@ import {
   clearChatState,
   getDraftForRecipient,
   pruneDraftEntry,
+  subscribeChatStorage,
   type DraftEntry,
 } from './lib/chatStorage';
 import {
   applyDelivered,
   applyMessagesRead,
+  assertChatWasmVersionCompatible,
+  extractFirstUrl,
   initChatWasmBridge,
   mergeAndSortMessages,
 } from './lib/chatWasmBridge';
+import {
+  capMessageWindow,
+  mergeAndSortMessagesExcludingDeleted,
+} from './lib/chatMessages';
+import { addTombstone, removeTombstone } from './lib/chatDeleteTombstones';
+import {
+  dequeueOutbox,
+  enqueueOutbox,
+  loadOutbox,
+  type OutboxItem,
+} from './lib/chatOutbox';
+import { isAllowedChatImageFile } from './lib/chatMediaMime';
+import {
+  createChatHistoryController,
+  getChatLayer,
+} from './lib/chatHistoryLayer';
 import {
   isWsAuthFailureCloseCode,
   isWsAuthFailureMessage,
@@ -183,6 +202,18 @@ export default function App() {
   const chatDraftsRef = useRef(chatDrafts);
   const chatMessagesRef = useRef<Message[]>([]);
   const connectWSRef = useRef<(() => void) | null>(null);
+  const pendingDeletedIdsRef = useRef<Set<number>>(new Set());
+  const pendingDeleteSnapshotsRef = useRef<Map<number, Message>>(new Map());
+  const pendingDeleteTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const optimisticIdRef = useRef(-1);
+  const pendingChatMediaRef = useRef(pendingChatMedia);
+  const flushOutboxRef = useRef<(() => void) | null>(null);
+
+  const nextOptimisticId = () => {
+    const id = optimisticIdRef.current;
+    optimisticIdRef.current -= 1;
+    return id;
+  };
 
   const [threads, setThreads] = useState<import('@hin/types').ChatThread[]>([]);
   const threadsRef = useRef(threads);
@@ -262,6 +293,9 @@ export default function App() {
   const pendingPostBodiesRef = useRef(new Map<string, Record<string, unknown>>());
   const showMessagesDropdownRef = useRef(showMessagesDropdown);
   const chatRecipientRef = useRef(chatRecipient);
+  const chatHistoryRef = useRef(createChatHistoryController());
+  const backToMessagesListUiRef = useRef<() => void>(() => {});
+  const closeMessagesPanelUiRef = useRef<() => void>(() => {});
   const handleSessionExpiredRef = useRef<() => void>(() => {});
   /** Prevents duplicate toasts when multiple in-flight requests (or StrictMode double-fetch) return 401. */
   const sessionExpiredHandledRef = useRef(false);
@@ -311,16 +345,36 @@ export default function App() {
     chatMessagesRef.current = chatMessages;
   }, [chatMessages]);
 
+  useEffect(() => {
+    pendingChatMediaRef.current = pendingChatMedia;
+  }, [pendingChatMedia]);
+
+  // PF-013: revoke pending media object URL on unmount
+  useEffect(() => {
+    return () => {
+      const pending = pendingChatMediaRef.current;
+      if (pending) URL.revokeObjectURL(pending.previewUrl);
+    };
+  }, []);
+
   // Keep per-conversation draft map in sync with the active composer.
   useEffect(() => {
     if (!chatRecipient) return;
     const id = chatRecipient.id;
+    const mediaDraft = pendingChatMedia
+      ? {
+          fileName: pendingChatMedia.file.name,
+          fileType: pendingChatMedia.file.type,
+          fileSize: pendingChatMedia.file.size,
+        }
+      : null;
     setChatDrafts(prev => {
       const current = prev[id];
       const next = pruneDraftEntry({
         text: newMsgText,
         preview: draftLinkPreview,
         dismissedPreviewUrl: current?.dismissedPreviewUrl,
+        mediaDraft,
       });
       if (!next) {
         if (!current) return prev;
@@ -330,13 +384,14 @@ export default function App() {
       if (
         current?.text === next.text &&
         current?.preview === next.preview &&
-        current?.dismissedPreviewUrl === next.dismissedPreviewUrl
+        current?.dismissedPreviewUrl === next.dismissedPreviewUrl &&
+        JSON.stringify(current?.mediaDraft ?? null) === JSON.stringify(next.mediaDraft ?? null)
       ) {
         return prev;
       }
       return { ...prev, [id]: next };
     });
-  }, [chatRecipient, newMsgText, draftLinkPreview]);
+  }, [chatRecipient, newMsgText, draftLinkPreview, pendingChatMedia]);
 
   // Persist chat UI state so drafts + open conversation survive refresh / navigation.
   useEffect(() => {
@@ -347,10 +402,18 @@ export default function App() {
     let drafts = chatDrafts;
     if (chatRecipient) {
       drafts = { ...chatDrafts };
+      const mediaDraft = pendingChatMedia
+        ? {
+            fileName: pendingChatMedia.file.name,
+            fileType: pendingChatMedia.file.type,
+            fileSize: pendingChatMedia.file.size,
+          }
+        : chatDrafts[chatRecipient.id]?.mediaDraft ?? null;
       const entry = pruneDraftEntry({
         text: newMsgText,
         preview: draftLinkPreview,
         dismissedPreviewUrl: chatDrafts[chatRecipient.id]?.dismissedPreviewUrl,
+        mediaDraft,
       });
       if (entry) drafts[chatRecipient.id] = entry;
       else delete drafts[chatRecipient.id];
@@ -361,7 +424,28 @@ export default function App() {
       recipient: chatRecipient,
       drafts,
     });
-  }, [token, showMessagesDropdown, messagesPanelExpanded, chatRecipient, chatDrafts, newMsgText, draftLinkPreview]);
+  }, [
+    token,
+    showMessagesDropdown,
+    messagesPanelExpanded,
+    chatRecipient,
+    chatDrafts,
+    newMsgText,
+    draftLinkPreview,
+    pendingChatMedia,
+  ]);
+
+  // SC-026: sync drafts from other tabs
+  useEffect(() => {
+    if (!token) return;
+    return subscribeChatStorage(state => {
+      setChatDrafts(state.drafts);
+      if (!chatRecipientRef.current) return;
+      const draft = getDraftForRecipient(state.drafts, chatRecipientRef.current.id);
+      setNewMsgText(draft.text);
+      setDraftLinkPreview(draft.preview);
+    });
+  }, [token]);
 
   // After reload, rehydrate the open conversation's messages.
   useEffect(() => {
@@ -372,7 +456,9 @@ export default function App() {
 
   useEffect(() => {
     if (!token) return;
-    void initChatWasmBridge();
+    void initChatWasmBridge().then(() => {
+      assertChatWasmVersionCompatible();
+    });
   }, [token]);
 
   useEffect(() => {
@@ -456,36 +542,66 @@ export default function App() {
     addToast(message, 'system', { retryKey }, { skipPrefCheck: true });
   };
 
-  const goHome = (opts?: { skipUrlSync?: boolean }) => {
-    setActiveTab('feed');
-    setIsSearchOpen(false);
-    setProfileUserId(null);
-    setProfileUser(null);
-    setProfilePosts([]);
-    setProfileError(null);
-    setIsProfileEditing(false);
-    setPostViewId(null);
-    setPostViewPost(null);
-    setPostViewError(null);
-    setHighlightCommentId(null);
-    setOlabidItemId(null);
-    setShowGuestAuth(false);
-    setShowNotifications(false);
+  /** Close messages UI without touching history (history already popped or dismissing). */
+  const closeMessagesPanelUi = () => {
+    showMessagesDropdownRef.current = false;
     setShowMessagesDropdown(false);
     setMessagesPanelExpanded(false);
-    // Keep chat recipient + draft so the conversation restores from localStorage.
-    if (!opts?.skipUrlSync) {
-      syncUrl({ view: 'home' }, true);
+    // Preserve recipient + draft text/preview in state (and localStorage).
+  };
+
+  /** Dismiss chat history layers, then optionally run navigation that push/replaceStates. */
+  const ensureMessagesClosed = (after?: () => void) => {
+    closeMessagesPanelUi();
+    chatHistoryRef.current.dismiss({ onSettled: after });
+  };
+
+  const goHome = (opts?: { skipUrlSync?: boolean }) => {
+    const apply = () => {
+      setActiveTab('feed');
+      setIsSearchOpen(false);
+      setProfileUserId(null);
+      setProfileUser(null);
+      setProfilePosts([]);
+      setProfileError(null);
+      setIsProfileEditing(false);
+      setPostViewId(null);
+      setPostViewPost(null);
+      setPostViewError(null);
+      setHighlightCommentId(null);
+      setOlabidItemId(null);
+      setShowGuestAuth(false);
+      setShowNotifications(false);
+      showMessagesDropdownRef.current = false;
+      setShowMessagesDropdown(false);
+      setMessagesPanelExpanded(false);
+      // Keep chat recipient + draft so the conversation restores from localStorage.
+      if (!opts?.skipUrlSync) {
+        syncUrl({ view: 'home' }, true);
+      }
+    };
+    if (showMessagesDropdownRef.current || chatHistoryRef.current.getDepth() > 0) {
+      ensureMessagesClosed(apply);
+    } else {
+      apply();
     }
   };
 
   const openSearch = (opts?: { skipUrlSync?: boolean; replace?: boolean }) => {
-    setShowNotifications(false);
-    setShowMessagesDropdown(false);
-    setMessagesPanelExpanded(false);
-    setIsSearchOpen(true);
-    if (!opts?.skipUrlSync) {
-      syncUrl({ view: 'search' }, opts?.replace);
+    const apply = () => {
+      setShowNotifications(false);
+      showMessagesDropdownRef.current = false;
+      setShowMessagesDropdown(false);
+      setMessagesPanelExpanded(false);
+      setIsSearchOpen(true);
+      if (!opts?.skipUrlSync) {
+        syncUrl({ view: 'search' }, opts?.replace);
+      }
+    };
+    if (showMessagesDropdownRef.current || chatHistoryRef.current.getDepth() > 0) {
+      ensureMessagesClosed(apply);
+    } else {
+      apply();
     }
   };
 
@@ -502,9 +618,7 @@ export default function App() {
   };
 
   const closeMessagesPanel = () => {
-    setShowMessagesDropdown(false);
-    setMessagesPanelExpanded(false);
-    // Preserve recipient + draft text/preview in state (and localStorage).
+    ensureMessagesClosed();
   };
 
   const openChatInPanel = (recipient: ChatRecipient, opts?: { draft?: DraftEntry }) => {
@@ -524,6 +638,7 @@ export default function App() {
       if (prev) URL.revokeObjectURL(prev.previewUrl);
       return null;
     });
+    chatHistoryRef.current.ensureOpenToThread();
     setChatRecipient(recipient);
     setReplyingToMessage(null);
     setNewMsgText(draft.text);
@@ -539,7 +654,8 @@ export default function App() {
     });
   };
 
-  const backToMessagesList = () => {
+  /** UI-only return to thread list (used by popstate). */
+  const backToMessagesListUi = () => {
     // Drafts stay in chatDrafts (and localStorage); only clear the active composer view.
     setPendingChatMedia(prev => {
       if (prev) URL.revokeObjectURL(prev.previewUrl);
@@ -551,6 +667,23 @@ export default function App() {
     setNewMsgText('');
     setDraftLinkPreview(null);
   };
+
+  /** Chevron Back — prefer history.back so native Back and chevron stay in sync. */
+  const backToMessagesList = () => {
+    const layer = getChatLayer(window.history.state);
+    if (layer === 'thread' && chatHistoryRef.current.getDepth() >= 2) {
+      window.history.back();
+      return;
+    }
+    // Hydrate / shallow stack: update UI and retag without leaving the page.
+    backToMessagesListUi();
+    if (showMessagesDropdownRef.current) {
+      chatHistoryRef.current.replaceLayer('list');
+    }
+  };
+
+  backToMessagesListUiRef.current = backToMessagesListUi;
+  closeMessagesPanelUiRef.current = closeMessagesPanelUi;
 
   const dismissDraftLinkPreview = () => {
     if (!chatRecipient || !draftLinkPreview) return;
@@ -571,13 +704,15 @@ export default function App() {
   };
 
   const pickChatImage = (file: File) => {
-    // Device camera/gallery may report jpeg/png/webp, or occasionally an empty/other image MIME.
-    if (file.type && !file.type.startsWith('image/')) {
-      alert('Please choose a JPEG, PNG, or WebP image.');
+    // Empty MIME allowed from some camera/gallery pickers; otherwise require jpeg/png/webp.
+    if (file.type && !isAllowedChatImageFile(file)) {
+      addToast('Please choose a JPEG, PNG, or WebP image.', 'system', undefined, {
+        skipPrefCheck: true,
+      });
       return;
     }
     if (file.size > 8 * 1024 * 1024) {
-      alert('Image is too large (max 8MB).');
+      addToast('Image is too large (max 8MB).', 'system', undefined, { skipPrefCheck: true });
       return;
     }
     setPendingChatMedia(prev => {
@@ -596,14 +731,19 @@ export default function App() {
   const toggleMessagesDropdown = () => {
     setShowMessagesDropdown(prev => {
       const next = !prev;
+      showMessagesDropdownRef.current = next;
       if (next) {
         setShowNotifications(false);
         fetchThreads();
         if (chatRecipientRef.current) {
+          chatHistoryRef.current.ensureOpenToThread();
           fetchMessages(chatRecipientRef.current.id);
+        } else {
+          chatHistoryRef.current.ensureOpenToList();
         }
       } else {
         setMessagesPanelExpanded(false);
+        chatHistoryRef.current.dismiss();
       }
       return next;
     });
@@ -778,26 +918,35 @@ export default function App() {
     userId: number,
     opts?: { highlightFollowRequests?: boolean; username?: string; skipUrlSync?: boolean; replace?: boolean },
   ) => {
-    setIsSearchOpen(false);
-    setProfileUserId(userId);
-    setActiveTab('profile');
-    setIsProfileEditing(false);
-    setIsProfileSettingsOpen(!!opts?.highlightFollowRequests && userId === currentUser?.id);
-    setShowNotifications(false);
-    setShowMessagesDropdown(false);
-    setMessagesPanelExpanded(false);
-    setProfilePostsError(null);
-    setHighlightFollowRequests(!!opts?.highlightFollowRequests);
-    setShowGuestAuth(false);
-    if (!opts?.skipUrlSync && opts?.username) {
-      syncUrl({ view: 'profile', username: opts.username }, opts?.replace);
-    }
-    const user = await fetchProfile(userId);
-    fetchProfilePosts(userId);
-    void fetchProfileGamification(userId);
-    if (userId === currentUser?.id) fetchFollowRequests();
-    if (!opts?.skipUrlSync && !opts?.username && user?.username) {
-      syncUrl({ view: 'profile', username: user.username }, opts?.replace);
+    const apply = async () => {
+      setIsSearchOpen(false);
+      setProfileUserId(userId);
+      setActiveTab('profile');
+      setIsProfileEditing(false);
+      setIsProfileSettingsOpen(!!opts?.highlightFollowRequests && userId === currentUser?.id);
+      setShowNotifications(false);
+      setShowMessagesDropdown(false);
+      setMessagesPanelExpanded(false);
+      setProfilePostsError(null);
+      setHighlightFollowRequests(!!opts?.highlightFollowRequests);
+      setShowGuestAuth(false);
+      if (!opts?.skipUrlSync && opts?.username) {
+        syncUrl({ view: 'profile', username: opts.username }, opts?.replace);
+      }
+      const user = await fetchProfile(userId);
+      fetchProfilePosts(userId);
+      void fetchProfileGamification(userId);
+      if (userId === currentUser?.id) fetchFollowRequests();
+      if (!opts?.skipUrlSync && !opts?.username && user?.username) {
+        syncUrl({ view: 'profile', username: user.username }, opts?.replace);
+      }
+    };
+    if (showMessagesDropdownRef.current || chatHistoryRef.current.getDepth() > 0) {
+      ensureMessagesClosed(() => {
+        void apply();
+      });
+    } else {
+      await apply();
     }
   };
 
@@ -805,49 +954,58 @@ export default function App() {
     username: string,
     opts?: { skipUrlSync?: boolean; replace?: boolean },
   ) => {
-    setIsSearchOpen(false);
-    setActiveTab('profile');
-    setProfileLoading(true);
-    setProfileError(null);
-    setProfileUser(null);
-    setProfilePosts([]);
-    setIsProfileEditing(false);
-    setIsProfileSettingsOpen(false);
-    setShowNotifications(false);
-    setShowMessagesDropdown(false);
-    setMessagesPanelExpanded(false);
-    setProfilePostsError(null);
-    setHighlightFollowRequests(false);
-    setShowGuestAuth(false);
-    if (!opts?.skipUrlSync) {
-      syncUrl({ view: 'profile', username }, opts?.replace);
-    }
-    try {
-      const res = await fetch(`${API_URL}/api/users/username/${encodeURIComponent(username)}`, {
-        headers: getHeaders(),
-      });
-      if (res.ok) {
-        const user: UserType = await res.json();
-        setProfileUserId(user.id);
-        setProfileUser(user);
-        setProfileLoading(false);
-        setProfileError(null);
-        fetchProfilePosts(user.id);
-        void fetchProfileGamification(user.id);
-        if (user.id === currentUser?.id) fetchFollowRequests();
-      } else {
-        setProfileUserId(null);
-        setProfileUser(null);
-        setProfileLoading(false);
-        const data = await res.json().catch(() => ({}));
-        setProfileError(data.error || `User @${username} not found`);
-        if (!currentUser) {
-          addToast(`User @${username} not found`, 'system', undefined, { skipPrefCheck: true });
-        }
+    const apply = async () => {
+      setIsSearchOpen(false);
+      setActiveTab('profile');
+      setProfileLoading(true);
+      setProfileError(null);
+      setProfileUser(null);
+      setProfilePosts([]);
+      setIsProfileEditing(false);
+      setIsProfileSettingsOpen(false);
+      setShowNotifications(false);
+      setShowMessagesDropdown(false);
+      setMessagesPanelExpanded(false);
+      setProfilePostsError(null);
+      setHighlightFollowRequests(false);
+      setShowGuestAuth(false);
+      if (!opts?.skipUrlSync) {
+        syncUrl({ view: 'profile', username }, opts?.replace);
       }
-    } catch (e) {
-      console.error('Error opening profile by username:', e);
-      setProfileError('Failed to load profile');
+      try {
+        const res = await fetch(`${API_URL}/api/users/username/${encodeURIComponent(username)}`, {
+          headers: getHeaders(),
+        });
+        if (res.ok) {
+          const user: UserType = await res.json();
+          setProfileUserId(user.id);
+          setProfileUser(user);
+          setProfileLoading(false);
+          setProfileError(null);
+          fetchProfilePosts(user.id);
+          void fetchProfileGamification(user.id);
+          if (user.id === currentUser?.id) fetchFollowRequests();
+        } else {
+          setProfileUserId(null);
+          setProfileUser(null);
+          setProfileLoading(false);
+          const data = await res.json().catch(() => ({}));
+          setProfileError(data.error || `User @${username} not found`);
+          if (!currentUser) {
+            addToast(`User @${username} not found`, 'system', undefined, { skipPrefCheck: true });
+          }
+        }
+      } catch (e) {
+        console.error('Error opening profile by username:', e);
+        setProfileError('Failed to load profile');
+      }
+    };
+    if (showMessagesDropdownRef.current || chatHistoryRef.current.getDepth() > 0) {
+      ensureMessagesClosed(() => {
+        void apply();
+      });
+    } else {
+      await apply();
     }
   };
 
@@ -886,14 +1044,21 @@ export default function App() {
       if (olabidFlagKnown) goHome();
       return;
     }
-    setIsSearchOpen(false);
-    setActiveTab('olabid');
-    setOlabidItemId(null);
-    setShowNotifications(false);
-    setShowMessagesDropdown(false);
-    setProfileUserId(null);
-    if (!opts?.skipUrlSync) {
-      syncUrl({ view: 'olabid' }, opts?.replace);
+    const apply = () => {
+      setIsSearchOpen(false);
+      setActiveTab('olabid');
+      setOlabidItemId(null);
+      setShowNotifications(false);
+      setShowMessagesDropdown(false);
+      setProfileUserId(null);
+      if (!opts?.skipUrlSync) {
+        syncUrl({ view: 'olabid' }, opts?.replace);
+      }
+    };
+    if (showMessagesDropdownRef.current || chatHistoryRef.current.getDepth() > 0) {
+      ensureMessagesClosed(apply);
+    } else {
+      apply();
     }
   };
 
@@ -905,14 +1070,21 @@ export default function App() {
       if (olabidFlagKnown) goHome();
       return;
     }
-    setIsSearchOpen(false);
-    setActiveTab('olabid');
-    setOlabidItemId(itemId);
-    setShowNotifications(false);
-    setShowMessagesDropdown(false);
-    setProfileUserId(null);
-    if (!opts?.skipUrlSync) {
-      syncUrl({ view: 'olabid', itemId }, opts?.replace);
+    const apply = () => {
+      setIsSearchOpen(false);
+      setActiveTab('olabid');
+      setOlabidItemId(itemId);
+      setShowNotifications(false);
+      setShowMessagesDropdown(false);
+      setProfileUserId(null);
+      if (!opts?.skipUrlSync) {
+        syncUrl({ view: 'olabid', itemId }, opts?.replace);
+      }
+    };
+    if (showMessagesDropdownRef.current || chatHistoryRef.current.getDepth() > 0) {
+      ensureMessagesClosed(apply);
+    } else {
+      apply();
     }
   };
 
@@ -1000,10 +1172,17 @@ export default function App() {
 
   /** Navigate to the Explore feed for a hashtag clicked inside post/comment content, from any tab. */
   const handleViewHashtag = (tag: string) => {
-    setActiveTab('feed');
-    setShowNotifications(false);
-    setShowMessagesDropdown(false);
-    handleSelectHashtag(tag);
+    const apply = () => {
+      setActiveTab('feed');
+      setShowNotifications(false);
+      setShowMessagesDropdown(false);
+      handleSelectHashtag(tag);
+    };
+    if (showMessagesDropdownRef.current || chatHistoryRef.current.getDepth() > 0) {
+      ensureMessagesClosed(apply);
+    } else {
+      apply();
+    }
   };
 
   const fetchComments = async (postId: number) => {
@@ -1032,8 +1211,8 @@ export default function App() {
 
   // Draft link preview while composing a DM (debounced URL detection).
   useEffect(() => {
-    const match = newMsgText.match(/(https?:\/\/[^\s<>"')]+)/i);
-    const url = match?.[1]?.replace(/[.,!?;:)\]}>'"]+$/, '') || null;
+    const url = extractFirstUrl(newMsgText);
+    const recipientIdAtStart = chatRecipient?.id ?? null;
     if (!url || !token) {
       setDraftLinkPreview(null);
       return;
@@ -1066,7 +1245,9 @@ export default function App() {
         const res = await fetch(`${API_URL}/api/link-preview?url=${encodeURIComponent(url)}`, {
           headers: getHeaders(),
         });
-        if (!cancelled && res.ok) {
+        // #424: ignore stale fetches after thread switch
+        if (cancelled || chatRecipientRef.current?.id !== recipientIdAtStart) return;
+        if (res.ok) {
           setDraftLinkPreview(await res.json());
         }
         // Keep any seeded preview on failure so share-from-item stays visible.
@@ -1110,20 +1291,27 @@ export default function App() {
     postId: number,
     opts?: { commentId?: number; replace?: boolean; skipUrlSync?: boolean },
   ) => {
-    setIsSearchOpen(false);
-    setActiveTab('post');
-    setPostViewId(postId);
-    setHighlightCommentId(opts?.commentId ?? null);
-    setPostViewPost(null);
-    setPostViewError(null);
-    setShowNotifications(false);
-    setShowMessagesDropdown(false);
-    setMessagesPanelExpanded(false);
-    setShowGuestAuth(false);
-    if (!opts?.skipUrlSync) {
-      syncUrl({ view: 'post', postId, commentId: opts?.commentId }, opts?.replace);
+    const apply = () => {
+      setIsSearchOpen(false);
+      setActiveTab('post');
+      setPostViewId(postId);
+      setHighlightCommentId(opts?.commentId ?? null);
+      setPostViewPost(null);
+      setPostViewError(null);
+      setShowNotifications(false);
+      setShowMessagesDropdown(false);
+      setMessagesPanelExpanded(false);
+      setShowGuestAuth(false);
+      if (!opts?.skipUrlSync) {
+        syncUrl({ view: 'post', postId, commentId: opts?.commentId }, opts?.replace);
+      }
+      fetchPost(postId);
+    };
+    if (showMessagesDropdownRef.current || chatHistoryRef.current.getDepth() > 0) {
+      ensureMessagesClosed(apply);
+    } else {
+      apply();
     }
-    fetchPost(postId);
   };
 
   const handleCopyPostPermalink = (postId: number) => {
@@ -1266,7 +1454,9 @@ export default function App() {
         const pending = prev.filter(
           m => m.id < 0 || m.status === 'sending' || m.status === 'failed',
         );
-        return mergeAndSortMessages(data, pending);
+        return capMessageWindow(
+          mergeAndSortMessagesExcludingDeleted(data, pending, pendingDeletedIdsRef.current),
+        );
       });
 
       // Ack delivery for incoming undelivered messages (extra safety beyond REST deliver-on-fetch).
@@ -1328,6 +1518,8 @@ export default function App() {
 
   const handleUserTyping = (recipientId: number) => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN || !wsReadyRef.current) return;
+    // PR-019: do not send typing to blocked users
+    if (blockedUserIdsRef.current.has(recipientId)) return;
     const now = Date.now();
     if (!lastTypingSentRef.current[recipientId] || now - lastTypingSentRef.current[recipientId] > 1000) {
       ws.current.send(JSON.stringify({ type: 'typing', payload: { receiverId: recipientId, isTyping: true } }));
@@ -1437,7 +1629,11 @@ export default function App() {
     }
 
     const appendChatMessage = (msg: Message) => {
-      setChatMessages(prev => mergeAndSortMessages(prev, [msg]));
+      setChatMessages(prev =>
+        capMessageWindow(
+          mergeAndSortMessagesExcludingDeleted(prev, [msg], pendingDeletedIdsRef.current),
+        ),
+      );
     };
 
     const markSendingFailed = () => {
@@ -1496,6 +1692,7 @@ export default function App() {
               wsReadyRef.current = true;
               sendActiveChat();
               syncAfterReconnect();
+              flushOutboxRef.current?.();
               break;
             case 'error': {
               if (isWsAuthFailureMessage(message.payload?.message)) {
@@ -1641,6 +1838,13 @@ export default function App() {
                 messageId: number;
                 conversationPeerId: number;
               };
+              const timer = pendingDeleteTimersRef.current.get(messageId);
+              if (timer) {
+                clearTimeout(timer);
+                pendingDeleteTimersRef.current.delete(messageId);
+              }
+              pendingDeleteSnapshotsRef.current.delete(messageId);
+              pendingDeletedIdsRef.current = addTombstone(pendingDeletedIdsRef.current, messageId);
               setChatMessages(prev => prev.filter(m => m.id !== messageId));
               setReplyingToMessage(prev => (prev?.id === messageId ? null : prev));
               setThreads(prev => {
@@ -2235,8 +2439,8 @@ export default function App() {
     });
     setNewMsgText('');
     setDraftLinkPreview(null);
-    setShowMessagesDropdown(false);
-    setMessagesPanelExpanded(false);
+    closeMessagesPanelUi();
+    chatHistoryRef.current.dismiss();
     setNotifications([]);
     setUnreadNotifsCount(0);
     setActiveTab('feed');
@@ -3262,6 +3466,7 @@ export default function App() {
   const startChat = (user: UserType | ChatRecipient, opts?: { prefillText?: string; seedPreview?: LinkPreview | null }) => {
     const recipient: ChatRecipient = { id: user.id, username: user.username, role: user.role, avatarUrl: user.avatarUrl };
     setShowNotifications(false);
+    showMessagesDropdownRef.current = true;
     setShowMessagesDropdown(true);
     setMessagesPanelExpanded(false);
     if (opts?.prefillText != null || opts?.seedPreview != null) {
@@ -3278,12 +3483,45 @@ export default function App() {
   };
 
   const handlePostOlabidItem = (permalink: string, seedPreview: LinkPreview) => {
-    setShowMessagesDropdown(false);
-    goHome();
-    setNewPostContent(permalink);
-    setPostSeedPreview(seedPreview);
-    setShowNewPostForm(true);
+    ensureMessagesClosed(() => {
+      goHome();
+      setNewPostContent(permalink);
+      setPostSeedPreview(seedPreview);
+      setShowNewPostForm(true);
+    });
   };
+
+  const sendWsChatMessage = (payload: {
+    receiverId: number;
+    content: string;
+    suppressLinkPreview?: boolean;
+    mediaUrl?: string;
+    mediaType?: string;
+    clientMessageId: string;
+    replyToMessageId?: number;
+  }) => {
+    if (!(ws.current?.readyState === WebSocket.OPEN && wsReadyRef.current)) return false;
+    ws.current.send(JSON.stringify({ type: 'send_message', payload }));
+    return true;
+  };
+
+  const flushChatOutbox = () => {
+    if (!currentUser) return;
+    if (!(ws.current?.readyState === WebSocket.OPEN && wsReadyRef.current)) return;
+    const items = loadOutbox(currentUser.id);
+    for (const item of items) {
+      const ok = sendWsChatMessage({
+        receiverId: item.recipientId,
+        content: item.content,
+        mediaUrl: item.mediaUrl,
+        mediaType: item.mediaType,
+        clientMessageId: item.clientMessageId,
+        replyToMessageId: item.replyToMessageId,
+      });
+      if (ok) dequeueOutbox(currentUser.id, item.clientMessageId);
+    }
+  };
+  flushOutboxRef.current = flushChatOutbox;
 
   const handleSendDM = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3291,14 +3529,9 @@ export default function App() {
     const content = newMsgText.trim();
     const pendingMedia = pendingChatMedia;
     if (!content && !pendingMedia) return;
-    if (!(ws.current?.readyState === WebSocket.OPEN && wsReadyRef.current)) {
-      alert('Real-time connection is not ready yet. Please wait a moment and try again.');
-      return;
-    }
 
     const dismissedUrl = chatDraftsRef.current[chatRecipient.id]?.dismissedPreviewUrl ?? null;
-    const firstUrlMatch = content.match(/(https?:\/\/[^\s<>"')]+)/i);
-    const firstUrl = firstUrlMatch?.[1]?.replace(/[.,!?;:)\]}>'"]+$/, '') || null;
+    const firstUrl = extractFirstUrl(content);
     const suppressLinkPreview = !!(dismissedUrl && firstUrl && dismissedUrl === firstUrl);
     const optimisticPreview = suppressLinkPreview ? null : draftLinkPreview;
 
@@ -3312,12 +3545,13 @@ export default function App() {
       try {
         const uploaded = await uploadCompressedImage(pendingMedia.file, 'chat', token, API_URL);
         mediaUrl = uploaded.url;
-        // Client compression prefers WebP; server also records the stored mime.
         mediaType = 'image/webp';
         optimisticMediaUrl = mediaUrl;
       } catch (err) {
         console.error(err);
-        alert(err instanceof Error ? err.message : 'Failed to upload image');
+        addToast(err instanceof Error ? err.message : 'Failed to upload image', 'system', undefined, {
+          skipPrefCheck: true,
+        });
         setSendingChatMedia(false);
         return;
       } finally {
@@ -3325,15 +3559,10 @@ export default function App() {
       }
     }
 
-    if (!(ws.current?.readyState === WebSocket.OPEN && wsReadyRef.current)) {
-      alert('Real-time connection is not ready yet. Please wait a moment and try again.');
-      return;
-    }
-
     const clientMessageId = randomId();
     const replyParent = replyingToMessage;
     const optimisticMsg: Message = {
-      id: -Date.now(),
+      id: nextOptimisticId(),
       senderId: currentUser.id,
       senderUsername: currentUser.username,
       receiverId: chatRecipient.id,
@@ -3359,26 +3588,48 @@ export default function App() {
         : null,
     };
 
-    setChatMessages(prev => mergeAndSortMessages(prev, [optimisticMsg]));
-
-    ws.current.send(
-      JSON.stringify({
-        type: 'send_message',
-        payload: {
-          receiverId: chatRecipient.id,
-          content,
-          suppressLinkPreview: suppressLinkPreview || undefined,
-          mediaUrl,
-          mediaType,
-          clientMessageId,
-          replyToMessageId:
-            replyParent && replyParent.id > 0 ? replyParent.id : undefined,
-        },
-      })
+    setChatMessages(prev =>
+      capMessageWindow(
+        mergeAndSortMessagesExcludingDeleted(prev, [optimisticMsg], pendingDeletedIdsRef.current),
+      ),
     );
-    if (typingTimeoutRef.current[chatRecipient.id]) clearTimeout(typingTimeoutRef.current[chatRecipient.id]);
-    ws.current.send(JSON.stringify({ type: 'typing', payload: { receiverId: chatRecipient.id, isTyping: false } }));
-    lastTypingSentRef.current[chatRecipient.id] = 0;
+
+    const wsPayload = {
+      receiverId: chatRecipient.id,
+      content,
+      suppressLinkPreview: suppressLinkPreview || undefined,
+      mediaUrl,
+      mediaType,
+      clientMessageId,
+      replyToMessageId: replyParent && replyParent.id > 0 ? replyParent.id : undefined,
+    };
+
+    const sent = sendWsChatMessage(wsPayload);
+    if (!sent) {
+      // OF-002: queue for flush when WS reconnects
+      const outboxItem: OutboxItem = {
+        clientMessageId,
+        recipientId: chatRecipient.id,
+        content,
+        mediaUrl,
+        mediaType,
+        replyToMessageId: wsPayload.replyToMessageId,
+        createdAt: optimisticMsg.createdAt,
+      };
+      enqueueOutbox(currentUser.id, outboxItem);
+      addToast('Message queued — will send when you reconnect.', 'system', undefined, {
+        skipPrefCheck: true,
+      });
+    } else if (ws.current?.readyState === WebSocket.OPEN) {
+      if (typingTimeoutRef.current[chatRecipient.id]) {
+        clearTimeout(typingTimeoutRef.current[chatRecipient.id]);
+      }
+      ws.current.send(
+        JSON.stringify({ type: 'typing', payload: { receiverId: chatRecipient.id, isTyping: false } }),
+      );
+      lastTypingSentRef.current[chatRecipient.id] = 0;
+    }
+
     const sentToId = chatRecipient.id;
     setChatDrafts(prev => {
       if (!prev[sentToId]) return prev;
@@ -3396,40 +3647,52 @@ export default function App() {
 
   const handleRetryFailedMessage = (failed: Message) => {
     if (!currentUser || !chatRecipient) return;
-    if (!(ws.current?.readyState === WebSocket.OPEN && wsReadyRef.current)) {
-      alert('Real-time connection is not ready yet. Please wait a moment and try again.');
-      return;
-    }
-    // Keep the same clientMessageId so the server returns the original row if it already committed.
     const clientMessageId = failed.clientMessageId || randomId();
     const retryMsg: Message = {
       ...failed,
-      id: failed.id < 0 ? failed.id : -Date.now(),
+      id: failed.id < 0 ? failed.id : nextOptimisticId(),
       status: 'sending',
       clientMessageId,
       createdAt: failed.createdAt,
     };
     setChatMessages(prev =>
       mergeAndSortMessages(
-        prev.filter(m => !(m.id === failed.id || (failed.clientMessageId && m.clientMessageId === failed.clientMessageId))),
+        prev.filter(
+          m =>
+            !(
+              m.id === failed.id ||
+              (failed.clientMessageId && m.clientMessageId === failed.clientMessageId)
+            ),
+        ),
         [retryMsg],
       ),
     );
 
-    ws.current.send(
-      JSON.stringify({
-        type: 'send_message',
-        payload: {
-          receiverId: chatRecipient.id,
-          content: failed.content,
-          mediaUrl: failed.mediaUrl || undefined,
-          mediaType: failed.mediaType || undefined,
-          clientMessageId,
-          suppressLinkPreview: !failed.linkPreview,
-          replyToMessageId: failed.replyToMessageId || undefined,
-        },
-      }),
-    );
+    const wsPayload = {
+      receiverId: chatRecipient.id,
+      content: failed.content,
+      mediaUrl: failed.mediaUrl || undefined,
+      mediaType: failed.mediaType || undefined,
+      clientMessageId,
+      suppressLinkPreview: !failed.linkPreview,
+      replyToMessageId: failed.replyToMessageId || undefined,
+    };
+
+    const sent = sendWsChatMessage(wsPayload);
+    if (!sent) {
+      enqueueOutbox(currentUser.id, {
+        clientMessageId,
+        recipientId: chatRecipient.id,
+        content: failed.content,
+        mediaUrl: failed.mediaUrl || undefined,
+        mediaType: failed.mediaType || undefined,
+        replyToMessageId: failed.replyToMessageId || undefined,
+        createdAt: failed.createdAt,
+      });
+      addToast('Retry queued — will send when you reconnect.', 'system', undefined, {
+        skipPrefCheck: true,
+      });
+    }
   };
 
   const handleDeleteMessage = (msg: Message) => {
@@ -3452,12 +3715,40 @@ export default function App() {
     }
 
     if (!(ws.current?.readyState === WebSocket.OPEN && wsReadyRef.current)) {
-      alert('Real-time connection is not ready yet. Please wait a moment and try again.');
+      addToast('Real-time connection is not ready yet. Please wait a moment and try again.', 'system', undefined, {
+        skipPrefCheck: true,
+      });
       return;
     }
 
+    // DL-008/014/015/022: tombstone + rollback timeout
+    pendingDeletedIdsRef.current = addTombstone(pendingDeletedIdsRef.current, msg.id);
+    pendingDeleteSnapshotsRef.current.set(msg.id, msg);
     setChatMessages(prev => prev.filter(m => m.id !== msg.id));
     setReplyingToMessage(prev => (prev?.id === msg.id ? null : prev));
+
+    const existingTimer = pendingDeleteTimersRef.current.get(msg.id);
+    if (existingTimer) clearTimeout(existingTimer);
+    pendingDeleteTimersRef.current.set(
+      msg.id,
+      setTimeout(() => {
+        pendingDeleteTimersRef.current.delete(msg.id);
+        const snapshot = pendingDeleteSnapshotsRef.current.get(msg.id);
+        pendingDeleteSnapshotsRef.current.delete(msg.id);
+        pendingDeletedIdsRef.current = removeTombstone(pendingDeletedIdsRef.current, msg.id);
+        if (snapshot) {
+          setChatMessages(prev =>
+            capMessageWindow(
+              mergeAndSortMessagesExcludingDeleted(prev, [snapshot], pendingDeletedIdsRef.current),
+            ),
+          );
+          addToast('Could not delete message. It was restored.', 'system', undefined, {
+            skipPrefCheck: true,
+          });
+        }
+      }, 8000),
+    );
+
     ws.current.send(
       JSON.stringify({
         type: 'delete_message',
@@ -3858,7 +4149,29 @@ export default function App() {
       }
     }
 
-    const onPopState = () => {
+    const onPopState = (event: PopStateEvent) => {
+      if (chatHistoryRef.current.consumeSuppressedPop()) {
+        return;
+      }
+
+      const chatLayer = getChatLayer(event.state);
+      if (showMessagesDropdownRef.current || chatHistoryRef.current.getDepth() > 0) {
+        if (chatLayer === 'list') {
+          backToMessagesListUiRef.current();
+          chatHistoryRef.current.notePopped();
+          return;
+        }
+        if (chatLayer === 'thread') {
+          showMessagesDropdownRef.current = true;
+          setShowMessagesDropdown(true);
+          return;
+        }
+        // Left chat overlay entries — URL unchanged for chat-only pops.
+        closeMessagesPanelUiRef.current();
+        chatHistoryRef.current.resetDepth();
+        return;
+      }
+
       const r = parseLocation(window.location.pathname, window.location.hash);
       if (r.view === 'post') {
         openPost(r.postId, { commentId: r.commentId, skipUrlSync: true });
@@ -3883,6 +4196,14 @@ export default function App() {
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // Tag restored chat UI on the current history entry (no extra stack depth).
+  useEffect(() => {
+    if (!showMessagesDropdown) return;
+    chatHistoryRef.current.replaceLayer(chatRecipient ? 'thread' : 'list');
+    // Cold restore only — in-session opens push their own layers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount hydrate
   }, []);
 
   // Removed auto-fetch users effect
@@ -3960,8 +4281,8 @@ export default function App() {
       setChatDrafts({});
       setNewMsgText('');
       setDraftLinkPreview(null);
-      setShowMessagesDropdown(false);
-      setMessagesPanelExpanded(false);
+      closeMessagesPanelUi();
+      chatHistoryRef.current.dismiss();
       clearChatState();
       addToast('Returned to Admin session', 'system', undefined, { skipPrefCheck: true });
     }
@@ -4057,8 +4378,8 @@ export default function App() {
     setUnreadNotifsCount(0);
     setUnreadMessagesCount(0);
     setShowNotifications(false);
-    setShowMessagesDropdown(false);
-    setMessagesPanelExpanded(false);
+    closeMessagesPanelUi();
+    chatHistoryRef.current.dismiss();
     setAdminData(null);
     setBroadcastHistory(null);
     setAdminReports(null);
@@ -4095,7 +4416,8 @@ export default function App() {
 
   const handleWalkthroughStepChange = useCallback(() => {
     setShowNotifications(false);
-    setShowMessagesDropdown(false);
+    closeMessagesPanelUiRef.current();
+    chatHistoryRef.current.dismiss();
     setShowNewPostForm(false);
   }, []);
 
@@ -4260,7 +4582,7 @@ export default function App() {
               setShowNotifications(prev => {
                 const next = !prev;
                 if (next) {
-                  setShowMessagesDropdown(false);
+                  ensureMessagesClosed();
                   fetchNotifications();
                 }
                 return next;
@@ -4717,10 +5039,11 @@ export default function App() {
             unreadMessagesCount={unreadMessagesCount}
             messageIconPulseAt={messageIconPulseAt}
             onOpenCreatePost={() => {
-              setShowMessagesDropdown(false);
-              if (activeTab !== 'feed') goHome();
-              setPostSeedPreview(null);
-              setShowNewPostForm(true);
+              ensureMessagesClosed(() => {
+                if (activeTab !== 'feed') goHome();
+                setPostSeedPreview(null);
+                setShowNewPostForm(true);
+              });
             }}
             onToggleMessages={toggleMessagesDropdown}
           />

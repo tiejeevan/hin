@@ -6,14 +6,24 @@ import {
   pruneDraftEntry,
   pruneDrafts,
   getDraftForRecipient,
+  mergeDraftMaps,
+  subscribeChatStorage,
+  CHAT_STORAGE_KEY,
   type DraftEntry,
   type PersistedChatState,
+  type MediaDraftMeta,
 } from './chatStorage';
 import type { LinkPreview } from '@hin/types';
 import type { ChatRecipient } from '../types/ui';
 
 const V1_KEY = 'hin_chat_ui_v1';
 const V2_KEY = 'hin_chat_ui_v2';
+
+const mediaDraft: MediaDraftMeta = {
+  fileName: 'shot.png',
+  fileType: 'image/png',
+  fileSize: 2048,
+};
 
 const recipient: ChatRecipient = {
   id: 7,
@@ -158,6 +168,43 @@ describe('pruneDraftEntry', () => {
       dismissedPreviewUrl: 'https://dismissed.example',
     });
   });
+
+  it('keeps mediaDraft-only drafts with empty text and no preview', () => {
+    expect(pruneDraftEntry(draft({ text: '', mediaDraft }))).toEqual({
+      text: '',
+      preview: null,
+      mediaDraft,
+    });
+  });
+
+  it('keeps mediaDraft with whitespace-only text', () => {
+    expect(pruneDraftEntry(draft({ text: '  ', mediaDraft }))).toEqual({
+      text: '',
+      preview: null,
+      mediaDraft,
+    });
+  });
+
+  it('drops invalid mediaDraft and returns null when text/preview empty', () => {
+    expect(
+      pruneDraftEntry(
+        draft({
+          text: '',
+          mediaDraft: { fileName: 'x' } as unknown as MediaDraftMeta,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('preserves mediaDraft alongside text and preview', () => {
+    expect(
+      pruneDraftEntry(draft({ text: 'caption', preview, mediaDraft })),
+    ).toEqual({
+      text: 'caption',
+      preview,
+      mediaDraft,
+    });
+  });
 });
 
 describe('pruneDrafts', () => {
@@ -203,6 +250,48 @@ describe('pruneDrafts', () => {
       }),
     ).toEqual({
       9: { text: 'x', preview: null, dismissedPreviewUrl: 'https://d.example' },
+    });
+  });
+});
+
+describe('mergeDraftMaps', () => {
+  it('preserves existing recipient drafts not present in incoming', () => {
+    const existing = { 1: draft({ text: 'tab-a' }) };
+    const incoming = { 2: draft({ text: 'tab-b' }) };
+    expect(mergeDraftMaps(existing, incoming)).toEqual({
+      1: { text: 'tab-a', preview: null },
+      2: { text: 'tab-b', preview: null },
+    });
+  });
+
+  it('shallow-merges overlapping recipient drafts (incoming wins per field)', () => {
+    const existing = {
+      1: draft({ text: 'old', preview, dismissedPreviewUrl: 'https://old.example' }),
+    };
+    const incoming = {
+      1: draft({ text: 'new', mediaDraft }),
+    };
+    expect(mergeDraftMaps(existing, incoming)).toEqual({
+      1: {
+        text: 'new',
+        preview: null,
+        dismissedPreviewUrl: 'https://old.example',
+        mediaDraft,
+      },
+    });
+  });
+
+  it('skips non-finite incoming keys', () => {
+    const result = mergeDraftMaps(
+      { 1: draft({ text: 'keep' }) },
+      {
+        NaN: draft({ text: 'nope' }),
+        2: draft({ text: 'ok' }),
+      } as Record<number, DraftEntry>,
+    );
+    expect(result).toEqual({
+      1: { text: 'keep', preview: null },
+      2: { text: 'ok', preview: null },
     });
   });
 });
@@ -300,7 +389,7 @@ describe('saveChatState', () => {
     ).not.toThrow();
   });
 
-  it('overwrites any previously saved state', () => {
+  it('overwrites panel chrome from incoming while preserving existing drafts', () => {
     saveChatState({
       isOpen: true,
       isExpanded: true,
@@ -318,8 +407,121 @@ describe('saveChatState', () => {
       isOpen: false,
       isExpanded: false,
       recipient: null,
-      drafts: {},
+      drafts: {
+        7: { text: 'first', preview: null },
+      },
     });
+  });
+
+  it('deep-merges drafts across sequential saves (Tab A + Tab B)', () => {
+    // Tab A writes draft for user 1
+    saveChatState({
+      isOpen: true,
+      isExpanded: false,
+      recipient: { id: 1, username: 'u1', role: 'user', avatarUrl: null },
+      drafts: { 1: draft({ text: 'from-tab-a' }) },
+    });
+    // Tab B saves draft for user 2 with different panel chrome
+    saveChatState({
+      isOpen: false,
+      isExpanded: true,
+      recipient: { id: 2, username: 'u2', role: 'user', avatarUrl: null },
+      drafts: { 2: draft({ text: 'from-tab-b' }) },
+    });
+
+    expect(JSON.parse(memory.getItem(V2_KEY)!)).toEqual({
+      isOpen: false,
+      isExpanded: true,
+      recipient: { id: 2, username: 'u2', role: 'user', avatarUrl: null },
+      drafts: {
+        1: { text: 'from-tab-a', preview: null },
+        2: { text: 'from-tab-b', preview: null },
+      },
+    });
+  });
+
+  it('persists mediaDraft-only drafts through save/load', () => {
+    saveChatState({
+      isOpen: false,
+      isExpanded: false,
+      recipient: null,
+      drafts: { 3: draft({ text: '', mediaDraft }) },
+    });
+    expect(loadChatState().drafts).toEqual({
+      3: { text: '', preview: null, mediaDraft },
+    });
+  });
+});
+
+describe('subscribeChatStorage', () => {
+  let memory: MemoryStorage;
+
+  beforeEach(() => {
+    memory = createMemoryStorage();
+    vi.stubGlobal('localStorage', memory);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('exports CHAT_STORAGE_KEY matching the v2 key', () => {
+    expect(CHAT_STORAGE_KEY).toBe(V2_KEY);
+  });
+
+  it('invokes onChange with loaded state when another tab writes the key', () => {
+    const onChange = vi.fn();
+    const unsubscribe = subscribeChatStorage(onChange);
+
+    memory.setItem(
+      V2_KEY,
+      JSON.stringify({
+        isOpen: true,
+        isExpanded: false,
+        recipient: null,
+        drafts: { 1: { text: 'from-other-tab', preview: null } },
+      }),
+    );
+
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: V2_KEY,
+        newValue: memory.getItem(V2_KEY),
+        storageArea: localStorage,
+      }),
+    );
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0]![0]).toEqual({
+      isOpen: true,
+      isExpanded: false,
+      recipient: null,
+      drafts: { 1: { text: 'from-other-tab', preview: null } },
+    });
+
+    unsubscribe();
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: V2_KEY,
+        newValue: memory.getItem(V2_KEY),
+        storageArea: localStorage,
+      }),
+    );
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores storage events for other keys', () => {
+    const onChange = vi.fn();
+    const unsubscribe = subscribeChatStorage(onChange);
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: 'unrelated',
+        newValue: '{}',
+        storageArea: localStorage,
+      }),
+    );
+    expect(onChange).not.toHaveBeenCalled();
+    unsubscribe();
   });
 });
 
@@ -521,6 +723,8 @@ describe('loadChatState', () => {
             abc: { text: 'skip-key', preview: null },
             6: { text: 'ok-preview', preview },
             7: { text: 'ok-dismiss', preview: null, dismissedPreviewUrl: 'https://d.com' },
+            8: { text: '', preview: null, mediaDraft },
+            9: { text: '', preview: null, mediaDraft: { fileName: 'x' } },
           },
         }),
       );
@@ -533,6 +737,7 @@ describe('loadChatState', () => {
           preview: null,
           dismissedPreviewUrl: 'https://d.com',
         },
+        8: { text: '', preview: null, mediaDraft },
       });
     });
 

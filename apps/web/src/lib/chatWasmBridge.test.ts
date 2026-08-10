@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest';
 import type { Message } from '@hin/types';
 import {
   applyDelivered,
+  assertChatWasmVersionCompatible,
+  CHAT_WASM_BRIDGE_VERSION,
+  extractFirstUrl,
+  getChatWasmCoreVersion,
   mergeAndSortMessages,
   rubberBand,
   releaseSnap,
@@ -53,5 +57,35 @@ describe('chatWasmBridge TS fallback', () => {
   it('rubberBand + releaseSnap work', () => {
     expect(rubberBand(10, 100)).toBe(10);
     expect(releaseSnap(400, 0.2, true)).toBe('compact');
+  });
+});
+
+/** Documented expectations shared with `crates/hin-chat-core/src/url.rs` tests. */
+const URL_CASES: Array<{ input: string; expected: string | null }> = [
+  { input: 'see https://example.com/item now', expected: 'https://example.com/item' },
+  { input: 'go https://example.com.', expected: 'https://example.com' },
+  { input: 'check example.com please', expected: 'https://example.com' },
+  { input: 'see www.example.com/path now', expected: 'https://www.example.com/path' },
+  { input: 'foo.co.uk/x', expected: 'https://foo.co.uk/x' },
+  { input: 'email me at user@example.com thanks', expected: null },
+  { input: 'shipped 1.2.3 today', expected: null },
+  { input: 'http://a.co/x', expected: 'http://a.co/x' },
+  { input: 'no links here', expected: null },
+];
+
+describe('extractFirstUrl parity (WA-009 / CM-016)', () => {
+  it.each(URL_CASES)('extracts $input', ({ input, expected }) => {
+    expect(extractFirstUrl(input)).toBe(expected);
+  });
+});
+
+describe('WASM version handshake (WA-008)', () => {
+  it('exports bridge version constant', () => {
+    expect(CHAT_WASM_BRIDGE_VERSION).toBe('1');
+  });
+
+  it('treats missing WASM as compatible', () => {
+    expect(getChatWasmCoreVersion()).toBeNull();
+    expect(assertChatWasmVersionCompatible()).toBe(true);
   });
 });

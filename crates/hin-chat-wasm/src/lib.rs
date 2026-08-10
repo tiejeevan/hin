@@ -1,10 +1,13 @@
 use hin_chat_core::{
     apply_delivered as core_apply_delivered, apply_messages_read as core_apply_messages_read,
-    invert_flip_uniform as core_invert_flip_uniform,
+    extract_first_url as core_extract_first_url, invert_flip_uniform as core_invert_flip_uniform,
     merge_and_sort_messages as core_merge_and_sort_messages, release_snap as core_release_snap,
     rubber_band as core_rubber_band, sort_threads as core_sort_threads, ChatEngine, EngineEvent,
     Message, RectLike, DEFAULT_FLICK_DOWN, DEFAULT_FLICK_UP, DEFAULT_SNAP_THRESHOLD,
 };
+
+/// Keep in sync with `CHAT_WASM_BRIDGE_VERSION` in `apps/web/src/lib/chatWasmBridge.ts`.
+const CHAT_CORE_VERSION: &str = "1";
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use wasm_bindgen::prelude::*;
@@ -22,6 +25,16 @@ fn next_id() -> &'static Mutex<u32> {
 #[wasm_bindgen(start)]
 pub fn start() {
     console_error_panic_hook::set_once();
+}
+
+#[wasm_bindgen]
+pub fn chat_core_version() -> String {
+    CHAT_CORE_VERSION.to_string()
+}
+
+#[wasm_bindgen]
+pub fn extract_first_url(text: &str) -> Option<String> {
+    core_extract_first_url(text)
 }
 
 fn js_err(err: impl ToString) -> JsValue {

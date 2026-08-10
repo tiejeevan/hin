@@ -5,6 +5,24 @@ import {
   applyMessagesRead,
   mergeAndSortMessages,
 } from '../lib/chatWasmBridge';
+import {
+  capMessageWindow,
+  excludeDeletedIds,
+  mergeAndSortMessagesExcludingDeleted,
+} from '../lib/chatMessages';
+import { addTombstone, removeTombstone } from '../lib/chatDeleteTombstones';
+
+// App.tsx (Agent 1) should import delete-integrity helpers from:
+//   - '../lib/chatMessages' — excludeDeletedIds, mergeAndSortMessagesExcludingDeleted, capMessageWindow
+//   - '../lib/chatDeleteTombstones' — addTombstone, removeTombstone
+// Re-exported here for hook consumers / incremental migration.
+export {
+  excludeDeletedIds,
+  mergeAndSortMessagesExcludingDeleted,
+  capMessageWindow,
+  addTombstone,
+  removeTombstone,
+};
 
 /**
  * Chat engine helpers + reply draft state.
@@ -34,6 +52,11 @@ export function useChatEngine() {
   const actions = useMemo(
     () => ({
       mergeAndSortMessages,
+      mergeAndSortMessagesExcludingDeleted,
+      excludeDeletedIds,
+      capMessageWindow,
+      addTombstone,
+      removeTombstone,
       applyDelivered,
       applyMessagesRead,
       setReplyTo,

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Copy, Reply, RotateCcw, Trash2 } from 'lucide-react';
 import type { Message } from '@hin/types';
 import { deriveLocalStatus } from '../../lib/chatMessages';
+import { safeMediaUrl } from '../../lib/safeUrl';
 
 export interface MessageActionMenuProps {
   msg: Message;
@@ -11,6 +12,11 @@ export interface MessageActionMenuProps {
   onReply?: (msg: Message) => void;
   onRetry?: (msg: Message) => void;
   onDelete: (msg: Message) => void;
+}
+
+function getMenuItems(menu: HTMLElement | null): HTMLElement[] {
+  if (!menu) return [];
+  return Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
 }
 
 export function MessageActionMenu({
@@ -30,13 +36,54 @@ export function MessageActionMenu({
   const canReply = Boolean(onReply) && msg.id > 0;
 
   useEffect(() => {
+    const items = getMenuItems(menuRef.current);
+    items[0]?.focus();
+
     const handlePointerDown = (e: PointerEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         onClose();
       }
     };
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+
+      const menuItems = getMenuItems(menuRef.current);
+      if (!menuItems.length) return;
+
+      const currentIndex = menuItems.findIndex(el => el === document.activeElement);
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const next = currentIndex < 0 ? 0 : (currentIndex + 1) % menuItems.length;
+        menuItems[next]?.focus();
+        return;
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const next =
+          currentIndex < 0
+            ? menuItems.length - 1
+            : (currentIndex - 1 + menuItems.length) % menuItems.length;
+        menuItems[next]?.focus();
+        return;
+      }
+
+      if (e.key === 'Home') {
+        e.preventDefault();
+        menuItems[0]?.focus();
+        return;
+      }
+
+      if (e.key === 'End') {
+        e.preventDefault();
+        menuItems[menuItems.length - 1]?.focus();
+      }
     };
 
     document.addEventListener('pointerdown', handlePointerDown);
@@ -51,10 +98,11 @@ export function MessageActionMenu({
     if (onCopy) {
       onCopy(msg);
     } else {
+      const safeMedia = safeMediaUrl(msg.mediaUrl);
       const text = msg.content?.trim()
         ? msg.content
-        : msg.mediaUrl
-          ? msg.mediaUrl
+        : safeMedia
+          ? safeMedia
           : 'Photo';
       try {
         await navigator.clipboard.writeText(text);
