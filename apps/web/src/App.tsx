@@ -73,6 +73,7 @@ import {
   getChatLayer,
 } from './lib/chatHistoryLayer';
 import {
+  isWsAccountBlockErrorCode,
   isWsAuthFailureCloseCode,
   isWsAuthFailureMessage,
   shouldReconnectAfterClose,
@@ -1661,6 +1662,10 @@ export default function App() {
       disconnectWS();
       return;
     }
+    if (currentUser.needsEmailVerification || currentUser.needsUsernameSetup) {
+      disconnectWS();
+      return;
+    }
 
     const appendChatMessage = (msg: Message) => {
       setChatMessages(prev =>
@@ -1729,6 +1734,9 @@ export default function App() {
               flushOutboxRef.current?.();
               break;
             case 'error': {
+              if (isWsAccountBlockErrorCode(message.payload?.code)) {
+                break;
+              }
               if (isWsAuthFailureMessage(message.payload?.message)) {
                 handleSessionExpiredRef.current();
               }

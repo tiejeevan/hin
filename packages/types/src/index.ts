@@ -288,6 +288,25 @@ export interface SystemSettings {
   outboundFromEmail: string;
 }
 
+export type RateLimitStorage = 'd1' | 'memory' | 'counter';
+
+export interface RateLimitCatalogEntry {
+  tier: string;
+  scope: string;
+  limitLabel: string;
+  windowLabel: string;
+  appliesTo: string;
+  storage: RateLimitStorage;
+  notes?: string;
+}
+
+export interface RateLimitCatalogResponse {
+  entries: RateLimitCatalogEntry[];
+  adminBypass: string;
+  edgeNote: string;
+  exemptions: string[];
+}
+
 export interface MeBootstrapCounts {
   unreadNotifications: number;
   unreadMessages: number;

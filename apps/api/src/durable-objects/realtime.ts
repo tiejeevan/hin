@@ -9,15 +9,27 @@ import { isBlocked } from '../lib/blocks';
 import { parseFirstUrl, getOrFetchLinkPreview } from '../lib/linkPreview';
 import { isPresenceEnabled } from '../lib/system-settings';
 import { markMessagesReadSet, toMessageDto, loadReplyToMap } from '../lib/messages';
+import { buildWsBucketKey, MemoryRateLimiter } from '../lib/rate-limit-memory';
+import { WS_SEND_MESSAGE, WS_TYPING } from '../lib/rate-limit-policy';
+import {
+  getAccountBlockMessage,
+  getAccountBlockReason,
+  loadUserForAccountGuard,
+} from '../lib/account-guard';
 
 export interface RealtimeSession {
   userId: number;
   username: string;
+  role: string;
   activeChatId: number | null;
+  accountSetupComplete: boolean;
 }
 
 /** Application close code used when JWT join fails. */
 export const AUTH_FAILURE_CLOSE_CODE = 4001;
+
+/** Application close code when account setup (username/email) is incomplete. */
+export const ACCOUNT_SETUP_BLOCKED_CLOSE_CODE = 4002;
 
 export function parseSessionAttachment(raw: unknown): RealtimeSession | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -25,8 +37,11 @@ export function parseSessionAttachment(raw: unknown): RealtimeSession | null {
   if (typeof obj.userId !== 'number' || !Number.isFinite(obj.userId)) return null;
   if (typeof obj.username !== 'string' || !obj.username) return null;
 
+  const role = typeof obj.role === 'string' && obj.role ? obj.role : 'user';
+  const accountSetupComplete = obj.accountSetupComplete === true;
+
   if (obj.activeChatId === null || obj.activeChatId === undefined) {
-    return { userId: obj.userId, username: obj.username, activeChatId: null };
+    return { userId: obj.userId, username: obj.username, role, activeChatId: null, accountSetupComplete };
   }
   if (typeof obj.activeChatId !== 'number' || !Number.isFinite(obj.activeChatId)) {
     return null;
@@ -34,13 +49,16 @@ export function parseSessionAttachment(raw: unknown): RealtimeSession | null {
   return {
     userId: obj.userId,
     username: obj.username,
+    role,
     activeChatId: obj.activeChatId,
+    accountSetupComplete,
   };
 }
 
 export class RealtimeDO implements DurableObject {
   state: DurableObjectState;
   env: Env;
+  private memoryRateLimiter = new MemoryRateLimiter();
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
@@ -61,12 +79,25 @@ export class RealtimeDO implements DurableObject {
     }
   }
 
+  /** Session with completed account setup — required for mutating WS actions. */
+  requireReadySession(ws: WebSocket): RealtimeSession | null {
+    const session = this.getSession(ws);
+    if (!session || !session.accountSetupComplete) return null;
+    return session;
+  }
+
   setSession(ws: WebSocket, session: RealtimeSession): void {
     ws.serializeAttachment({
       userId: session.userId,
       username: session.username,
+      role: session.role,
       activeChatId: session.activeChatId,
+      accountSetupComplete: session.accountSetupComplete,
     });
+  }
+
+  private shouldBypassWsRateLimit(session: RealtimeSession): boolean {
+    return session.role === 'admin';
   }
 
   clearSession(ws: WebSocket): void {
@@ -281,10 +312,31 @@ export class RealtimeDO implements DurableObject {
         const payload = await verify(token, getJwtSecret(this.env), 'HS256');
         const userId = payload.id as number;
         const username = payload.username as string;
+        const role = typeof payload.role === 'string' && payload.role ? payload.role : 'user';
+
+        const guardUser = await loadUserForAccountGuard(db, userId);
+        if (!guardUser) {
+          throw new Error('User not found');
+        }
+        const blockReason = getAccountBlockReason(guardUser);
+        if (blockReason) {
+          const blockMessage = getAccountBlockMessage(blockReason);
+          this.sendSafely(ws, { type: 'error', payload: { message: blockMessage, code: blockReason } });
+          try {
+            ws.close(ACCOUNT_SETUP_BLOCKED_CLOSE_CODE, blockMessage);
+          } catch (_) {}
+          return;
+        }
 
         const presenceOn = await isPresenceEnabled(db);
         const wasOnline = presenceOn ? this.isUserOnline(userId) : true;
-        this.setSession(ws, { userId, username, activeChatId: null });
+        this.setSession(ws, {
+          userId,
+          username,
+          role,
+          activeChatId: null,
+          accountSetupComplete: true,
+        });
 
         this.sendSafely(ws, { type: 'joined', payload: { userId } });
 
@@ -309,7 +361,7 @@ export class RealtimeDO implements DurableObject {
     }
 
     else if (message.type === 'active_chat') {
-      const session = this.getSession(ws);
+      const session = this.requireReadySession(ws);
       if (!session) return;
 
       const recipientId = message.payload?.recipientId;
@@ -339,7 +391,7 @@ export class RealtimeDO implements DurableObject {
     }
 
     else if (message.type === 'send_message') {
-      const session = this.getSession(ws);
+      const session = this.requireReadySession(ws);
       if (!session) return;
 
       const {
@@ -463,6 +515,21 @@ export class RealtimeDO implements DurableObject {
         }
       }
 
+      if (!this.shouldBypassWsRateLimit(session)) {
+        const sendLimit = this.memoryRateLimiter.consume(
+          buildWsBucketKey('send', session.userId),
+          WS_SEND_MESSAGE.limit,
+          WS_SEND_MESSAGE.windowSec,
+        );
+        if (!sendLimit.ok) {
+          this.sendSafely(ws, {
+            type: 'error',
+            payload: { message: 'Too many messages. Slow down.', code: 'rate_limit' },
+          });
+          return;
+        }
+      }
+
       let replyTo: MessageReplyTo | null = null;
       if (replyToMessageId) {
         const parent = await db
@@ -571,7 +638,7 @@ export class RealtimeDO implements DurableObject {
     }
 
     else if (message.type === 'delete_message') {
-      const session = this.getSession(ws);
+      const session = this.requireReadySession(ws);
       if (!session) return;
 
       const rawMessageId = message.payload?.messageId;
@@ -619,7 +686,7 @@ export class RealtimeDO implements DurableObject {
     }
 
     else if (message.type === 'ack_delivered') {
-      const session = this.getSession(ws);
+      const session = this.requireReadySession(ws);
       if (!session) return;
 
       const rawIds = message.payload?.messageIds;
@@ -669,8 +736,17 @@ export class RealtimeDO implements DurableObject {
     }
 
     else if (message.type === 'typing') {
-      const session = this.getSession(ws);
+      const session = this.requireReadySession(ws);
       if (!session) return;
+
+      if (!this.shouldBypassWsRateLimit(session)) {
+        const typingLimit = this.memoryRateLimiter.consume(
+          buildWsBucketKey('typing', session.userId),
+          WS_TYPING.limit,
+          WS_TYPING.windowSec,
+        );
+        if (!typingLimit.ok) return;
+      }
 
       const { receiverId, isTyping } = message.payload;
       this.broadcastToUser(receiverId, {

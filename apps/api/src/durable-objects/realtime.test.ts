@@ -4,6 +4,7 @@ import {
   RealtimeDO,
   parseSessionAttachment,
   AUTH_FAILURE_CLOSE_CODE,
+  ACCOUNT_SETUP_BLOCKED_CLOSE_CODE,
   type RealtimeSession,
 } from './realtime';
 import { JWT_SECRET } from '../lib/auth';
@@ -24,6 +25,17 @@ vi.mock('../lib/system-settings', () => ({
 }));
 
 import { isPresenceEnabled } from '../lib/system-settings';
+
+function readySession(overrides: Partial<RealtimeSession> = {}): RealtimeSession {
+  return {
+    userId: 1,
+    username: 'alice',
+    role: 'user',
+    activeChatId: null,
+    accountSetupComplete: true,
+    ...overrides,
+  };
+}
 
 class MockWebSocket {
   attachment: unknown = null;
@@ -157,8 +169,11 @@ describe('parseSessionAttachment', () => {
     expect(parseSessionAttachment({ userId: 1, username: 'a', activeChatId: null })).toEqual({
       userId: 1,
       username: 'a',
+      role: 'user',
       activeChatId: null,
+      accountSetupComplete: false,
     });
+    expect(parseSessionAttachment(readySession())).toEqual(readySession());
   });
 
   it('rejects invalid shapes', () => {
@@ -196,7 +211,7 @@ describe('RealtimeDO hibernation session routing', () => {
       payload: { token },
     }));
 
-    expect(ws.attachment).toEqual({ userId: 1, username: 'alice', activeChatId: null });
+    expect(ws.attachment).toEqual(readySession({ userId: 1, username: 'alice' }));
     expect(ws.eventsOfType('joined')).toHaveLength(1);
     expect(ws.eventsOfType('presence_snapshot')[0]?.payload).toEqual({ onlineUserIds: [1] });
 
@@ -211,9 +226,84 @@ describe('RealtimeDO hibernation session routing', () => {
     expect(bad.closeCode).toBe(AUTH_FAILURE_CLOSE_CODE);
   });
 
+  it('rejects join for unverified password user with account setup close code', async () => {
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(createDbMock({
+      getQueue: [{
+        needsUsernameSetup: 0,
+        email: 'user@example.com',
+        emailVerifiedAt: null,
+        passwordHash: 'hash',
+        googleId: null,
+      }],
+    }));
+
+    const ws = dob.addSocket();
+    await dob.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({
+      type: 'join',
+      payload: { token: await makeToken(1, 'alice') },
+    }));
+
+    expect(ws.attachment).toBeNull();
+    expect(ws.eventsOfType('joined')).toHaveLength(0);
+    const err = ws.eventsOfType('error')[0];
+    expect(err?.payload).toEqual({
+      message: 'Verify your email to continue',
+      code: 'email_verification_required',
+    });
+    expect(ws.closed).toBe(true);
+    expect(ws.closeCode).toBe(ACCOUNT_SETUP_BLOCKED_CLOSE_CODE);
+  });
+
+  it('rejects join when username setup is required', async () => {
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(createDbMock({
+      getQueue: [{
+        needsUsernameSetup: 1,
+        email: null,
+        emailVerifiedAt: null,
+        passwordHash: 'hash',
+        googleId: null,
+      }],
+    }));
+
+    const ws = dob.addSocket();
+    await dob.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({
+      type: 'join',
+      payload: { token: await makeToken(1, 'alice') },
+    }));
+
+    expect(ws.attachment).toBeNull();
+    expect(ws.eventsOfType('joined')).toHaveLength(0);
+    expect(ws.eventsOfType('error')[0]?.payload).toEqual({
+      message: 'Choose a username to continue',
+      code: 'username_setup_required',
+    });
+    expect(ws.closeCode).toBe(ACCOUNT_SETUP_BLOCKED_CLOSE_CODE);
+  });
+
+  it('allows join for Google-only users without email verification', async () => {
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(createDbMock({
+      getQueue: [{
+        needsUsernameSetup: 0,
+        email: 'user@example.com',
+        emailVerifiedAt: null,
+        passwordHash: '',
+        googleId: 'google-123',
+      }],
+    }));
+
+    const ws = dob.addSocket();
+    await dob.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({
+      type: 'join',
+      payload: { token: await makeToken(1, 'alice') },
+    }));
+
+    expect(ws.attachment).toEqual(readySession({ userId: 1, username: 'alice' }));
+    expect(ws.eventsOfType('joined')).toHaveLength(1);
+  });
+
   it('deduplicates presence and emits user_online only on first socket', async () => {
     const other = dob.addSocket();
-    other.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    other.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     const a1 = dob.addSocket();
     await dob.webSocketMessage(a1 as unknown as WebSocket, JSON.stringify({
@@ -240,9 +330,9 @@ describe('RealtimeDO hibernation session routing', () => {
     const a1 = dob.addSocket();
     const a2 = dob.addSocket();
     const bob = dob.addSocket();
-    a1.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    a2.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    a1.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    a2.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     // During close, the closing socket may still be listed; exclude it in handleClose.
     await dob.handleClose(a1 as unknown as WebSocket);
@@ -263,7 +353,7 @@ describe('RealtimeDO hibernation session routing', () => {
     (isPresenceEnabled as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(false);
 
     const other = dob.addSocket();
-    other.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    other.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     const alice = dob.addSocket();
     await dob.webSocketMessage(alice as unknown as WebSocket, JSON.stringify({
@@ -283,8 +373,8 @@ describe('RealtimeDO hibernation session routing', () => {
     const alice = dob.addSocket();
     const bob = dob.addSocket();
     const unauth = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    alice.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     const notification = makeNotification(2);
     await dob.fetch(new Request('http://realtime/broadcast-notification', {
@@ -300,8 +390,8 @@ describe('RealtimeDO hibernation session routing', () => {
   it('routes batch notifications per user', async () => {
     const alice = dob.addSocket();
     const bob = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    alice.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     await dob.fetch(new Request('http://realtime/broadcast-notifications-batch', {
       method: 'POST',
@@ -318,8 +408,8 @@ describe('RealtimeDO hibernation session routing', () => {
     const alice = dob.addSocket();
     const bob = dob.addSocket();
     const unauth = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    alice.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     await dob.fetch(new Request('http://realtime/broadcast-system-toast', {
       method: 'POST',
@@ -341,9 +431,9 @@ describe('RealtimeDO hibernation session routing', () => {
     const alice = dob.addSocket();
     const aliceTab = dob.addSocket();
     const bob = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    aliceTab.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    alice.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    aliceTab.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     await dob.fetch(new Request('http://realtime/broadcast-user-event', {
       method: 'POST',
@@ -366,9 +456,9 @@ describe('RealtimeDO hibernation session routing', () => {
     const alice = dob.addSocket();
     const bob = dob.addSocket();
     const bobTab = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
-    bobTab.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    alice.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
+    bobTab.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     await dob.handleClientMessage(alice as unknown as WebSocket, {
       type: 'typing',
@@ -400,9 +490,9 @@ describe('RealtimeDO hibernation session routing', () => {
     const alice = dob.addSocket();
     const bob = dob.addSocket();
     const bobTab = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
-    bobTab.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    alice.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
+    bobTab.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     await dob.handleClientMessage(alice as unknown as WebSocket, {
       type: 'send_message',
@@ -442,7 +532,7 @@ describe('RealtimeDO hibernation session routing', () => {
     );
 
     const alice = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
+    alice.serializeAttachment(readySession());
 
     await dob.handleClientMessage(alice as unknown as WebSocket, {
       type: 'send_message',
@@ -483,7 +573,7 @@ describe('RealtimeDO hibernation session routing', () => {
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mock);
 
     const alice = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
+    alice.serializeAttachment(readySession());
 
     await dob.handleClientMessage(alice as unknown as WebSocket, {
       type: 'send_message',
@@ -519,8 +609,8 @@ describe('RealtimeDO hibernation session routing', () => {
 
     const alice = dob.addSocket();
     const bob = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: 1 });
+    alice.serializeAttachment(readySession());
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob', activeChatId: 1 }));
 
     await dob.handleClientMessage(alice as unknown as WebSocket, {
       type: 'send_message',
@@ -573,8 +663,8 @@ describe('RealtimeDO hibernation session routing', () => {
 
     const alice = dob.addSocket();
     const bob = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    alice.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     await dob.handleClientMessage(alice as unknown as WebSocket, {
       type: 'send_message',
@@ -611,7 +701,7 @@ describe('RealtimeDO hibernation session routing', () => {
     );
 
     const alice = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
+    alice.serializeAttachment(readySession());
 
     await dob.handleClientMessage(alice as unknown as WebSocket, {
       type: 'send_message',
@@ -636,9 +726,9 @@ describe('RealtimeDO hibernation session routing', () => {
     const alice = dob.addSocket();
     const bob = dob.addSocket();
     const carol = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
-    carol.serializeAttachment({ userId: 3, username: 'carol', activeChatId: null });
+    alice.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
+    carol.serializeAttachment(readySession({ userId: 3, username: 'carol' }));
 
     await dob.handleClientMessage(alice as unknown as WebSocket, {
       type: 'delete_message',
@@ -667,8 +757,8 @@ describe('RealtimeDO hibernation session routing', () => {
 
     const alice = dob.addSocket();
     const bob = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    alice.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     await dob.handleClientMessage(alice as unknown as WebSocket, {
       type: 'delete_message',
@@ -690,7 +780,7 @@ describe('RealtimeDO hibernation session routing', () => {
     );
 
     const bob = dob.addSocket();
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     await dob.handleClientMessage(bob as unknown as WebSocket, {
       type: 'delete_message',
@@ -711,8 +801,8 @@ describe('RealtimeDO hibernation session routing', () => {
 
     const alice = dob.addSocket();
     const bob = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    alice.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     await dob.handleClientMessage(bob as unknown as WebSocket, {
       type: 'ack_delivered',
@@ -733,15 +823,15 @@ describe('RealtimeDO hibernation session routing', () => {
   it('persists active_chat attachment and fans out read status', async () => {
     const alice = dob.addSocket();
     const bob = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    alice.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     await dob.handleClientMessage(alice as unknown as WebSocket, {
       type: 'active_chat',
       payload: { recipientId: 2 },
     });
 
-    expect(alice.attachment).toEqual({ userId: 1, username: 'alice', activeChatId: 2 });
+    expect(alice.attachment).toEqual(readySession({ activeChatId: 2 }));
     expect(bob.eventsOfType('messages_read')).toEqual([
       expect.objectContaining({
         type: 'messages_read',
@@ -757,7 +847,7 @@ describe('RealtimeDO hibernation session routing', () => {
   it('ignores authenticated actions and broadcasts for unauthenticated sockets', async () => {
     const unauth = dob.addSocket();
     const alice = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
+    alice.serializeAttachment(readySession());
 
     await dob.handleClientMessage(unauth as unknown as WebSocket, {
       type: 'typing',
@@ -796,8 +886,8 @@ describe('RealtimeDO hibernation session routing', () => {
   it('recovers routing exclusively from attachments after simulated re-instantiation', async () => {
     const alice = dob.addSocket();
     const bob = dob.addSocket();
-    alice.serializeAttachment({ userId: 1, username: 'alice', activeChatId: 2 } satisfies RealtimeSession);
-    bob.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    alice.serializeAttachment(readySession({ activeChatId: 2 }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
 
     // Simulate DO wake: new instance, same socket list + attachments only.
     const woken = new TestRealtimeDO(state, env);
@@ -818,8 +908,8 @@ describe('RealtimeDO hibernation session routing', () => {
   it('sendSafely continues fan-out when one socket fails', () => {
     const good = dob.addSocket();
     const bad = dob.addSocket();
-    good.serializeAttachment({ userId: 1, username: 'alice', activeChatId: null });
-    bad.serializeAttachment({ userId: 2, username: 'bob', activeChatId: null });
+    good.serializeAttachment(readySession());
+    bad.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
     bad.failSend = true;
 
     expect(() => dob.broadcastToAll({ type: 'system_toast', payload: { content: 'x' } })).not.toThrow();
@@ -849,5 +939,90 @@ describe('RealtimeDO hibernation session routing', () => {
     }));
     expect(res.status).toBe(101);
     expect(acceptSpy).toHaveBeenCalled();
+  });
+});
+
+describe('RealtimeDO websocket rate limits', () => {
+  let socketsRef: { current: MockWebSocket[] };
+  let state: DurableObjectState;
+  let env: Env;
+  let dob: TestRealtimeDO;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (isPresenceEnabled as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    socketsRef = { current: [] };
+    state = createMockState(socketsRef);
+    env = { DB: {} as D1Database, OLABID_API_KEY: '' } as Env;
+    dob = new TestRealtimeDO(state, env);
+    dob.sockets = socketsRef.current;
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      createDbMock({
+        insertReturning: {
+          id: 99,
+          content: 'spam',
+          createdAt: 123,
+          read: 0,
+          mediaUrl: null,
+          mediaType: null,
+        },
+        receiverUser: { id: 2, username: 'bob' },
+      }),
+    );
+  });
+
+  it('blocks send_message after the per-user limit', async () => {
+    const alice = dob.addSocket();
+    const bob = dob.addSocket();
+    alice.serializeAttachment(readySession());
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
+
+    for (let i = 0; i < 60; i += 1) {
+      await dob.handleClientMessage(alice as unknown as WebSocket, {
+        type: 'send_message',
+        payload: { receiverId: 2, content: `msg-${i}` },
+      });
+    }
+
+    await dob.handleClientMessage(alice as unknown as WebSocket, {
+      type: 'send_message',
+      payload: { receiverId: 2, content: 'blocked' },
+    });
+
+    const errors = alice.eventsOfType('error');
+    expect(errors.at(-1)?.payload).toMatchObject({
+      code: 'rate_limit',
+      message: 'Too many messages. Slow down.',
+    });
+  });
+
+  it('does not rate-limit admin send_message bursts', async () => {
+    const admin = dob.addSocket();
+    admin.serializeAttachment(readySession({ userId: 9, username: 'admin', role: 'admin' }));
+
+    for (let i = 0; i < 65; i += 1) {
+      await dob.handleClientMessage(admin as unknown as WebSocket, {
+        type: 'send_message',
+        payload: { receiverId: 2, content: `admin-${i}` },
+      });
+    }
+
+    expect(admin.eventsOfType('error').filter((e) => e.payload?.code === 'rate_limit')).toHaveLength(0);
+  });
+
+  it('drops typing events after the per-user limit', async () => {
+    const alice = dob.addSocket();
+    const bob = dob.addSocket();
+    alice.serializeAttachment(readySession());
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
+
+    for (let i = 0; i < 31; i += 1) {
+      await dob.handleClientMessage(alice as unknown as WebSocket, {
+        type: 'typing',
+        payload: { receiverId: 2, isTyping: true },
+      });
+    }
+
+    expect(bob.eventsOfType('typing')).toHaveLength(30);
   });
 });

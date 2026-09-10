@@ -4,8 +4,11 @@ import * as schema from '@hin/db';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { searchUsers, searchPosts, searchHashtags, searchMentions } from '../lib/search';
+import { createSearchRateLimitMiddleware } from '../lib/rate-limit-middleware';
 
 const search = new Hono<{ Bindings: Env }>();
+
+search.use('*', createSearchRateLimitMiddleware());
 
 search.get('/', async (c) => {
   const authUser = await getAuthUser(c);

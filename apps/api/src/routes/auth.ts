@@ -51,11 +51,24 @@ import {
   otpExpiresAt,
 } from '../lib/otp';
 import { clientIpFromRequest, consumeRateLimit } from '../lib/rate-limit';
+import {
+  buildBucketKey,
+  resolveClientIp,
+} from '../lib/rate-limit-policy';
+import {
+  createAuthRouteRateLimit,
+  enforceRateLimit,
+  rateLimitExceeded,
+} from '../lib/rate-limit-middleware';
 
 const auth = new Hono<{ Bindings: Env }>();
 
 const USERNAME_AVAILABILITY_LIMIT = 30;
 const USERNAME_AVAILABILITY_WINDOW_SEC = 60;
+const USERNAME_AVAILABILITY_POLICY = {
+  limit: USERNAME_AVAILABILITY_LIMIT,
+  windowSec: USERNAME_AVAILABILITY_WINDOW_SEC,
+};
 
 auth.get('/turnstile-config', async (c) => {
   const db = drizzle(c.env.DB, { schema });
@@ -69,19 +82,17 @@ auth.get('/turnstile-config', async (c) => {
 
 auth.get('/username-available', async (c) => {
   const raw = c.req.query('username') ?? '';
-  const ip = clientIpFromRequest(c.req.raw) ?? 'unknown';
-  const db = drizzle(c.env.DB, { schema });
-
-  const limit = await consumeRateLimit(
-    db,
-    `username_avail:ip:${ip}`,
-    USERNAME_AVAILABILITY_LIMIT,
-    USERNAME_AVAILABILITY_WINDOW_SEC,
+  const ip = resolveClientIp(c.req.raw);
+  const bucketKey = buildBucketKey('username_avail', 'ip', ip);
+  const blocked = await enforceRateLimit(
+    c,
+    bucketKey,
+    USERNAME_AVAILABILITY_POLICY,
+    'Too many checks. Try again shortly.',
   );
-  if (!limit.ok) {
-    return c.json({ available: false, reason: 'Too many checks. Try again shortly.' }, 429);
-  }
+  if (blocked) return blocked;
 
+  const db = drizzle(c.env.DB, { schema });
   const result = await isUsernameAvailable(db, raw);
   return c.json(result);
 });
@@ -137,7 +148,7 @@ async function sendEmailVerificationOtp(
 }
 
 // Register — creates account and sends email OTP (verification required before full access)
-auth.post('/register', async (c) => {
+auth.post('/register', createAuthRouteRateLimit('register'), async (c) => {
   const db = drizzle(c.env.DB, { schema });
   await seedAdminUser(db);
 
@@ -342,7 +353,7 @@ auth.post('/complete-username', async (c) => {
 });
 
 // Login — username or email
-auth.post('/login', async (c) => {
+auth.post('/login', createAuthRouteRateLimit('login'), async (c) => {
   const db = drizzle(c.env.DB, { schema });
   await seedAdminUser(db);
 
@@ -464,7 +475,7 @@ auth.post('/logout', async (c) => {
   return c.json({ success: true });
 });
 
-auth.post('/google', async (c) => {
+auth.post('/google', createAuthRouteRateLimit('google'), async (c) => {
   const clientId = c.env.GOOGLE_CLIENT_ID;
   if (!clientId) {
     return c.json({ error: 'Google sign-in is not configured' }, 503);
@@ -724,7 +735,7 @@ auth.post('/password-reset/verify', async (c) => {
     3600,
   );
   if (!verifyHour.ok) {
-    return c.json({ error: 'Too many attempts. Try again later.' }, 429);
+    return rateLimitExceeded(c, verifyHour, 'Too many attempts. Try again later.');
   }
   const verifyDay = await consumeRateLimit(
     db,
@@ -733,7 +744,7 @@ auth.post('/password-reset/verify', async (c) => {
     86400,
   );
   if (!verifyDay.ok) {
-    return c.json({ error: 'Too many attempts. Try again later.' }, 429);
+    return rateLimitExceeded(c, verifyDay, 'Too many attempts. Try again later.');
   }
 
   let user: typeof schema.users.$inferSelect | undefined;

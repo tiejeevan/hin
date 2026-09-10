@@ -2,7 +2,15 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from './types';
 import { getAuthUser } from './lib/auth';
-import { getAccountBlockReason, isIncompleteAccountPathAllowed } from './lib/account-guard';
+import {
+  getAccountBlockMessage,
+  getAccountBlockReason,
+  isIncompleteAccountPathAllowed,
+} from './lib/account-guard';
+import {
+  createGlobalRateLimitMiddleware,
+  createWriteRateLimitMiddleware,
+} from './lib/rate-limit-middleware';
 import authRoutes from './routes/auth';
 import usersRoutes from './routes/users';
 import mediaRoutes from './routes/media';
@@ -101,6 +109,9 @@ app.use('*', async (c, next) => {
 // Basic test endpoint
 app.get('/', (c) => c.text('Hin API is running!'));
 
+app.use('/api/*', createGlobalRateLimitMiddleware());
+app.use('/api/*', createWriteRateLimitMiddleware());
+
 /** Block incomplete accounts from most API routes until username/email setup finishes. */
 app.use('/api/*', async (c, next) => {
   const pathname = new URL(c.req.url).pathname;
@@ -113,10 +124,7 @@ app.use('/api/*', async (c, next) => {
   }
   const blockReason = getAccountBlockReason(authUser);
   if (blockReason) {
-    const message = blockReason === 'username_setup_required'
-      ? 'Choose a username to continue'
-      : 'Verify your email to continue';
-    return c.json({ error: message, code: blockReason }, 403);
+    return c.json({ error: getAccountBlockMessage(blockReason), code: blockReason }, 403);
   }
   return next();
 });

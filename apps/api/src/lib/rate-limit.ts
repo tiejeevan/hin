@@ -1,6 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '@hin/db';
+import { resolveClientIp } from './rate-limit-policy';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -15,6 +16,20 @@ export type RateLimitResult =
  * This helper uses a rolling window: first hit sets windowEndsAt = now + windowSeconds.
  */
 export async function consumeRateLimit(
+  db: Db,
+  bucketKey: string,
+  limit: number,
+  windowSeconds: number,
+): Promise<RateLimitResult> {
+  try {
+    return await consumeRateLimitInner(db, bucketKey, limit, windowSeconds);
+  } catch (e) {
+    console.error('Rate limit check failed (fail-open):', e);
+    return { ok: true, remaining: limit };
+  }
+}
+
+async function consumeRateLimitInner(
   db: Db,
   bucketKey: string,
   limit: number,
@@ -57,9 +72,6 @@ export async function consumeRateLimit(
 }
 
 export function clientIpFromRequest(req: Request): string | null {
-  return (
-    req.headers.get('CF-Connecting-IP') ??
-    req.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ??
-    null
-  );
+  const ip = resolveClientIp(req);
+  return ip === 'unknown' ? null : ip;
 }

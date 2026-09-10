@@ -36,6 +36,7 @@ import {
   otpExpiresAt,
 } from '../lib/otp';
 import { clientIpFromRequest, consumeRateLimit } from '../lib/rate-limit';
+import { rateLimitExceeded } from '../lib/rate-limit-middleware';
 
 const emailRoutes = new Hono<{ Bindings: Env }>();
 
@@ -131,10 +132,7 @@ emailRoutes.post('/request', async (c) => {
     OTP_RESEND_COOLDOWN_SECONDS,
   );
   if (!cooldown.ok) {
-    return c.json(
-      { error: 'Please wait before requesting another code', retryAfterSeconds: cooldown.retryAfterSeconds },
-      429,
-    );
+    return rateLimitExceeded(c, cooldown, 'Please wait before requesting another code');
   }
 
   const limits = await Promise.all([
@@ -149,10 +147,7 @@ emailRoutes.post('/request', async (c) => {
 
   for (const limit of limits) {
     if (!limit.ok) {
-      return c.json(
-        { error: 'Too many requests', retryAfterSeconds: limit.retryAfterSeconds },
-        429,
-      );
+      return rateLimitExceeded(c, limit);
     }
   }
 
@@ -234,18 +229,12 @@ emailRoutes.post('/verify', async (c) => {
 
   const ipLimitHour = await consumeRateLimit(db, `otp_verify:ip:${ip}:h`, OTP_VERIFY_IP_PER_HOUR, 3600);
   if (!ipLimitHour.ok) {
-    return c.json(
-      { error: 'Too many requests', retryAfterSeconds: ipLimitHour.retryAfterSeconds },
-      429,
-    );
+    return rateLimitExceeded(c, ipLimitHour);
   }
 
   const ipLimitDay = await consumeRateLimit(db, `otp_verify:ip:${ip}:d`, OTP_VERIFY_IP_PER_DAY, 86400);
   if (!ipLimitDay.ok) {
-    return c.json(
-      { error: 'Too many requests', retryAfterSeconds: ipLimitDay.retryAfterSeconds },
-      429,
-    );
+    return rateLimitExceeded(c, ipLimitDay);
   }
 
   const nowIso = new Date().toISOString();

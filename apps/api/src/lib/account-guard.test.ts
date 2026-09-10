@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getAccountBlockMessage,
   getAccountBlockReason,
   isAccountSetupComplete,
   userNeedsEmailVerification,
@@ -37,6 +38,13 @@ describe('userNeedsEmailVerification', () => {
       email: 'user@example.com',
       emailVerifiedAt: null,
     })).toBe(false);
+  });
+});
+
+describe('getAccountBlockMessage', () => {
+  it('returns user-facing messages for each block reason', () => {
+    expect(getAccountBlockMessage('username_setup_required')).toBe('Choose a username to continue');
+    expect(getAccountBlockMessage('email_verification_required')).toBe('Verify your email to continue');
   });
 });
 

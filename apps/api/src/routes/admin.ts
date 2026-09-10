@@ -23,6 +23,7 @@ import { isNotificationEnabled, toPublicSettings } from '../lib/user-settings';
 import { listReports, reviewReport } from '../lib/reports';
 import { softDeleteUser, reinstateUser, computeAccountStatus } from '../lib/user-lifecycle';
 import { getSystemSettings, updateSystemSettings } from '../lib/system-settings';
+import { getRateLimitCatalog } from '../lib/rate-limit-catalog';
 import { broadcastToAll } from '../lib/realtime';
 import { writeAuditLog } from '../lib/audit';
 import { sendWebPushBatch } from '../lib/push';
@@ -493,6 +494,15 @@ admin.post('/reset-data', async (c) => {
   });
 
   return c.json({ success: true, customersDeleted, adminsRemaining });
+});
+
+admin.get('/rate-limits', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  return c.json(getRateLimitCatalog());
 });
 
 admin.get('/settings', async (c) => {

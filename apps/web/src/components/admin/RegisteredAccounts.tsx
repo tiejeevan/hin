@@ -15,10 +15,12 @@ import {
 } from 'lucide-react';
 import { User as UserType, AccountStatus } from '@hin/types';
 import { AdminData } from '../../types/ui';
+import { AdminRateLimitsPanel } from './AdminRateLimitsPanel';
 
 interface RegisteredAccountsProps {
   adminData: AdminData;
   currentUser: UserType;
+  token: string;
   onImpersonateUser: (userId: number) => void;
   onUpdateUserRole: (userId: number, currentRole: 'user' | 'admin') => void;
   onDeleteUser: (userId: number, username: string) => void;
@@ -208,6 +210,7 @@ function UserIdentity({ user }: { user: UserType }) {
 export function RegisteredAccounts({
   adminData,
   currentUser,
+  token,
   onImpersonateUser,
   onUpdateUserRole,
   onDeleteUser,
@@ -340,6 +343,11 @@ export function RegisteredAccounts({
           <p className="text-[10px] text-text-muted font-semibold uppercase">DMs Sent</p>
           <p className="text-xl font-bold text-violet-400 mt-1">{adminData.stats.messages}</p>
         </div>
+      </div>
+
+      <div className="bg-bg-primary/20 border border-border-custom rounded-xl p-3 space-y-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">API rate limits</p>
+        <AdminRateLimitsPanel token={token} />
       </div>
 
       <button

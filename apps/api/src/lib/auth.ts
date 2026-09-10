@@ -16,13 +16,46 @@ export function getJwtSecret(env?: { JWT_SECRET?: string }): string {
 /** @deprecated Prefer getJwtSecret(env). Kept for tests that sign without env. */
 export const JWT_SECRET = JWT_SECRET_DEV_FALLBACK;
 
-// Helper to get authenticated user from JWT token
-export async function getAuthUser(c: Context<{ Bindings: Env }>): Promise<any | null> {
+export type JwtClaims = {
+  id: number;
+  role: string;
+};
+
+function parseBearerToken(c: Context<{ Bindings: Env }>): string | null {
   const authHeader = c.req.header('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return null;
   }
-  const token = authHeader.substring(7);
+  return authHeader.substring(7);
+}
+
+/** Verify JWT and return claims without a D1 lookup (for rate-limit bypass). */
+export async function getJwtClaims(c: Context<{ Bindings: Env }>): Promise<JwtClaims | null> {
+  const token = parseBearerToken(c);
+  if (!token) return null;
+
+  try {
+    const payload = await verify(token, getJwtSecret(c.env), 'HS256');
+    const id = payload.id;
+    const role = payload.role;
+    if (typeof id !== 'number' || !Number.isFinite(id)) return null;
+    if (typeof role !== 'string' || !role) return null;
+    return { id, role };
+  } catch {
+    return null;
+  }
+}
+
+export function isAdminJwtClaims(claims: JwtClaims | null): boolean {
+  return claims?.role === 'admin';
+}
+
+// Helper to get authenticated user from JWT token
+export async function getAuthUser(c: Context<{ Bindings: Env }>): Promise<any | null> {
+  const token = parseBearerToken(c);
+  if (!token) {
+    return null;
+  }
   try {
     const payload = await verify(token, getJwtSecret(c.env), 'HS256');
     const db = drizzle(c.env.DB, { schema });
