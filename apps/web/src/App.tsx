@@ -81,7 +81,9 @@ import { AppShell } from './components/layout/AppShell';
 import { AppHeader } from './components/layout/AppHeader';
 import { GuestHeader } from './components/layout/GuestHeader';
 import { ImpersonationBanner } from './components/layout/ImpersonationBanner';
-import { AuthForm } from './components/auth/AuthForm';
+import { AuthLanding } from './components/auth/AuthLanding';
+import { UsernameSetupGate } from './components/auth/UsernameSetupGate';
+import { EmailVerificationGate } from './components/auth/EmailVerificationGate';
 import { FeedView } from './components/feed/FeedView';
 import { PostView } from './components/feed/PostView';
 import { AdminDashboard } from './components/admin/AdminDashboard';
@@ -148,6 +150,7 @@ export default function App() {
 
   const [isRegisterMode, setIsRegisterMode] = useState(false);
   const [usernameInput, setUsernameInput] = useState('');
+  const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(false);
@@ -837,6 +840,22 @@ export default function App() {
         setGamificationEnabled(!!data.gamificationEnabled);
         setMyGamification(data.g ?? null);
         setIntroWalkthroughCompleted(!!data.introWalkthroughCompleted);
+        if (data.needsUsernameSetup !== undefined || data.needsEmailVerification !== undefined) {
+          setCurrentUser((prev) => {
+            if (!prev) return prev;
+            const updatedUser = {
+              ...prev,
+              ...(data.needsUsernameSetup !== undefined
+                ? { needsUsernameSetup: data.needsUsernameSetup }
+                : {}),
+              ...(data.needsEmailVerification !== undefined
+                ? { needsEmailVerification: data.needsEmailVerification }
+                : {}),
+            };
+            localStorage.setItem('hin_user', JSON.stringify(updatedUser));
+            return updatedUser;
+          });
+        }
       }
     } catch (e) {
       console.error('Error fetching bootstrap:', e);
@@ -1152,6 +1171,10 @@ export default function App() {
   }, [feedNextCursor, token, feedMode, activeHashtag]);
 
   const handleFeedModeChange = (mode: FeedMode) => {
+    if (!token && mode !== 'all' && mode !== 'explore') {
+      handleGuestSignIn();
+      return;
+    }
     if (mode === feedMode) return;
     setFeedMode(mode);
     setPosts([]);
@@ -1413,8 +1436,14 @@ export default function App() {
     }
   };
 
-  const handleGuestSignIn = () => {
+  const handleGuestSignIn = (opts?: { register?: boolean }) => {
     setShowGuestAuth(true);
+    if (opts?.register) setIsRegisterMode(true);
+    else setIsRegisterMode(false);
+    if (activeTab !== 'feed') {
+      setActiveTab('feed');
+      syncUrl({ view: 'home' }, true);
+    }
     sessionStorage.setItem('hin_return_url', window.location.pathname + window.location.hash);
   };
 
@@ -1608,6 +1637,11 @@ export default function App() {
       setIntroWalkthroughCompleted(null);
     }
   }, [token]);
+
+  useEffect(() => {
+    if (token || activeTab !== 'feed' || showGuestAuth) return;
+    fetchPosts({ mode: feedMode, hashtag: activeHashtag });
+  }, [token, activeTab, showGuestAuth]);
 
   const sendActiveChat = () => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN || !wsReadyRef.current) return;
@@ -2311,6 +2345,7 @@ export default function App() {
     localStorage.setItem('hin_token', data.token);
     localStorage.setItem('hin_user', JSON.stringify(data.user));
     setUsernameInput('');
+    setEmailInput('');
     setPasswordInput('');
     setAuthError(null);
     setShowGuestAuth(false);
@@ -2341,6 +2376,10 @@ export default function App() {
       setAuthError('Please fill in all fields');
       return;
     }
+    if (isRegisterMode && !emailInput.trim()) {
+      setAuthError('Email is required');
+      return;
+    }
     setAuthError(null);
     setIsAuthLoading(true);
     const path = isRegisterMode ? '/api/auth/register' : '/api/auth/login';
@@ -2352,6 +2391,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: usernameInput.trim(),
+          ...(isRegisterMode ? { email: emailInput.trim() } : {}),
           password: passwordInput,
           clientLocalTime: new Date().toISOString(),
           sessionId,
@@ -4401,9 +4441,7 @@ export default function App() {
     addToast('Data reset complete. Admin accounts remain.', 'system', undefined, { skipPrefCheck: true });
   };
 
-  const isGuestPostView = !currentUser && activeTab === 'post';
-  const isGuestProfileView = !currentUser && activeTab === 'profile';
-  const showAuthOnly = !currentUser && !isGuestPostView && !isGuestProfileView;
+  const showGuestAuthPage = !currentUser && showGuestAuth && activeTab === 'feed';
 
   const effectiveSettings: UserSettings = userSettings ?? {
     ...DEFAULT_USER_SETTINGS,
@@ -4422,7 +4460,7 @@ export default function App() {
   }, []);
 
   const walkthrough = useIntroWalkthrough({
-    enabled: !!currentUser && activeTab === 'feed' && !showAuthOnly,
+    enabled: !!currentUser && activeTab === 'feed' && !showGuestAuthPage,
     token,
     serverCompleted: introWalkthroughCompleted,
     getHeaders,
@@ -4446,7 +4484,7 @@ export default function App() {
       profileUser?.id === currentUser.id &&
       !profileLoading &&
       !currentUser.profileCompletedAt &&
-      !showAuthOnly,
+      !showGuestAuthPage,
     feedIntroActive: walkthrough.isActive,
     isProfileEditing,
     setIsProfileEditing,
@@ -4464,7 +4502,22 @@ export default function App() {
   return (
     <AppShell
       overlay={
-        walkthrough.isActive ? (
+        currentUser?.needsUsernameSetup && token ? (
+          <UsernameSetupGate
+            token={token}
+            onComplete={(data) => completeAuthSuccess(data)}
+          />
+        ) : currentUser?.needsEmailVerification && token ? (
+          <EmailVerificationGate
+            token={token}
+            user={currentUser}
+            onComplete={(user) => {
+              setCurrentUser(user);
+              localStorage.setItem('hin_user', JSON.stringify(user));
+            }}
+            onBack={handleLogout}
+          />
+        ) : walkthrough.isActive ? (
           <IntroWalkthrough
             steps={INTRO_WALKTHROUGH_STEPS}
             stepIndex={walkthrough.stepIndex}
@@ -4564,8 +4617,12 @@ export default function App() {
         ) : undefined
       }
       header={
-        isGuestPostView || isGuestProfileView ? (
-          <GuestHeader onSignIn={handleGuestSignIn} onGoHome={() => goHome()} />
+        !currentUser ? (
+          <GuestHeader
+            onSignIn={() => handleGuestSignIn()}
+            onRegister={() => handleGuestSignIn({ register: true })}
+            onGoHome={() => goHome()}
+          />
         ) : currentUser ? (
           <AppHeader
             currentUser={currentUser}
@@ -4602,15 +4659,17 @@ export default function App() {
       }
     >
       <section className="flex-grow flex flex-col min-w-0 min-h-0 bg-bg-primary/40 relative">
-        {showAuthOnly ? (
-          <AuthForm
+        {showGuestAuthPage ? (
+          <AuthLanding
             isRegisterMode={isRegisterMode}
             usernameInput={usernameInput}
+            emailInput={emailInput}
             passwordInput={passwordInput}
             authError={authError}
             isAuthLoading={isAuthLoading}
             onSubmit={handleAuthSubmit}
             onUsernameChange={setUsernameInput}
+            onEmailChange={setEmailInput}
             onPasswordChange={setPasswordInput}
             onToggleMode={() => {
               setIsRegisterMode(!isRegisterMode);
@@ -4648,6 +4707,7 @@ export default function App() {
             showGuestAuth={showGuestAuth}
             isRegisterMode={isRegisterMode}
             usernameInput={usernameInput}
+            emailInput={emailInput}
             passwordInput={passwordInput}
             authError={authError}
             isAuthLoading={isAuthLoading}
@@ -4655,6 +4715,7 @@ export default function App() {
             onSignIn={handleGuestSignIn}
             onAuthSubmit={handleAuthSubmit}
             onUsernameChange={setUsernameInput}
+            onEmailChange={setEmailInput}
             onPasswordChange={setPasswordInput}
             onToggleAuthMode={() => {
               setIsRegisterMode(!isRegisterMode);
@@ -4797,6 +4858,7 @@ export default function App() {
             showGuestAuth={showGuestAuth}
             isRegisterMode={isRegisterMode}
             usernameInput={usernameInput}
+            emailInput={emailInput}
             passwordInput={passwordInput}
             authError={authError}
             isAuthLoading={isAuthLoading}
@@ -4804,6 +4866,7 @@ export default function App() {
             onSignIn={handleGuestSignIn}
             onAuthSubmit={handleAuthSubmit}
             onUsernameChange={setUsernameInput}
+            onEmailChange={setEmailInput}
             onPasswordChange={setPasswordInput}
             onToggleAuthMode={() => {
               setIsRegisterMode(!isRegisterMode);
@@ -4884,14 +4947,16 @@ export default function App() {
             gamificationEnabled={gamificationEnabled}
             onToggleEquipBadge={gamificationEnabled ? handleToggleEquipBadge : undefined}
           />
-        ) : currentUser && activeTab === 'feed' ? (
+        ) : activeTab === 'feed' ? (
           <FeedView
             posts={posts}
             currentUser={currentUser}
+            readOnly={!currentUser}
+            onSignInRequired={() => handleGuestSignIn()}
             showNewPostForm={showNewPostForm}
             newPostContent={newPostContent}
             postSeedPreview={postSeedPreview}
-            token={token!}
+            token={token}
             newlyCreatedPostId={newlyCreatedPostId}
             expandedComments={expandedComments}
             postComments={postComments}

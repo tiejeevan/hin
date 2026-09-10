@@ -4,34 +4,43 @@ import { GOOGLE_CLIENT_ID, TURNSTILE_SITE_KEY, API_URL } from '../../config';
 import { GoogleSignInButton } from './GoogleSignInButton';
 import { TurnstileWidget, type TurnstileWidgetHandle } from './TurnstileWidget';
 import { ForgotPasswordForm } from './ForgotPasswordForm';
+import { UsernameField } from './UsernameField';
 
 interface AuthFormProps {
+  /** When true, renders only the card (for AuthLanding split layout). */
+  embedded?: boolean;
   isRegisterMode: boolean;
   usernameInput: string;
+  emailInput: string;
   passwordInput: string;
   authError: string | null;
   isAuthLoading: boolean;
   onSubmit: (e: React.FormEvent, turnstileToken?: string) => void;
   onUsernameChange: (value: string) => void;
+  onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onToggleMode: () => void;
   onGoogleCredential?: (credential: string) => void;
 }
 
 export function AuthForm({
+  embedded = false,
   isRegisterMode,
   usernameInput,
+  emailInput,
   passwordInput,
   authError,
   isAuthLoading,
   onSubmit,
   onUsernameChange,
+  onEmailChange,
   onPasswordChange,
   onToggleMode,
   onGoogleCredential,
 }: AuthFormProps) {
   const showGoogleSignIn = !!GOOGLE_CLIENT_ID && !!onGoogleCredential;
   const [turnstileEnabledSetting, setTurnstileEnabledSetting] = useState(false);
+  const [strictPassword, setStrictPassword] = useState(false);
   const [forgotMode, setForgotMode] = useState(false);
 
   useEffect(() => {
@@ -40,11 +49,15 @@ export function AuthForm({
       try {
         const res = await fetch(`${API_URL}/api/auth/turnstile-config`);
         if (!res.ok) throw new Error();
-        const data = await res.json() as { turnstileEnabled: boolean };
+        const data = await res.json() as {
+          turnstileEnabled: boolean;
+          strictPasswordRequirements?: boolean;
+        };
         if (!cancelled) {
           setTurnstileEnabledSetting(data.turnstileEnabled);
+          setStrictPassword(!!data.strictPasswordRequirements);
         }
-      } catch (e) {
+      } catch {
         // Fallback to disabled
       }
     })();
@@ -58,7 +71,6 @@ export function AuthForm({
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileError, setTurnstileError] = useState<string | null>(null);
 
-  // Reset the challenge after a failed auth attempt so the (single-use) token isn't reused.
   useEffect(() => {
     if (authError) {
       turnstileRef.current?.reset();
@@ -80,8 +92,13 @@ export function AuthForm({
     return <ForgotPasswordForm onBack={() => setForgotMode(false)} />;
   }
 
-  return (
-    <div className="flex-grow flex flex-col items-center justify-center p-4 bg-radial from-indigo-900/10 via-transparent to-transparent">
+  const passwordHint = isRegisterMode
+    ? (strictPassword
+      ? 'At least 8 characters with 3 of: upper, lower, number, symbol'
+      : 'Any password with at least 1 character')
+    : null;
+
+  const card = (
       <div className="max-w-md w-full bg-bg-secondary border border-border-custom rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
 
@@ -94,8 +111,8 @@ export function AuthForm({
           </h2>
           <p className="text-xs text-text-muted mt-2">
             {isRegisterMode
-              ? 'Register a secure username and password'
-              : 'Sign in to access secure real-time messaging'}
+              ? 'Register with a unique username, email, and password'
+              : 'Sign in with your username or email'}
           </p>
         </div>
 
@@ -120,17 +137,42 @@ export function AuthForm({
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-text-secondary mb-1.5">Username</label>
-            <input
-              type="text"
-              required
-              placeholder="Enter username"
+          {isRegisterMode ? (
+            <UsernameField
               value={usernameInput}
-              onChange={e => onUsernameChange(e.target.value)}
-              className="w-full bg-bg-primary border border-border-custom rounded-xl px-4 py-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
+              onChange={onUsernameChange}
+              disabled={isAuthLoading}
             />
-          </div>
+          ) : (
+            <div>
+              <label className="block text-xs font-semibold text-text-secondary mb-1.5">Username or email</label>
+              <input
+                type="text"
+                required
+                autoComplete="username"
+                placeholder="username or you@example.com"
+                value={usernameInput}
+                onChange={e => onUsernameChange(e.target.value)}
+                className="w-full bg-bg-primary border border-border-custom rounded-xl px-4 py-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
+              />
+            </div>
+          )}
+
+          {isRegisterMode && (
+            <div>
+              <label className="block text-xs font-semibold text-text-secondary mb-1.5">Email</label>
+              <input
+                type="email"
+                required
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={emailInput}
+                onChange={e => onEmailChange(e.target.value)}
+                className="w-full bg-bg-primary border border-border-custom rounded-xl px-4 py-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
+              />
+            </div>
+          )}
+
           <div>
             <div className="flex items-center justify-between mb-1.5 gap-2">
               <label className="block text-xs font-semibold text-text-secondary">Password</label>
@@ -147,12 +189,17 @@ export function AuthForm({
             <input
               type="password"
               required
+              autoComplete={isRegisterMode ? 'new-password' : 'current-password'}
               placeholder="••••••••"
               value={passwordInput}
               onChange={e => onPasswordChange(e.target.value)}
               className="w-full bg-bg-primary border border-border-custom rounded-xl px-4 py-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
             />
+            {passwordHint && (
+              <p className="mt-1.5 text-[10px] text-text-muted">{passwordHint}</p>
+            )}
           </div>
+
           {turnstileRequired && (
             <TurnstileWidget
               ref={turnstileRef}
@@ -182,6 +229,15 @@ export function AuthForm({
           </button>
         </div>
       </div>
+  );
+
+  if (embedded) {
+    return card;
+  }
+
+  return (
+    <div className="flex-grow flex flex-col items-center justify-center p-4 bg-radial from-indigo-900/10 via-transparent to-transparent">
+      {card}
     </div>
   );
 }

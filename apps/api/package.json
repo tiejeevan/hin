@@ -15,6 +15,7 @@
     "@hin/db": "*",
     "@hin/types": "*",
     "bcryptjs": "^2.4.3",
+    "cloudflare-smtp": "^0.1.2",
     "hono": "^4.4.2"
   },
   "devDependencies": {

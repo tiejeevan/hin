@@ -11,6 +11,8 @@ import {
   settingsRowUpdatesFromPatch,
 } from '../lib/user-settings';
 import { UpdateUserSettingsSchema, DeleteAccountSchema, ChangePasswordSchema } from '@hin/types';
+import { validatePassword } from '../lib/auth-validation';
+import { getSystemSettings } from '../lib/system-settings';
 import { softDeleteUser, verifyPassword } from '../lib/user-lifecycle';
 import { toGamificationPublic, emptyGamificationPublic } from '../lib/gamification/public';
 import { isGamificationEnabled } from '../lib/gamification/settings';
@@ -130,6 +132,12 @@ users.post('/me/password', async (c) => {
 
   if (currentPassword === newPassword) {
     return c.json({ error: 'New password must be different from the current password' }, 400);
+  }
+
+  const settings = await getSystemSettings(db);
+  const passwordError = validatePassword(newPassword, settings.strictPasswordRequirements);
+  if (passwordError) {
+    return c.json({ error: passwordError }, 400);
   }
 
   const passwordHash = await bcrypt.hash(newPassword, 10);

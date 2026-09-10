@@ -21,7 +21,7 @@ import {
   isIntroWalkthroughCompleted,
   resetIntroWalkthrough,
 } from '../lib/intro-walkthrough';
-import { toPublicUser } from '../lib/users';
+import { toPublicUser, toSelfUser } from '../lib/users';
 
 const me = new Hono<{ Bindings: Env }>();
 
@@ -71,6 +71,7 @@ me.get('/bootstrap', async (c) => {
       : Promise.resolve(null),
   ]);
 
+  const self = toSelfUser(authUser);
   const payload: MeBootstrap = {
     followingIds,
     blockedIds,
@@ -84,6 +85,8 @@ me.get('/bootstrap', async (c) => {
     },
     introWalkthroughCompleted,
     gamificationEnabled,
+    needsUsernameSetup: self.needsUsernameSetup,
+    needsEmailVerification: self.needsEmailVerification,
     ...(gamificationEnabled && gamification ? { g: gamification } : {}),
   };
 

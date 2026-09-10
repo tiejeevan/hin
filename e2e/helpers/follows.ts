@@ -50,14 +50,43 @@ export async function switchFeedMode(page: Page, mode: 'Everyone' | 'Following' 
   await page.getByRole('menuitem', { name: mode, exact: true }).click();
 }
 
-export async function registerViaApi(username: string, password: string): Promise<{ token: string; userId: number }> {
+function uniqueRegisterEmail(prefix = 'e2e') {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}@example.com`;
+}
+
+export async function verifyRegistrationViaApi(token: string, code: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/auth/verify-registration`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error(`Verify registration failed: ${await res.text()}`);
+}
+
+export async function registerViaApi(
+  username: string,
+  password: string,
+  email?: string,
+): Promise<{ token: string; userId: number }> {
   const res = await fetch(`${API_URL}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({
+      username,
+      email: email ?? uniqueRegisterEmail(),
+      password,
+    }),
   });
   if (!res.ok) throw new Error(`Register failed: ${await res.text()}`);
   const data = await res.json();
+  if (data.devVerificationCode) {
+    await verifyRegistrationViaApi(data.token, data.devVerificationCode);
+  } else if (!data.registrationComplete && data.user?.needsEmailVerification) {
+    throw new Error('Registration requires email verification; configure OCI dev fallback or pass verification flow');
+  }
   return { token: data.token, userId: data.user.id };
 }
 

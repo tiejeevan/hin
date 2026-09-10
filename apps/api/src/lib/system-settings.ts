@@ -49,6 +49,19 @@ const SETTING_REGISTRY = {
     defaultValue: DEFAULT_SYSTEM_SETTINGS.presenceEnabled,
     parse: (raw: string | null) => parseBooleanSetting(raw, DEFAULT_SYSTEM_SETTINGS.presenceEnabled),
   },
+  strictPasswordRequirements: {
+    key: 'strict_password_requirements',
+    defaultValue: DEFAULT_SYSTEM_SETTINGS.strictPasswordRequirements,
+    parse: (raw: string | null) => parseBooleanSetting(raw, DEFAULT_SYSTEM_SETTINGS.strictPasswordRequirements),
+  },
+  outboundFromEmail: {
+    key: 'outbound_from_email',
+    defaultValue: DEFAULT_SYSTEM_SETTINGS.outboundFromEmail,
+    parse: (raw: string | null) => {
+      if (raw === null || raw.trim() === '') return DEFAULT_SYSTEM_SETTINGS.outboundFromEmail;
+      return raw.trim().toLowerCase();
+    },
+  },
 } as const satisfies Record<
   keyof SystemSettings,
   { key: string; defaultValue: number | boolean; parse: (raw: string | null) => number | boolean }

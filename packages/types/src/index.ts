@@ -38,6 +38,37 @@ export interface User {
   emailVerifiedAt?: string | null;
   /** Self-only — true when the account has a password (not Google-only). */
   hasPassword?: boolean;
+  /** Self-only — Google signup must pick a username before using the app. */
+  needsUsernameSetup?: boolean;
+  /** Self-only — password signup must verify email OTP before full access. */
+  needsEmailVerification?: boolean;
+}
+
+export const USERNAME_MIN_LENGTH = 4;
+export const USERNAME_MAX_LENGTH = 30;
+
+export const DEFAULT_OUTBOUND_FROM_EMAIL = 'noreply@hingot.com';
+
+export const HINGOT_OUTBOUND_FROM_SUGGESTIONS = [
+  'support@hingot.com',
+  'noreply@hingot.com',
+  'admin@hingot.com',
+  'info@hingot.com',
+  'hello@hingot.com',
+] as const;
+
+export const HINGOT_EMAIL_DOMAIN = 'hingot.com';
+
+export function isHingotOutboundEmail(email: string): boolean {
+  return email.trim().toLowerCase().endsWith(`@${HINGOT_EMAIL_DOMAIN}`);
+}
+
+export function outboundFromWarnings(email: string): string[] {
+  const normalized = email.trim().toLowerCase();
+  if (!HINGOT_OUTBOUND_FROM_SUGGESTIONS.includes(normalized as typeof HINGOT_OUTBOUND_FROM_SUGGESTIONS[number])) {
+    return ['This address must be an Oracle approved sender for hingot.com or email will fail.'];
+  }
+  return [];
 }
 
 export interface FollowRequest {
@@ -251,6 +282,10 @@ export interface SystemSettings {
    * no presence WS events, no header online count, no chat online/offline indicators.
    */
   presenceEnabled: boolean;
+  /** When true, enforce industry-standard password complexity on register/change/reset. */
+  strictPasswordRequirements: boolean;
+  /** Outbound From address for OTP and system email (must be @hingot.com). */
+  outboundFromEmail: string;
 }
 
 export interface MeBootstrapCounts {
@@ -271,6 +306,9 @@ export interface MeBootstrap {
   gamificationEnabled?: boolean;
   /** Present when user has gamification data to display (read-only when flag is OFF). */
   g?: GamificationPublic;
+  /** Self account setup flags (refreshed on bootstrap). */
+  needsUsernameSetup?: boolean;
+  needsEmailVerification?: boolean;
 }
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -280,6 +318,8 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   turnstileEnabled: false,
   olabidEnabled: true,
   presenceEnabled: false,
+  strictPasswordRequirements: false,
+  outboundFromEmail: DEFAULT_OUTBOUND_FROM_EMAIL,
 };
 
 export function validatePostLimits(
@@ -557,8 +597,17 @@ export const CreateMessageSchema = z.object({
 });
 
 export const RegisterSchema = z.object({
-  username: z.string().min(3, 'Username must be at least 3 characters').max(30, 'Username is too long'),
-  password: z.string().min(6, 'Password must be at least 6 characters').max(50, 'Password is too long'),
+  username: z.string().min(USERNAME_MIN_LENGTH, `Username must be at least ${USERNAME_MIN_LENGTH} characters`).max(USERNAME_MAX_LENGTH, 'Username is too long'),
+  email: z.string().email('Enter a valid email address').max(254),
+  password: z.string().min(1, 'Password is required').max(128, 'Password is too long'),
+});
+
+export const VerifyRegistrationSchema = z.object({
+  code: z.string().regex(/^\d{4}$/, 'Enter the 4-digit code'),
+});
+
+export const CompleteUsernameSchema = z.object({
+  username: z.string().min(USERNAME_MIN_LENGTH, `Username must be at least ${USERNAME_MIN_LENGTH} characters`).max(USERNAME_MAX_LENGTH, 'Username is too long'),
 });
 
 export const LoginSchema = z.object({
@@ -739,7 +788,7 @@ export const DeleteAccountSchema = z.object({
 
 export const ChangePasswordSchema = z.object({
   currentPassword: z.string().min(1, 'Current password is required'),
-  newPassword: z.string().min(6, 'Password must be at least 6 characters').max(50, 'Password is too long'),
+  newPassword: z.string().min(1, 'Password is required').max(128, 'Password is too long'),
 });
 
 export const PasswordResetRequestSchema = z.object({
@@ -757,7 +806,7 @@ export const PasswordResetVerifySchema = z.object({
   username: z.string().min(1).max(40).optional(),
   email: z.string().email().max(254).optional(),
   code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
-  newPassword: z.string().min(6, 'Password must be at least 6 characters').max(50, 'Password is too long'),
+  newPassword: z.string().min(1, 'Password is required').max(128, 'Password is too long'),
 }).refine(
   (v) => !!(v.username?.trim() || v.email?.trim()),
   { message: 'Username or email is required' },
@@ -812,13 +861,17 @@ export const UpdateSystemSettingsSchema = z.object({
   turnstileEnabled: z.boolean().optional(),
   olabidEnabled: z.boolean().optional(),
   presenceEnabled: z.boolean().optional(),
+  strictPasswordRequirements: z.boolean().optional(),
+  outboundFromEmail: z.string().email().max(254).optional(),
 }).refine(
   data => data.maxPinnedPostsPerUser !== undefined
     || data.maxPostLength !== undefined
     || data.maxMediaPerPost !== undefined
     || data.turnstileEnabled !== undefined
     || data.olabidEnabled !== undefined
-    || data.presenceEnabled !== undefined,
+    || data.presenceEnabled !== undefined
+    || data.strictPasswordRequirements !== undefined
+    || data.outboundFromEmail !== undefined,
   { message: 'At least one setting must be provided' },
 );
 

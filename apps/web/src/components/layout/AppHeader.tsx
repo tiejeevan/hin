@@ -1,4 +1,5 @@
 import { LogOut, Search, Shield, User, Gavel } from 'lucide-react';
+import { BrandMark } from './BrandMark';
 import { User as UserType, Notification, type GamificationPublic } from '@hin/types';
 import { NotificationBell } from '../notifications/NotificationBell';
 import { NotificationPanel } from '../notifications/NotificationPanel';
@@ -76,9 +77,7 @@ export function AppHeader({
           className="cursor-pointer rounded-xl hover:opacity-90 transition-opacity"
           aria-label="Go home"
         >
-          <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-text-primary via-text-secondary to-text-muted">
-            Hin
-          </span>
+          <BrandMark size="md" />
         </button>
         {currentUser && typeof onlineCount === 'number' && onlineCount > 0 && (
           <span

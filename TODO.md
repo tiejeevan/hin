@@ -1,0 +1,3 @@
+-> User saw a post as guest and liked that specific post, then app asks for login.
+    -So after login, that post should have been already liked or user should like again?
+->

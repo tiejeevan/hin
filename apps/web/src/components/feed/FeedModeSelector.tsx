@@ -16,9 +16,14 @@ function feedModeLabel(mode: FeedMode): string {
 interface FeedModeSelectorProps {
   feedMode: FeedMode;
   onFeedModeChange: (mode: FeedMode) => void;
+  /** When true, only public feed modes are shown (guest browsing). */
+  guestMode?: boolean;
 }
 
-export function FeedModeSelector({ feedMode, onFeedModeChange }: FeedModeSelectorProps) {
+export function FeedModeSelector({ feedMode, onFeedModeChange, guestMode = false }: FeedModeSelectorProps) {
+  const modes = guestMode
+    ? FEED_MODES.filter(m => m.value === 'all' || m.value === 'explore')
+    : FEED_MODES;
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -73,7 +78,7 @@ export function FeedModeSelector({ feedMode, onFeedModeChange }: FeedModeSelecto
           role="menu"
           className="absolute left-0 top-full mt-2 w-full max-w-xs rounded-2xl border border-border-custom bg-bg-secondary shadow-xl overflow-hidden z-30"
         >
-          {FEED_MODES.map(({ value, label }) => {
+          {modes.map(({ value, label }) => {
             const selected = feedMode === value;
             return (
               <button

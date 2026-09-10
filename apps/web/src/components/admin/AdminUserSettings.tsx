@@ -1,6 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Settings, AlertTriangle } from 'lucide-react';
-import { DEFAULT_SYSTEM_SETTINGS, SYSTEM_SETTING_BOUNDS, SystemSettings } from '@hin/types';
+import {
+  DEFAULT_SYSTEM_SETTINGS,
+  HINGOT_OUTBOUND_FROM_SUGGESTIONS,
+  outboundFromWarnings,
+  SYSTEM_SETTING_BOUNDS,
+  SystemSettings,
+} from '@hin/types';
 import { API_URL } from '../../config';
 
 interface AdminUserSettingsProps {
@@ -14,6 +20,8 @@ type FormState = {
   turnstileEnabled: boolean;
   olabidEnabled: boolean;
   presenceEnabled: boolean;
+  strictPasswordRequirements: boolean;
+  outboundFromEmail: string;
 };
 
 type ConfirmKind = 'turnstile' | 'olabid' | 'presence';
@@ -26,6 +34,8 @@ function settingsToForm(settings: SystemSettings): FormState {
     turnstileEnabled: !!settings.turnstileEnabled,
     olabidEnabled: !!settings.olabidEnabled,
     presenceEnabled: !!settings.presenceEnabled,
+    strictPasswordRequirements: !!settings.strictPasswordRequirements,
+    outboundFromEmail: settings.outboundFromEmail,
   };
 }
 
@@ -36,8 +46,14 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [saveWarnings, setSaveWarnings] = useState<string[]>([]);
   const [confirmKind, setConfirmKind] = useState<ConfirmKind | null>(null);
   const [pendingBoolValue, setPendingBoolValue] = useState(false);
+
+  const outboundWarnings = useMemo(
+    () => outboundFromWarnings(form.outboundFromEmail),
+    [form.outboundFromEmail],
+  );
 
   const openConfirm = (kind: ConfirmKind, nextValue: boolean) => {
     setConfirmKind(kind);
@@ -84,6 +100,8 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
     const turnstileEnabled = form.turnstileEnabled;
     const olabidEnabled = form.olabidEnabled;
     const presenceEnabled = form.presenceEnabled;
+    const strictPasswordRequirements = form.strictPasswordRequirements;
+    const outboundFromEmail = form.outboundFromEmail.trim().toLowerCase();
 
     if (
       Number.isNaN(maxPinnedPostsPerUser)
@@ -113,6 +131,7 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
     setSaving(true);
     setError(null);
     setSuccess(false);
+    setSaveWarnings([]);
     try {
       const res = await fetch(`${API_URL}/api/admin/settings`, {
         method: 'PATCH',
@@ -127,12 +146,16 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
           turnstileEnabled,
           olabidEnabled,
           presenceEnabled,
+          strictPasswordRequirements,
+          outboundFromEmail,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save settings');
-      setSettings(data);
-      setForm(settingsToForm(data));
+      const { warnings, ...savedSettings } = data as SystemSettings & { warnings?: string[] };
+      setSettings(savedSettings);
+      setForm(settingsToForm(savedSettings));
+      setSaveWarnings(warnings ?? []);
       setSuccess(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save settings');
@@ -176,6 +199,13 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
       </p>
       {error && <p className="text-xs text-rose-400">{error}</p>}
       {success && <p className="text-xs text-emerald-400">Settings saved.</p>}
+      {saveWarnings.length > 0 && (
+        <div className="text-xs text-amber-400 space-y-1">
+          {saveWarnings.map((w) => (
+            <p key={w}>{w}</p>
+          ))}
+        </div>
+      )}
 
       <section className="space-y-3">
         <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">User limits</h4>
@@ -217,6 +247,54 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
             className="w-full px-3 py-2 rounded-xl border border-border-custom bg-bg-primary text-sm text-text-primary"
           />
           <span className="text-[10px] text-text-muted">Set to 0 to disable media attachments.</span>
+        </label>
+      </section>
+
+      <section className="space-y-3">
+        <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Email</h4>
+        <label className="block space-y-2 max-w-md">
+          <span className="text-xs font-medium text-text-secondary">Outbound From address</span>
+          <div className="flex gap-2">
+            <select
+              value={HINGOT_OUTBOUND_FROM_SUGGESTIONS.includes(form.outboundFromEmail as typeof HINGOT_OUTBOUND_FROM_SUGGESTIONS[number])
+                ? form.outboundFromEmail
+                : ''}
+              onChange={(e) => {
+                if (e.target.value) {
+                  setForm(prev => ({ ...prev, outboundFromEmail: e.target.value }));
+                }
+              }}
+              className="shrink-0 px-3 py-2 rounded-xl border border-border-custom bg-bg-primary text-sm text-text-primary"
+              aria-label="Suggested outbound From addresses"
+            >
+              <option value="">Custom…</option>
+              {HINGOT_OUTBOUND_FROM_SUGGESTIONS.map((addr) => (
+                <option key={addr} value={addr}>{addr}</option>
+              ))}
+            </select>
+            <input
+              type="email"
+              list="outbound-from-suggestions"
+              value={form.outboundFromEmail}
+              onChange={e => setForm(prev => ({ ...prev, outboundFromEmail: e.target.value }))}
+              placeholder="noreply@hingot.com"
+              className="flex-1 px-3 py-2 rounded-xl border border-border-custom bg-bg-primary text-sm text-text-primary"
+            />
+            <datalist id="outbound-from-suggestions">
+              {HINGOT_OUTBOUND_FROM_SUGGESTIONS.map((addr) => (
+                <option key={addr} value={addr} />
+              ))}
+            </datalist>
+          </div>
+          {outboundWarnings.length > 0 && (
+            <p className="text-[10px] text-amber-400 flex items-start gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              {outboundWarnings[0]}
+            </p>
+          )}
+          <span className="text-[10px] text-text-muted block">
+            Used for registration OTP, email verification, and password reset. Must be an @hingot.com address approved in Oracle.
+          </span>
         </label>
       </section>
 
@@ -274,6 +352,29 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
         <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Security settings</h4>
         <div className="flex items-center justify-between max-w-md p-3.5 rounded-xl border border-border-custom bg-bg-primary">
           <div className="space-y-0.5 pr-3">
+            <span className="text-xs font-medium text-text-secondary block">Strict password requirements</span>
+            <span className="text-[10px] text-text-muted block">
+              When on: min 8 chars and 3 of upper, lower, digit, symbol. When off: any password with at least 1 character.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setForm(prev => ({ ...prev, strictPasswordRequirements: !prev.strictPasswordRequirements }))}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              form.strictPasswordRequirements ? 'bg-indigo-600' : 'bg-zinc-700'
+            }`}
+            aria-pressed={form.strictPasswordRequirements}
+            aria-label="Toggle strict password requirements"
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                form.strictPasswordRequirements ? 'translate-x-4' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+        <div className="flex items-center justify-between max-w-md p-3.5 rounded-xl border border-border-custom bg-bg-primary">
+          <div className="space-y-0.5 pr-3">
             <span className="text-xs font-medium text-text-secondary block">Cloudflare Turnstile</span>
             <span className="text-[10px] text-text-muted block">Enforce bot protection on login/signup.</span>
           </div>
@@ -311,6 +412,8 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
           {' '}{settings.maxMediaPerPost} media file{settings.maxMediaPerPost === 1 ? '' : 's'} per post.
           {' '}Olabid is {settings.olabidEnabled ? 'enabled' : 'disabled'}.
           {' '}Presence is {settings.presenceEnabled ? 'enabled' : 'disabled'}.
+          {' '}Strict passwords are {settings.strictPasswordRequirements ? 'enabled' : 'disabled'}.
+          {' '}Outbound From is {settings.outboundFromEmail}.
           {' '}Cloudflare Turnstile is {settings.turnstileEnabled ? 'enabled' : 'disabled'}.
         </p>
       )}

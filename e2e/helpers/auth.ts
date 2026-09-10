@@ -3,7 +3,12 @@ import { expect, type Page } from '@playwright/test';
 export const DEFAULT_PASSWORD = 'TestPass123!';
 
 export function uniqueUsername(prefix = 'e2e') {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const raw = `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+  return raw.slice(0, 30);
+}
+
+export function uniqueEmail(prefix = 'e2e') {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}@example.com`;
 }
 
 /** Wait until the signed-in chrome is visible (Logout moved into Account menu). */
@@ -19,27 +24,50 @@ export async function dismissWalkthroughIfPresent(page: Page) {
   }
 }
 
+export async function completeEmailVerificationIfPresent(page: Page, code = '0000') {
+  const gate = page.getByRole('heading', { name: 'Verify your email' });
+  if (!(await gate.isVisible().catch(() => false))) return;
+
+  await page.getByPlaceholder('0000').fill(code);
+  await page.getByRole('button', { name: 'Verify email' }).click();
+  await expect(gate).not.toBeVisible({ timeout: 15_000 });
+}
+
 export async function registerUser(
   page: Page,
   username: string,
   password = DEFAULT_PASSWORD,
+  email?: string,
+  verificationCode?: string,
 ) {
+  const userEmail = email ?? uniqueEmail('reg');
   await page.goto('/');
-  await page.getByRole('button', { name: "Don't have an account? Register" }).click();
+  await page.getByRole('button', { name: 'Join free' }).click();
   await page.getByPlaceholder('Enter username').fill(username);
+  await page.getByPlaceholder('you@example.com').fill(userEmail);
   await page.getByPlaceholder('••••••••').fill(password);
   await page.getByRole('button', { name: 'Register Account' }).click();
+
+  const verifyHeading = page.getByRole('heading', { name: 'Verify your email' });
+  if (await verifyHeading.isVisible().catch(() => false)) {
+    if (!verificationCode) {
+      throw new Error('Registration requires email verification; pass verificationCode from devVerificationCode');
+    }
+    await completeEmailVerificationIfPresent(page, verificationCode);
+  }
+
   await expectLoggedIn(page);
   await dismissWalkthroughIfPresent(page);
 }
 
 export async function loginUser(
   page: Page,
-  username: string,
+  identifier: string,
   password = DEFAULT_PASSWORD,
 ) {
   await page.goto('/');
-  await page.getByPlaceholder('Enter username').fill(username);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByPlaceholder('username or you@example.com').fill(identifier);
   await page.getByPlaceholder('••••••••').fill(password);
   await page.getByRole('button', { name: 'Sign In' }).click();
   await expectLoggedIn(page);
@@ -49,5 +77,5 @@ export async function loginUser(
 export async function logoutUser(page: Page) {
   await page.getByRole('button', { name: 'Account menu' }).click();
   await page.getByRole('menuitem', { name: 'Log out' }).click();
-  await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
 }

@@ -43,13 +43,15 @@ interface ProfileViewProps {
   showGuestAuth?: boolean;
   isRegisterMode?: boolean;
   usernameInput?: string;
+  emailInput?: string;
   passwordInput?: string;
   authError?: string | null;
   isAuthLoading?: boolean;
   onBack: () => void;
   onSignIn?: () => void;
-  onAuthSubmit?: (e: React.FormEvent) => void;
+  onAuthSubmit?: (e: React.FormEvent, turnstileToken?: string) => void;
   onUsernameChange?: (value: string) => void;
+  onEmailChange?: (value: string) => void;
   onPasswordChange?: (value: string) => void;
   onToggleAuthMode?: () => void;
   onGoogleCredential?: (credential: string) => void;
@@ -148,6 +150,7 @@ export function ProfileView({
   showGuestAuth,
   isRegisterMode,
   usernameInput,
+  emailInput,
   passwordInput,
   authError,
   isAuthLoading,
@@ -155,6 +158,7 @@ export function ProfileView({
   onSignIn,
   onAuthSubmit,
   onUsernameChange,
+  onEmailChange,
   onPasswordChange,
   onToggleAuthMode,
   onGoogleCredential,
@@ -403,17 +407,19 @@ export function ProfileView({
         </>
       ) : null}
 
-      {showGuestAuth && readOnly && onAuthSubmit && onUsernameChange && onPasswordChange && onToggleAuthMode && (
+      {showGuestAuth && readOnly && onAuthSubmit && onUsernameChange && onEmailChange && onPasswordChange && onToggleAuthMode && (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/60">
           <div className="w-full max-w-sm rounded-2xl border border-border-custom bg-bg-secondary p-6 shadow-xl">
             <AuthForm
               isRegisterMode={!!isRegisterMode}
               usernameInput={usernameInput ?? ''}
+              emailInput={emailInput ?? ''}
               passwordInput={passwordInput ?? ''}
               authError={authError ?? null}
               isAuthLoading={!!isAuthLoading}
               onSubmit={onAuthSubmit}
               onUsernameChange={onUsernameChange}
+              onEmailChange={onEmailChange}
               onPasswordChange={onPasswordChange}
               onToggleMode={onToggleAuthMode}
               onGoogleCredential={onGoogleCredential}

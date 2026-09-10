@@ -11,6 +11,7 @@ import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { toSelfUser } from '../lib/users';
 import { sendOtpEmail } from '../lib/email/resend';
+import { getOutboundFromEmail } from '../lib/email/outbound-from';
 import { isDisposableEmail } from '../lib/email/disposable';
 import { getEmailChangeStatus } from '../lib/email/change-cooldown';
 import {
@@ -57,11 +58,8 @@ emailRoutes.post('/request', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
 
-  const apiKey = c.env.RESEND_API_KEY;
-  const from = c.env.RESEND_FROM_EMAIL;
-  if (!apiKey || !from) {
-    return c.json({ error: 'Email verification is not configured' }, 503);
-  }
+  const db = drizzle(c.env.DB, { schema });
+  const from = await getOutboundFromEmail(db);
 
   const body = await c.req.json().catch(() => null);
   const parsed = RequestEmailVerificationSchema.safeParse(body);
@@ -108,8 +106,6 @@ emailRoutes.post('/request', async (c) => {
       );
     }
   }
-
-  const db = drizzle(c.env.DB, { schema });
 
   const taken = await db.select({ id: schema.users.id })
     .from(schema.users)
@@ -186,7 +182,7 @@ emailRoutes.post('/request', async (c) => {
     ipAddress: ip === 'unknown' ? null : ip,
   });
 
-  const sent = await sendOtpEmail({ apiKey, from, to: email, code });
+  const sent = await sendOtpEmail({ env: c.env, from, to: email, code });
   if (!sent.ok) {
     return c.json({ error: sent.error || 'Failed to send verification email' }, 502);
   }

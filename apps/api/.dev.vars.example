@@ -2,25 +2,32 @@
 # Copy this file to .dev.vars (already gitignored) and fill in your values
 
 # Olabid API Configuration
-# Get this key using HTTP Toolkit by intercepting Olabid app requests
-OLABID_API_KEY=1BAF2123-00D7-421E-B999-FB0B222D6577
+OLABID_API_KEY=
 
 # Cloudflare Turnstile Configuration (optional for local dev)
 TURNSTILE_SECRET_KEY=
 
-# Resend email verification
-# Create an API key at https://resend.com — never commit the real key
-RESEND_API_KEY=
-# Must be a verified sender/domain in Resend (e.g. Hin <noreply@yourdomain.com>)
-RESEND_FROM_EMAIL=
+# Oracle Cloud Email Delivery (SMTP — hingot.com, us-chicago-1)
+OCI_SMTP_HOST=smtp.email.us-chicago-1.oci.oraclecloud.com
+OCI_SMTP_PORT=587
+OCI_SMTP_USERNAME=
+OCI_SMTP_PASSWORD=
+
+# Optional: Oracle HTTPS submit API (future; not used when SMTP is configured)
+# OCI_TENANCY_OCID=
+# OCI_USER_OCID=
+# OCI_FINGERPRINT=
+# OCI_PRIVATE_KEY=
+# OCI_COMPARTMENT_OCID=
+# OCI_EMAIL_SUBMIT_ENDPOINT=
+
 # Optional pepper for OTP hashing (use a long random string in prod)
 OTP_PEPPER=
 
 # JWT signing secret (required in production via `wrangler secret put JWT_SECRET`)
 JWT_SECRET=
 
-# Web Push VAPID (generate once; private key is a Worker secret in production)
-# Example: npx web-push generate-vapid-keys
+# Web Push VAPID
 VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
-VAPID_SUBJECT=mailto:noreply@example.com
+VAPID_SUBJECT=mailto:noreply@hingot.com

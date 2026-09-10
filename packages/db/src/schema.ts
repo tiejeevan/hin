@@ -37,6 +37,8 @@ export const users = sqliteTable('users', {
   profileCompletedAt: text('profile_completed_at'),
   /** ISO-8601 UTC when the user's last WebSocket session closed (presence). */
   lastSeenAt: text('last_seen_at'),
+  /** 1 until Google (or migrated) user picks a public username. */
+  needsUsernameSetup: integer('needs_username_setup').default(0).notNull(),
 }, (table) => ({
   deletedAtIdx: index('users_deleted_at_idx').on(table.deletedAt),
   isPrivateIdx: index('users_is_private_idx').on(table.isPrivate),

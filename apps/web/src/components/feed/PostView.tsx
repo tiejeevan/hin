@@ -23,13 +23,15 @@ interface PostViewProps {
   showGuestAuth: boolean;
   isRegisterMode: boolean;
   usernameInput: string;
+  emailInput: string;
   passwordInput: string;
   authError: string | null;
   isAuthLoading: boolean;
   onBack: () => void;
   onSignIn: () => void;
-  onAuthSubmit: (e: React.FormEvent) => void;
+  onAuthSubmit: (e: React.FormEvent, turnstileToken?: string) => void;
   onUsernameChange: (value: string) => void;
+  onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onToggleAuthMode: () => void;
   onGoogleCredential?: (credential: string) => void;
@@ -89,6 +91,7 @@ export function PostView({
   showGuestAuth,
   isRegisterMode,
   usernameInput,
+  emailInput,
   passwordInput,
   authError,
   isAuthLoading,
@@ -96,6 +99,7 @@ export function PostView({
   onSignIn,
   onAuthSubmit,
   onUsernameChange,
+  onEmailChange,
   onPasswordChange,
   onToggleAuthMode,
   onGoogleCredential,
@@ -177,11 +181,13 @@ export function PostView({
           <AuthForm
             isRegisterMode={isRegisterMode}
             usernameInput={usernameInput}
+            emailInput={emailInput}
             passwordInput={passwordInput}
             authError={authError}
             isAuthLoading={isAuthLoading}
             onSubmit={onAuthSubmit}
             onUsernameChange={onUsernameChange}
+            onEmailChange={onEmailChange}
             onPasswordChange={onPasswordChange}
             onToggleMode={onToggleAuthMode}
             onGoogleCredential={onGoogleCredential}
@@ -210,11 +216,13 @@ export function PostView({
         <AuthForm
           isRegisterMode={isRegisterMode}
           usernameInput={usernameInput}
+          emailInput={emailInput}
           passwordInput={passwordInput}
           authError={authError}
           isAuthLoading={isAuthLoading}
           onSubmit={onAuthSubmit}
           onUsernameChange={onUsernameChange}
+          onEmailChange={onEmailChange}
           onPasswordChange={onPasswordChange}
           onToggleMode={onToggleAuthMode}
           onGoogleCredential={onGoogleCredential}

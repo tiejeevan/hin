@@ -29,10 +29,17 @@ if curl -sf "$API/" | grep -q "Hin API"; then pass "API root"; else fail "API ro
 # Register
 REG=$(curl -sf -X POST "$API/api/auth/register" \
   -H 'Content-Type: application/json' \
-  -d "{\"username\":\"$USER\",\"password\":\"$PASSWD\"}")
+  -d "{\"username\":\"$USER\",\"email\":\"$EMAIL\",\"password\":\"$PASSWD\"}")
 TOKEN=$(echo "$REG" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
 USER_ID=$(echo "$REG" | python3 -c "import sys,json; print(json.load(sys.stdin)['user']['id'])")
+VERIFY_CODE=$(echo "$REG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('devVerificationCode') or '')")
 if [ -n "$TOKEN" ]; then pass "Register $USER"; else fail "Register"; fi
+if [ -n "$VERIFY_CODE" ]; then
+  curl -sf -X POST "$API/api/auth/verify-registration" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d "{\"code\":\"$VERIFY_CODE\"}" >/dev/null
+fi
 AUTH="Authorization: Bearer $TOKEN"
 
 # Change password — wrong current
@@ -156,7 +163,7 @@ fi
 # Existing auth still works
 REG2=$(curl -sf -X POST "$API/api/auth/register" \
   -H 'Content-Type: application/json' \
-  -d "{\"username\":\"${USER}_b\",\"password\":\"$PASSWD\"}")
+  -d "{\"username\":\"${USER}_b\",\"email\":\"${USER}_b@example.com\",\"password\":\"$PASSWD\"}")
 if echo "$REG2" | python3 -c "import sys,json; assert json.load(sys.stdin).get('token')"; then
   pass "Existing register still works"
 else

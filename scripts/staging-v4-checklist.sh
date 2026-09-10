@@ -53,11 +53,19 @@ METRIC_COUNT=$(curl -sf "$API/api/admin/gamification/metrics" -H "Authorization:
 
 # 6. Register test user + session tick
 USER="staging_v4_$(date +%s)"
+EMAIL="${USER}@example.com"
 REG=$(curl -sf -X POST "$API/api/auth/register" \
   -H 'Content-Type: application/json' \
-  -d "{\"username\":\"$USER\",\"password\":\"TestPass123!\"}")
+  -d "{\"username\":\"$USER\",\"email\":\"$EMAIL\",\"password\":\"TestPass123!\"}")
 TOKEN=$(echo "$REG" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
 USER_ID=$(echo "$REG" | python3 -c "import sys,json; print(json.load(sys.stdin)['user']['id'])")
+VERIFY_CODE=$(echo "$REG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('devVerificationCode') or '')")
+if [ -n "$VERIFY_CODE" ]; then
+  curl -sf -X POST "$API/api/auth/verify-registration" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d "{\"code\":\"$VERIFY_CODE\"}" >/dev/null
+fi
 pass "Register test user $USER"
 
 TICK=$(curl -sf -X POST "$API/api/me/session-tick" \

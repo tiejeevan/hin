@@ -2,7 +2,20 @@ import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq, count, sql, isNull, desc } from 'drizzle-orm';
 import * as schema from '@hin/db';
-import { BroadcastDelivery, BroadcastSystemMessageSchema, Notification, ReportStatus, ResetPlatformDataSchema, ReviewReportSchema, SystemBroadcast, SystemSettings, UpdateSystemSettingsSchema } from '@hin/types';
+import {
+  BroadcastDelivery,
+  BroadcastSystemMessageSchema,
+  isHingotOutboundEmail,
+  Notification,
+  outboundFromWarnings,
+  ReportStatus,
+  ResetPlatformDataSchema,
+  ReviewReportSchema,
+  SystemBroadcast,
+  SystemSettings,
+  UpdateSystemSettingsSchema,
+} from '@hin/types';
+import { isValidEmail, normalizeEmail } from '../lib/otp';
 import { sign } from 'hono/jwt';
 import type { Env } from '../types';
 import { getAuthUser, getJwtSecret } from '../lib/auth';
@@ -505,15 +518,32 @@ admin.patch('/settings', async (c) => {
     return c.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, 400);
   }
 
+  if (parsed.data.outboundFromEmail !== undefined) {
+    const email = normalizeEmail(parsed.data.outboundFromEmail);
+    if (!isValidEmail(email)) {
+      return c.json({ error: 'Enter a valid outbound From email address' }, 400);
+    }
+    if (!isHingotOutboundEmail(email)) {
+      return c.json({ error: 'Outbound From must be an @hingot.com address' }, 400);
+    }
+    parsed.data.outboundFromEmail = email;
+  }
+
   const db = drizzle(c.env.DB, { schema });
   const systemSettings = await updateSystemSettings(db, parsed.data);
+  const warnings = parsed.data.outboundFromEmail
+    ? outboundFromWarnings(parsed.data.outboundFromEmail)
+    : [];
 
   await broadcastToAll(c.env, {
     type: 'system_settings_changed',
     payload: { settings: systemSettings },
   });
 
-  return c.json(systemSettings satisfies SystemSettings);
+  return c.json({
+    ...systemSettings,
+    ...(warnings.length > 0 ? { warnings } : {}),
+  } satisfies SystemSettings & { warnings?: string[] });
 });
 
 // List content reports for admin review

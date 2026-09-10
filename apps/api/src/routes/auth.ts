@@ -5,19 +5,34 @@ import * as schema from '@hin/db';
 import bcrypt from 'bcryptjs';
 import { sign } from 'hono/jwt';
 import {
+  CompleteUsernameSchema,
   PasswordResetRequestSchema,
   PasswordResetVerifySchema,
+  VerifyRegistrationSchema,
 } from '@hin/types';
 import type { Env } from '../types';
+import { getAuthUser } from '../lib/auth';
 import { getJwtSecret } from '../lib/auth';
 import { toPublicUser, toSelfUser, seedAdminUser } from '../lib/users';
 import { writeAuditLog } from '../lib/audit';
-import { verifyGoogleIdToken, deriveUsernameFromGoogle } from '../lib/google-auth';
+import { verifyGoogleIdToken } from '../lib/google-auth';
 import { requireTurnstile } from '../lib/turnstile';
 import { getSystemSettings } from '../lib/system-settings';
-import { sendPasswordResetOtpEmail } from '../lib/email/resend';
+import { sendPasswordResetOtpEmail, sendOtpEmail } from '../lib/email/resend';
+import { getOutboundFromEmail } from '../lib/email/outbound-from';
+import {
+  checkEmailAvailableForRegistration,
+  checkGoogleEmailCollision,
+  isUsernameAvailable,
+  normalizeUsername,
+  provisionalUsername,
+  validatePassword,
+  validateUsernameFormat,
+} from '../lib/auth-validation';
+import { getAccountBlockReason } from '../lib/account-guard';
 import {
   OTP_MAX_ATTEMPTS,
+  OTP_PURPOSE_EMAIL_VERIFY,
   OTP_PURPOSE_PASSWORD_RESET,
   OTP_RESET_LENGTH,
   OTP_RESET_SEND_EMAIL_PER_DAY,
@@ -39,29 +54,37 @@ import { clientIpFromRequest, consumeRateLimit } from '../lib/rate-limit';
 
 const auth = new Hono<{ Bindings: Env }>();
 
+const USERNAME_AVAILABILITY_LIMIT = 30;
+const USERNAME_AVAILABILITY_WINDOW_SEC = 60;
+
 auth.get('/turnstile-config', async (c) => {
   const db = drizzle(c.env.DB, { schema });
   const settings = await getSystemSettings(db);
   const turnstileEnabled = settings.turnstileEnabled && !!c.env.TURNSTILE_SECRET_KEY;
-  return c.json({ turnstileEnabled });
+  return c.json({
+    turnstileEnabled,
+    strictPasswordRequirements: settings.strictPasswordRequirements,
+  });
 });
 
-async function uniqueUsername(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  base: string,
-): Promise<string> {
-  let candidate = base;
-  let suffix = 0;
-  while (true) {
-    const existing = await db.select({ id: schema.users.id })
-      .from(schema.users)
-      .where(eq(schema.users.username, candidate))
-      .get();
-    if (!existing) return candidate;
-    suffix += 1;
-    candidate = `${base}${suffix}`.slice(0, 40);
+auth.get('/username-available', async (c) => {
+  const raw = c.req.query('username') ?? '';
+  const ip = clientIpFromRequest(c.req.raw) ?? 'unknown';
+  const db = drizzle(c.env.DB, { schema });
+
+  const limit = await consumeRateLimit(
+    db,
+    `username_avail:ip:${ip}`,
+    USERNAME_AVAILABILITY_LIMIT,
+    USERNAME_AVAILABILITY_WINDOW_SEC,
+  );
+  if (!limit.ok) {
+    return c.json({ available: false, reason: 'Too many checks. Try again shortly.' }, 429);
   }
-}
+
+  const result = await isUsernameAvailable(db, raw);
+  return c.json(result);
+});
 
 async function issueAuthToken(
   user: { id: number; username: string; role: string },
@@ -75,19 +98,58 @@ async function issueAuthToken(
   }, jwtSecret, 'HS256');
 }
 
-// Register
+async function sendEmailVerificationOtp(
+  c: { env: Env; req: { raw: Request } },
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  userId: number,
+  email: string,
+): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  const from = await getOutboundFromEmail(db);
+  const ip = clientIpFromRequest(c.req.raw) ?? 'unknown';
+
+  await db.update(schema.otpChallenges)
+    .set({ consumedAt: new Date().toISOString() })
+    .where(and(
+      eq(schema.otpChallenges.userId, userId),
+      eq(schema.otpChallenges.purpose, OTP_PURPOSE_EMAIL_VERIFY),
+      isNull(schema.otpChallenges.consumedAt),
+    ))
+    .run();
+
+  const code = generateOtpCode();
+  const codeHash = await hashOtpCode(code, c.env.OTP_PEPPER);
+
+  await db.insert(schema.otpChallenges).values({
+    purpose: OTP_PURPOSE_EMAIL_VERIFY,
+    userId,
+    email,
+    codeHash,
+    attempts: 0,
+    expiresAt: otpExpiresAt(),
+    ipAddress: ip === 'unknown' ? null : ip,
+  }).run();
+
+  const sent = await sendOtpEmail({ env: c.env, from, to: email, code });
+  if (!sent.ok) {
+    return { ok: false, error: sent.error || 'Failed to send verification email', status: 502 };
+  }
+  return { ok: true };
+}
+
+// Register — creates account and sends email OTP (verification required before full access)
 auth.post('/register', async (c) => {
   const db = drizzle(c.env.DB, { schema });
-  await seedAdminUser(db); // Seed admin user if not exists
+  await seedAdminUser(db);
 
   const body = await c.req.json<{
     username?: string;
+    email?: string;
     password?: string;
     clientLocalTime?: string;
     sessionId?: string;
     turnstileToken?: string;
   }>();
-  const { username, password, clientLocalTime, sessionId, turnstileToken } = body;
+  const { username, email, password, clientLocalTime, sessionId, turnstileToken } = body;
 
   const turnstileError = await requireTurnstile(c, turnstileToken, {
     eventType: 'register',
@@ -96,18 +158,29 @@ auth.post('/register', async (c) => {
   });
   if (turnstileError) return turnstileError;
 
-  if (!username || username.trim() === '') {
-    return c.json({ error: 'Username is required' }, 400);
-  }
-  if (!password || password.length < 6) {
-    return c.json({ error: 'Password must be at least 6 characters' }, 400);
+  const settings = await getSystemSettings(db);
+  const usernameError = validateUsernameFormat(username ?? '');
+  if (usernameError) return c.json({ error: usernameError }, 400);
+
+  const passwordError = validatePassword(password ?? '', settings.strictPasswordRequirements);
+  if (passwordError) return c.json({ error: passwordError }, 400);
+
+  const normalizedUsername = normalizeUsername(username!);
+  const normalizedEmail = normalizeEmail(email ?? '');
+  const emailCheck = await checkEmailAvailableForRegistration(db, normalizedEmail);
+  if (!emailCheck.ok) {
+    await writeAuditLog(c, {
+      eventType: 'register',
+      success: false,
+      failureReason: 'email_taken',
+      clientLocalTime,
+      sessionId,
+    });
+    return c.json({ error: emailCheck.error }, 400);
   }
 
-  const normalizedUsername = username.trim();
-
-  // Check if exists (case-sensitive)
-  const existing = await db.select().from(schema.users).where(eq(schema.users.username, normalizedUsername)).get();
-  if (existing) {
+  const usernameCheck = await isUsernameAvailable(db, normalizedUsername);
+  if (!usernameCheck.available) {
     await writeAuditLog(c, {
       eventType: 'register',
       success: false,
@@ -115,29 +188,31 @@ auth.post('/register', async (c) => {
       clientLocalTime,
       sessionId,
     });
-    return c.json({ error: 'Username already taken' }, 400);
+    return c.json({ error: usernameCheck.reason || 'Username already taken' }, 400);
   }
 
-  // Hash password
-  const passwordHash = await bcrypt.hash(password, 10);
-
-  // Insert user
+  const passwordHash = await bcrypt.hash(password!, 10);
   const cf = (c.req.raw as any).cf;
   const country = (cf?.country as string) ?? null;
 
   const [inserted] = await db.insert(schema.users).values({
     username: normalizedUsername,
+    email: normalizedEmail,
     passwordHash,
     role: 'user',
     country,
+    needsUsernameSetup: 0,
   }).returning();
 
   await db.insert(schema.userSettings).values({ userId: inserted.id });
 
-  // Generate JWT token
+  const otpResult = await sendEmailVerificationOtp(c, db, inserted.id, normalizedEmail);
+  if (!otpResult.ok) {
+    return c.json({ error: otpResult.error }, otpResult.status as 502);
+  }
+
   const token = await issueAuthToken(inserted, getJwtSecret(c.env));
 
-  // Audit: successful register
   await writeAuditLog(c, {
     userId: inserted.id,
     eventType: 'register',
@@ -148,14 +223,128 @@ auth.post('/register', async (c) => {
 
   return c.json({
     token,
-    user: toPublicUser(inserted),
+    user: toSelfUser(inserted),
+    registrationComplete: false,
   });
 });
 
-// Login
+auth.post('/verify-registration', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = VerifyRegistrationSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' }, 400);
+  }
+
+  if (authUser.emailVerifiedAt) {
+    return c.json({ registrationComplete: true, user: toSelfUser(authUser) });
+  }
+
+  const db = drizzle(c.env.DB, { schema });
+  const email = authUser.email ? normalizeEmail(authUser.email) : null;
+  if (!email) {
+    return c.json({ error: 'No email on file' }, 400);
+  }
+
+  const challenge = await db.select().from(schema.otpChallenges)
+    .where(and(
+      eq(schema.otpChallenges.userId, authUser.id),
+      eq(schema.otpChallenges.purpose, OTP_PURPOSE_EMAIL_VERIFY),
+      eq(schema.otpChallenges.email, email),
+      isNull(schema.otpChallenges.consumedAt),
+    ))
+    .orderBy(desc(schema.otpChallenges.createdAt))
+    .get();
+
+  if (!challenge) {
+    return c.json({ error: 'Invalid or expired code' }, 400);
+  }
+
+  if (challenge.expiresAt <= new Date().toISOString()) {
+    await db.update(schema.otpChallenges)
+      .set({ consumedAt: new Date().toISOString() })
+      .where(eq(schema.otpChallenges.id, challenge.id))
+      .run();
+    return c.json({ error: 'Code expired. Request a new one.' }, 400);
+  }
+
+  if (challenge.attempts >= OTP_MAX_ATTEMPTS) {
+    return c.json({ error: 'Too many incorrect attempts. Request a new code.' }, 400);
+  }
+
+  const match = await codesMatch(parsed.data.code, challenge.codeHash, c.env.OTP_PEPPER);
+  if (!match) {
+    await db.update(schema.otpChallenges)
+      .set({ attempts: challenge.attempts + 1 })
+      .where(eq(schema.otpChallenges.id, challenge.id))
+      .run();
+    return c.json({ error: 'Invalid or expired code' }, 400);
+  }
+
+  const now = new Date().toISOString();
+  await db.update(schema.otpChallenges)
+    .set({ consumedAt: now })
+    .where(eq(schema.otpChallenges.id, challenge.id))
+    .run();
+
+  const [updated] = await db.update(schema.users)
+    .set({ emailVerifiedAt: now })
+    .where(eq(schema.users.id, authUser.id))
+    .returning();
+
+  return c.json({
+    registrationComplete: true,
+    user: toSelfUser(updated),
+  });
+});
+
+auth.post('/complete-username', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+
+  if (!authUser.needsUsernameSetup) {
+    return c.json({ error: 'Username is already set' }, 400);
+  }
+
+  const body = await c.req.json().catch(() => null);
+  const parsed = CompleteUsernameSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' }, 400);
+  }
+
+  const usernameError = validateUsernameFormat(parsed.data.username);
+  if (usernameError) return c.json({ error: usernameError }, 400);
+
+  const normalizedUsername = normalizeUsername(parsed.data.username);
+  const db = drizzle(c.env.DB, { schema });
+
+  const usernameCheck = await isUsernameAvailable(db, normalizedUsername, authUser.id);
+  if (!usernameCheck.available) {
+    return c.json({ error: usernameCheck.reason || 'Username already taken' }, 400);
+  }
+
+  const [updated] = await db.update(schema.users)
+    .set({
+      username: normalizedUsername,
+      needsUsernameSetup: 0,
+    })
+    .where(eq(schema.users.id, authUser.id))
+    .returning();
+
+  const token = await issueAuthToken(updated, getJwtSecret(c.env));
+
+  return c.json({
+    token,
+    user: toSelfUser(updated),
+  });
+});
+
+// Login — username or email
 auth.post('/login', async (c) => {
   const db = drizzle(c.env.DB, { schema });
-  await seedAdminUser(db); // Seed admin user if not exists
+  await seedAdminUser(db);
 
   const body = await c.req.json<{
     username?: string;
@@ -174,15 +363,25 @@ auth.post('/login', async (c) => {
   if (turnstileError) return turnstileError;
 
   if (!username || !password) {
-    return c.json({ error: 'Username and password are required' }, 400);
+    return c.json({ error: 'Username or email and password are required' }, 400);
   }
 
-  const normalizedUsername = username.trim();
+  const identifier = username.trim();
+  const isEmailLogin = identifier.includes('@');
+  const normalizedIdentifier = isEmailLogin
+    ? normalizeEmail(identifier)
+    : normalizeUsername(identifier);
 
-  // Find user (case-sensitive; filtering out soft deleted ones)
-  const user = await db.select().from(schema.users)
-    .where(eq(schema.users.username, normalizedUsername))
-    .get();
+  const user = isEmailLogin
+    ? await db.select().from(schema.users)
+      .where(and(
+        eq(schema.users.email, normalizedIdentifier),
+        sql`${schema.users.deletedAt} IS NULL`,
+      ))
+      .get()
+    : await db.select().from(schema.users)
+      .where(eq(schema.users.username, normalizedIdentifier))
+      .get();
 
   if (!user) {
     await writeAuditLog(c, {
@@ -207,7 +406,18 @@ auth.post('/login', async (c) => {
     return c.json({ error: 'Invalid username or password' }, 401);
   }
 
-  // Compare passwords
+  if (!user.passwordHash) {
+    await writeAuditLog(c, {
+      userId: user.id,
+      eventType: 'failed_login',
+      success: false,
+      failureReason: 'google_only_account',
+      clientLocalTime,
+      sessionId,
+    });
+    return c.json({ error: 'This account uses Google sign-in' }, 401);
+  }
+
   const passwordMatch = await bcrypt.compare(password, user.passwordHash);
   if (!passwordMatch) {
     await writeAuditLog(c, {
@@ -221,10 +431,8 @@ auth.post('/login', async (c) => {
     return c.json({ error: 'Invalid username or password' }, 401);
   }
 
-  // Generate JWT token
   const token = await issueAuthToken(user, getJwtSecret(c.env));
 
-  // Audit: successful login
   await writeAuditLog(c, {
     userId: user.id,
     eventType: 'login',
@@ -235,11 +443,11 @@ auth.post('/login', async (c) => {
 
   return c.json({
     token,
-    user: toPublicUser(user),
+    user: toSelfUser(user),
+    registrationComplete: !getAccountBlockReason(user),
   });
 });
 
-// Logout (client-side token discard; server records the event for audit trail)
 auth.post('/logout', async (c) => {
   type LogoutBody = { userId?: number; clientLocalTime?: string; sessionId?: string };
   const defaultBody: LogoutBody = {};
@@ -256,7 +464,6 @@ auth.post('/logout', async (c) => {
   return c.json({ success: true });
 });
 
-// Google Sign-In (verifies Google ID token, creates or logs in user)
 auth.post('/google', async (c) => {
   const clientId = c.env.GOOGLE_CLIENT_ID;
   if (!clientId) {
@@ -294,34 +501,29 @@ auth.post('/google', async (c) => {
     .get();
 
   let isNewUser = false;
-
   const googleEmail = payload.email?.trim().toLowerCase() || null;
-  let emailAvailable = false;
-  if (googleEmail) {
-    const emailOwner = await db.select({ id: schema.users.id })
-      .from(schema.users)
-      .where(eq(schema.users.email, googleEmail))
-      .get();
-    emailAvailable = !emailOwner || (!!user && emailOwner.id === user.id);
-  }
 
   if (!user) {
+    if (googleEmail) {
+      const collision = await checkGoogleEmailCollision(db, googleEmail);
+      if (!collision.ok) {
+        return c.json({ error: collision.error }, 409);
+      }
+    }
+
     const cf = (c.req.raw as any).cf;
     const country = (cf?.country as string) ?? null;
-    const username = await uniqueUsername(
-      db,
-      deriveUsernameFromGoogle(payload.email, payload.name),
-    );
-
     const nowIso = new Date().toISOString();
+
     const [inserted] = await db.insert(schema.users).values({
-      username,
+      username: provisionalUsername(),
       passwordHash: '',
       role: 'user',
       googleId: payload.sub,
       avatarUrl: payload.picture ?? null,
       country,
-      ...(emailAvailable && googleEmail
+      needsUsernameSetup: 1,
+      ...(googleEmail
         ? { email: googleEmail, emailVerifiedAt: nowIso }
         : {}),
     }).returning();
@@ -350,10 +552,12 @@ auth.post('/google', async (c) => {
       updates.avatarUrl = payload.picture;
     }
 
-    // Persist Google-verified email when the account lacks a verified email.
-    if (emailAvailable && googleEmail && !user.emailVerifiedAt) {
-      updates.email = googleEmail;
-      updates.emailVerifiedAt = new Date().toISOString();
+    if (googleEmail && !user.emailVerifiedAt) {
+      const collision = await checkGoogleEmailCollision(db, googleEmail);
+      if (collision.ok) {
+        updates.email = googleEmail;
+        updates.emailVerifiedAt = new Date().toISOString();
+      }
     }
 
     if (Object.keys(updates).length > 0) {
@@ -379,12 +583,9 @@ auth.post('/google', async (c) => {
     token,
     user: toSelfUser(user),
     isNewUser,
+    needsUsernameSetup: !!user.needsUsernameSetup,
   });
 });
-
-// ---------------------------------------------------------------------------
-// Password reset (unauthenticated OTP via verified email)
-// ---------------------------------------------------------------------------
 
 auth.post('/password-reset/request', async (c) => {
   const db = drizzle(c.env.DB, { schema });
@@ -401,19 +602,11 @@ auth.post('/password-reset/request', async (c) => {
   });
   if (turnstileError) return turnstileError;
 
-  // Always return generic success to avoid account enumeration.
   const genericOk = () => c.json({ ok: true });
-
-  const apiKey = c.env.RESEND_API_KEY;
-  const from = c.env.RESEND_FROM_EMAIL;
-  if (!apiKey || !from) {
-    // Still generic — do not reveal config gaps to attackers.
-    return genericOk();
-  }
+  const from = await getOutboundFromEmail(db);
 
   const ip = clientIpFromRequest(c.req.raw) ?? 'unknown';
 
-  // Rate-limit request attempts by IP before lookup.
   const ipMinute = await consumeRateLimit(db, `pwd_reset_send:ip:${ip}:m`, OTP_RESET_SEND_IP_PER_MINUTE, 60);
   if (!ipMinute.ok) return genericOk();
   const ipHour = await consumeRateLimit(db, `pwd_reset_send:ip:${ip}:h`, OTP_RESET_SEND_IP_PER_HOUR, 3600);
@@ -431,7 +624,7 @@ auth.post('/password-reset/request', async (c) => {
   } else if (parsed.data.username?.trim()) {
     user = await db.select().from(schema.users)
       .where(and(
-        eq(schema.users.username, parsed.data.username.trim()),
+        eq(schema.users.username, normalizeUsername(parsed.data.username.trim())),
         sql`${schema.users.deletedAt} IS NULL`,
       ))
       .get();
@@ -477,7 +670,6 @@ auth.post('/password-reset/request', async (c) => {
   );
   if (!emailDay.ok) return genericOk();
 
-  // Invalidate prior unused reset challenges for this user.
   await db.update(schema.otpChallenges)
     .set({ consumedAt: new Date().toISOString() })
     .where(and(
@@ -501,7 +693,7 @@ auth.post('/password-reset/request', async (c) => {
   }).run();
 
   await sendPasswordResetOtpEmail({
-    apiKey,
+    env: c.env,
     from,
     to: email,
     code,
@@ -516,6 +708,12 @@ auth.post('/password-reset/verify', async (c) => {
   const parsed = PasswordResetVerifySchema.safeParse(body);
   if (!parsed.success) {
     return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' }, 400);
+  }
+
+  const settings = await getSystemSettings(db);
+  const passwordError = validatePassword(parsed.data.newPassword, settings.strictPasswordRequirements);
+  if (passwordError) {
+    return c.json({ error: passwordError }, 400);
   }
 
   const ip = clientIpFromRequest(c.req.raw) ?? 'unknown';
@@ -547,7 +745,7 @@ auth.post('/password-reset/verify', async (c) => {
   } else if (parsed.data.username?.trim()) {
     user = await db.select().from(schema.users)
       .where(and(
-        eq(schema.users.username, parsed.data.username.trim()),
+        eq(schema.users.username, normalizeUsername(parsed.data.username.trim())),
         sql`${schema.users.deletedAt} IS NULL`,
       ))
       .get();
@@ -605,7 +803,6 @@ auth.post('/password-reset/verify', async (c) => {
     .where(eq(schema.otpChallenges.id, challenge.id))
     .run();
 
-  // Invalidate any sibling unused reset challenges.
   await db.update(schema.otpChallenges)
     .set({ consumedAt: now })
     .where(and(
@@ -625,4 +822,3 @@ auth.post('/password-reset/verify', async (c) => {
 });
 
 export default auth;
-

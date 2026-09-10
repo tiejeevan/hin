@@ -48,12 +48,23 @@ function uniqueUser(prefix) {
 }
 
 async function register(username) {
+  const email = `${username}@example.com`;
   const { status, json } = await api('/api/auth/register', {
     method: 'POST',
-    body: { username, password: PASSWORD },
+    body: { username, email, password: PASSWORD },
   });
   if (status !== 200 || !json?.token) {
     throw new Error(`register ${username} failed: ${status} ${JSON.stringify(json)}`);
+  }
+  if (json.devVerificationCode) {
+    const verify = await api('/api/auth/verify-registration', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${json.token}` },
+      body: { code: json.devVerificationCode },
+    });
+    if (verify.status !== 200) {
+      throw new Error(`verify ${username} failed: ${verify.status} ${JSON.stringify(verify.json)}`);
+    }
   }
   return { token: json.token, user: json.user };
 }

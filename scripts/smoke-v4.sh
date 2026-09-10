@@ -19,6 +19,7 @@ fail() { echo "❌ $1"; FAIL=$((FAIL + 1)); }
 
 USER="smoke_v4_$(date +%s)"
 PASSWD="TestPass123!"
+EMAIL="${USER}@example.com"
 USER_ID=""
 
 echo "=== Hin v4 smoke test ($API) ==="
@@ -29,10 +30,17 @@ if curl -sf "$API/" | grep -q "Hin API"; then pass "API root"; else fail "API ro
 # Register
 REG=$(curl -sf -X POST "$API/api/auth/register" \
   -H 'Content-Type: application/json' \
-  -d "{\"username\":\"$USER\",\"password\":\"$PASSWD\"}")
+  -d "{\"username\":\"$USER\",\"email\":\"$EMAIL\",\"password\":\"$PASSWD\"}")
 TOKEN=$(echo "$REG" | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
 USER_ID=$(echo "$REG" | python3 -c "import sys,json; print(json.load(sys.stdin)['user']['id'])")
+VERIFY_CODE=$(echo "$REG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('devVerificationCode') or '')")
 if [ -n "$TOKEN" ]; then pass "Register user $USER"; else fail "Register user"; fi
+if [ -n "$VERIFY_CODE" ]; then
+  curl -sf -X POST "$API/api/auth/verify-registration" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d "{\"code\":\"$VERIFY_CODE\"}" >/dev/null
+fi
 
 AUTH="Authorization: Bearer $TOKEN"
 

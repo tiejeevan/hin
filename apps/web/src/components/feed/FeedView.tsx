@@ -11,11 +11,13 @@ import { ActiveEventsBanner } from '../gamification/ActiveEventsBanner';
 
 interface FeedViewProps {
   posts: Post[];
-  currentUser: UserType;
+  currentUser: UserType | null;
+  readOnly?: boolean;
+  onSignInRequired?: () => void;
   showNewPostForm: boolean;
   newPostContent: string;
   postSeedPreview?: LinkPreview | null;
-  token: string;
+  token?: string | null;
   newlyCreatedPostId: number | null;
   expandedComments: Record<number, boolean>;
   postComments: Record<number, Comment[]>;
@@ -76,6 +78,8 @@ interface FeedViewProps {
 export function FeedView({
   posts,
   currentUser,
+  readOnly = false,
+  onSignInRequired,
   showNewPostForm,
   newPostContent,
   postSeedPreview = null,
@@ -172,9 +176,13 @@ export function FeedView({
   return (
     <div ref={scrollRef} className="flex-grow overflow-y-auto p-4 md:p-6 relative">
       <div className="max-w-2xl mx-auto w-full space-y-4 pb-20 md:pb-4">
-      <FeedModeSelector feedMode={feedMode} onFeedModeChange={onFeedModeChange} />
+      <FeedModeSelector
+        feedMode={feedMode}
+        onFeedModeChange={onFeedModeChange}
+        guestMode={readOnly}
+      />
 
-      {gamificationEnabled && (
+      {gamificationEnabled && token && (
         <ActiveEventsBanner token={token} onGamificationRefresh={onGamificationRefresh} />
       )}
 
@@ -182,7 +190,7 @@ export function FeedView({
         <ExploreHashtags activeHashtag={activeHashtag} onSelectHashtag={onSelectHashtag} />
       )}
 
-      {showNewPostForm && (
+      {showNewPostForm && token && (
         <CreatePostForm
           content={newPostContent}
           token={token}
@@ -205,7 +213,9 @@ export function FeedView({
                   ? activeHashtag
                     ? `No posts found for #${activeHashtag} yet.`
                     : 'Pick a trending hashtag to explore posts.'
-                  : 'No posts yet. Be the first to publish!'}
+                  : readOnly
+                    ? 'No public posts yet. Check back soon — or join to be the first to share.'
+                    : 'No posts yet. Be the first to publish!'}
           </div>
         ) : (
           <>
@@ -216,6 +226,8 @@ export function FeedView({
                 key={post.id}
                 post={post}
                 currentUser={currentUser}
+                readOnly={readOnly}
+                onSignInRequired={onSignInRequired}
                 gamificationEnabled={gamificationEnabled}
                 commentsList={postComments[engagementId] || []}
                 isCommentsExpanded={expandedComments[engagementId] || false}

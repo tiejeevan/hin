@@ -9,6 +9,7 @@ import {
   getFollowerCount,
   getFollowingCount,
 } from './follows';
+import { userNeedsEmailVerification } from './account-guard';
 import { getBlockStatus } from './blocks';
 import { getMuteStatus } from './mutes';
 
@@ -88,14 +89,21 @@ export function toSelfUser(
     email?: string | null;
     emailVerifiedAt?: string | null;
     passwordHash?: string | null;
+    googleId?: string | null;
+    needsUsernameSetup?: number | boolean | null;
   },
   extras?: Parameters<typeof toPublicUser>[1],
 ): User {
+  const hasPassword = !!(user.passwordHash && user.passwordHash.length > 0);
+  const needsUsernameSetup = !!(user.needsUsernameSetup && user.needsUsernameSetup !== 0);
+  const needsEmailVerification = userNeedsEmailVerification(user);
   return {
     ...toPublicUser(user, extras),
     email: user.email ?? null,
     emailVerifiedAt: user.emailVerifiedAt ?? null,
-    hasPassword: !!(user.passwordHash && user.passwordHash.length > 0),
+    hasPassword,
+    needsUsernameSetup,
+    needsEmailVerification,
   };
 }
 
