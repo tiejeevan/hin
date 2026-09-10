@@ -26,5 +26,8 @@
     "@types/node": "^26.1.0",
     "concurrently": "^8.2.2",
     "typescript": "^5.4.5"
+  },
+  "overrides": {
+    "@swc/core": "1.15.47"
   }
 }
