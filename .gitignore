@@ -15,6 +15,7 @@ target/
 # Cloudflare Wrangler files
 .wrangler
 .dev.vars
+.env.production.local
 package-lock.json
 
 # IDE / OS files

@@ -130,6 +130,7 @@ Production example (`https://hingot.com`):
    ```bash
    VITE_SITE_URL=https://hingot.com VITE_API_URL=https://hingot.com npm run build --workspace=apps/web
    ```
+   Cloudflare Pages Git builds: set `VITE_SITE_URL` / `VITE_API_URL` in the dashboard **or** rely on [`apps/web/wrangler.toml`](../apps/web/wrangler.toml) `[vars]` `SITE_URL` + `API_PUBLIC_URL` (the build script reads these when `VITE_*` are unset).
    Deploy: `npx wrangler pages deploy dist --project-name konnect` from `apps/web`
 4. **Backfill** — `./scripts/backfill-share-previews.sh` with prod `API_URL` + admin JWT
 5. **Verify** — `SITE_URL=... API_URL=... ./scripts/seo-deploy-check.sh` or `npm run test:smoke:seo`
