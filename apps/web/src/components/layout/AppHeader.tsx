@@ -13,6 +13,7 @@ interface AppHeaderProps {
   showNotifications: boolean;
   unreadNotifsCount: number;
   notifications: Notification[];
+  notificationsLoading?: boolean;
   onlineCount?: number;
   isAdminTab?: boolean;
   isOlabidTab?: boolean;
@@ -36,6 +37,7 @@ export function AppHeader({
   showNotifications,
   unreadNotifsCount,
   notifications,
+  notificationsLoading = false,
   onlineCount = 0,
   isAdminTab,
   isOlabidTab,
@@ -155,6 +157,7 @@ export function AppHeader({
             <NotificationPanel
               isOpen={showNotifications}
               notifications={notifications}
+              isLoading={notificationsLoading}
               unreadCount={unreadNotifsCount}
               gamificationEnabled={gamificationEnabled}
               anchorRef={bellRef}

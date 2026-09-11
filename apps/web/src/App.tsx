@@ -117,6 +117,10 @@ export default function App() {
   const [posts, setPosts] = useState<import('@hin/types').Post[]>([]);
   const [feedNextCursor, setFeedNextCursor] = useState<number | string | null>(null);
   const [isLoadingMorePosts, setIsLoadingMorePosts] = useState(false);
+  const [feedInitialLoading, setFeedInitialLoading] = useState(false);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [threadsLoading, setThreadsLoading] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
   const [feedMode, setFeedMode] = useState<FeedMode>('all');
   const [activeHashtag, setActiveHashtag] = useState<string | null>(null);
   const activeHashtagRef = useRef<string | null>(null);
@@ -647,6 +651,7 @@ export default function App() {
     setReplyingToMessage(null);
     setNewMsgText(draft.text);
     setDraftLinkPreview(draft.preview);
+    setChatMessages([]);
     fetchMessages(recipient.id);
     setThreads(prev => {
       const thread = prev.find(t => t.id === recipient.id);
@@ -1138,6 +1143,8 @@ export default function App() {
       if (feedLoadingRef.current || cursor === null) return;
       feedLoadingRef.current = true;
       setIsLoadingMorePosts(true);
+    } else {
+      setFeedInitialLoading(true);
     }
     try {
       const params = new URLSearchParams({ limit: String(FEED_PAGE_SIZE) });
@@ -1166,6 +1173,7 @@ export default function App() {
     } finally {
       feedLoadingRef.current = false;
       setIsLoadingMorePosts(false);
+      if (!append) setFeedInitialLoading(false);
     }
   };
 
@@ -1453,6 +1461,7 @@ export default function App() {
 
   const fetchNotifications = async () => {
     if (!currentUser || !token) return;
+    setNotificationsLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/notifications`, { headers: getHeaders() });
       if (res.ok) {
@@ -1463,6 +1472,8 @@ export default function App() {
       }
     } catch (e) {
       console.error('Error fetching notifications:', e);
+    } finally {
+      setNotificationsLoading(false);
     }
   };
 
@@ -1471,6 +1482,8 @@ export default function App() {
     opts?: { sinceId?: number; markRead?: boolean; merge?: boolean },
   ) => {
     if (!currentUser || !token) return;
+    const isDeltaFetch = !!(opts?.sinceId && opts.sinceId > 0);
+    if (!isDeltaFetch) setMessagesLoading(true);
     try {
       const params = new URLSearchParams();
       if (opts?.sinceId && opts.sinceId > 0) params.set('sinceId', String(opts.sinceId));
@@ -1505,11 +1518,14 @@ export default function App() {
       }
     } catch (e) {
       console.error('Error fetching messages:', e);
+    } finally {
+      if (!isDeltaFetch) setMessagesLoading(false);
     }
   };
 
   const fetchThreads = async () => {
     if (!token) return;
+    setThreadsLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/messages/threads`, { headers: getHeaders() });
       if (res.ok) {
@@ -1526,6 +1542,8 @@ export default function App() {
       }
     } catch (e) {
       console.error('Error fetching threads:', e);
+    } finally {
+      setThreadsLoading(false);
     }
   };
 
@@ -4644,6 +4662,7 @@ export default function App() {
             showNotifications={showNotifications}
             unreadNotifsCount={unreadNotifsCount}
             notifications={notifications}
+            notificationsLoading={notificationsLoading}
             onlineCount={presenceEnabled ? onlineUserIds.size : undefined}
             isAdminTab={activeTab === 'admin'}
             isOlabidTab={activeTab === 'olabid'}
@@ -4982,6 +5001,7 @@ export default function App() {
             editingCommentId={editingCommentId}
             editingCommentContent={editingCommentContent}
             isLoadingMore={isLoadingMorePosts}
+            isInitialLoading={feedInitialLoading}
             hasMorePosts={feedNextCursor !== null}
             feedMode={feedMode}
             onFeedModeChange={handleFeedModeChange}
@@ -5135,6 +5155,8 @@ export default function App() {
             isExpanded={messagesPanelExpanded}
             onToggleExpand={() => setMessagesPanelExpanded(prev => !prev)}
             threads={threads}
+            threadsLoading={threadsLoading}
+            messagesLoading={messagesLoading}
             currentUser={currentUser}
             chatRecipient={chatRecipient}
             chatMessages={chatMessages}

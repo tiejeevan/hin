@@ -2,9 +2,8 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { SILENT_LOADING_HEADER, SILENT_LOADING_VALUE } from './globalLoading';
 
 /**
- * Instant taps (like/comment/bookmark/create post) are auto-silent so GlobalLoadingOverlay
- * does not block the UI. Data loads (GET) and heavy writes (delete post) still
- * drive the overlay after SHOW_DELAY_MS.
+ * Three-tier loading: GETs and most mutations are silent; global overlay only for
+ * auth submit and delete post. Views/panels show scoped inline loading instead.
  */
 describe('global fetch loading', () => {
   let originalFetch: typeof fetch;
@@ -63,7 +62,7 @@ describe('global fetch loading', () => {
     expect(mod.isGlobalLoadingVisible()).toBe(false);
   });
 
-  it('shows overlay for GET data loads after show delay', async () => {
+  it('does NOT show overlay for GET data loads (feed, notifications, chat)', async () => {
     const mod = await loadFreshModule();
 
     let resolveFetch!: (r: Response) => void;
@@ -77,13 +76,70 @@ describe('global fetch loading', () => {
       headers: { Authorization: 'Bearer x' },
     });
 
+    await vi.advanceTimersByTimeAsync(500);
+    expect(mod.isGlobalLoadingVisible()).toBe(false);
+
+    resolveFetch(new Response('[]', { status: 200 }));
+    await pending;
+    await vi.advanceTimersByTimeAsync(500);
+    expect(mod.isGlobalLoadingVisible()).toBe(false);
+
+    window.fetch = vi.fn(() => fetchPromise) as unknown as typeof fetch;
+    mod.installGlobalFetchLoading();
+
+    void window.fetch('http://localhost:8787/api/notifications');
+    void window.fetch('http://localhost:8787/api/messages/threads');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(mod.isGlobalLoadingVisible()).toBe(false);
+  });
+
+  it('shows overlay for DELETE /api/posts/{id} after show delay', async () => {
+    const mod = await loadFreshModule();
+
+    let resolveFetch!: (r: Response) => void;
+    const fetchPromise = new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    });
+    window.fetch = vi.fn(() => fetchPromise) as unknown as typeof fetch;
+    mod.installGlobalFetchLoading();
+
+    const pending = window.fetch('http://localhost:8787/api/posts/42', {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer x' },
+    });
+
     await vi.advanceTimersByTimeAsync(149);
     expect(mod.isGlobalLoadingVisible()).toBe(false);
 
     await vi.advanceTimersByTimeAsync(1);
     expect(mod.isGlobalLoadingVisible()).toBe(true);
 
-    resolveFetch(new Response('[]', { status: 200 }));
+    resolveFetch(new Response('{}', { status: 200 }));
+    await pending;
+    await vi.advanceTimersByTimeAsync(250);
+    expect(mod.isGlobalLoadingVisible()).toBe(false);
+  });
+
+  it('shows overlay for POST /api/auth/login after show delay', async () => {
+    const mod = await loadFreshModule();
+
+    let resolveFetch!: (r: Response) => void;
+    const fetchPromise = new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    });
+    window.fetch = vi.fn(() => fetchPromise) as unknown as typeof fetch;
+    mod.installGlobalFetchLoading();
+
+    const pending = window.fetch('http://localhost:8787/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+
+    await vi.advanceTimersByTimeAsync(150);
+    expect(mod.isGlobalLoadingVisible()).toBe(true);
+
+    resolveFetch(new Response('{}', { status: 200 }));
     await pending;
     await vi.advanceTimersByTimeAsync(250);
     expect(mod.isGlobalLoadingVisible()).toBe(false);
@@ -136,32 +192,15 @@ describe('global fetch loading', () => {
     expect(mod.isGlobalLoadingVisible()).toBe(false);
   });
 
-  it('session-tick is silent by URL; GET /posts is not', async () => {
+  it('session-tick and GET /posts are both silent', async () => {
     const mod = await loadFreshModule();
 
-    let resolvePosts!: (r: Response) => void;
-    const postsPromise = new Promise<Response>((resolve) => {
-      resolvePosts = resolve;
-    });
-
-    window.fetch = vi.fn((input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      if (url.includes('/api/posts')) return postsPromise;
-      return Promise.resolve(new Response('{}', { status: 200 }));
-    }) as unknown as typeof fetch;
+    window.fetch = vi.fn(async () => new Response('{}', { status: 200 })) as unknown as typeof fetch;
     mod.installGlobalFetchLoading();
 
     await window.fetch('http://localhost:8787/api/me/session-tick');
+    await window.fetch('http://localhost:8787/api/posts?limit=10');
     await vi.advanceTimersByTimeAsync(500);
-    expect(mod.isGlobalLoadingVisible()).toBe(false);
-
-    const postsPending = window.fetch('http://localhost:8787/api/posts?limit=10');
-    await vi.advanceTimersByTimeAsync(150);
-    expect(mod.isGlobalLoadingVisible()).toBe(true);
-
-    resolvePosts(new Response('[]', { status: 200 }));
-    await postsPending;
-    await vi.advanceTimersByTimeAsync(250);
     expect(mod.isGlobalLoadingVisible()).toBe(false);
   });
 });

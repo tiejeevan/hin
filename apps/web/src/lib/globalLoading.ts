@@ -1,4 +1,11 @@
-/** Header value that opts a fetch out of the global loading overlay. */
+/**
+ * Three-tier loading convention:
+ * 1. Silent background — all GETs, instant mutations, uploads (panel/view inline loading instead).
+ * 2. Scoped inline — skeletons/spinners inside FeedView, panels, profile, post (not here).
+ * 3. Global overlay — only BLOCKING_MUTATION_RULES (auth submit, delete post).
+ *
+ * Opt out per-request via X-Hin-Loading: silent header (see silentLoadingHeaders()).
+ */
 export const SILENT_LOADING_HEADER = 'X-Hin-Loading';
 export const SILENT_LOADING_VALUE = 'silent';
 
@@ -7,12 +14,19 @@ const MIN_VISIBLE_MS = 250;
 
 const SILENT_URL_SUFFIXES = ['/api/me/session-tick'];
 
+/** Only these mutations drive the full-screen overlay. Everything else is silent. */
+const BLOCKING_MUTATION_RULES: Array<{ method: string; pattern: RegExp }> = [
+  { method: 'POST', pattern: /\/api\/auth\// },
+  { method: 'DELETE', pattern: /\/api\/posts\/\d+(?:\?|$)/ },
+];
+
 /**
  * Instant user-interaction mutations: like, bookmark, comment, follow, etc.
- * These must not drive the full-screen overlay (Durable Object fan-out is separate).
- * Heavy writes (delete post, auth, admin, profile save) are intentionally excluded.
+ * Explicit list kept for documentation; non-blocking mutations default to silent.
  */
 const SILENT_INTERACTION_RULES: Array<{ method: string; pattern: RegExp }> = [
+  // Uploads (component-level spinners)
+  { method: 'POST', pattern: /\/api\/upload(?:\?|$)/ },
   // Posts: create (optimistic UI) / like / bookmark / share / pin / poll
   { method: 'POST', pattern: /\/api\/posts(?:\?|$)/ },
   { method: 'POST', pattern: /\/api\/posts\/\d+\/like(?:\?|$)/ },
@@ -208,6 +222,12 @@ function isSilentInteraction(url: string, method: string): boolean {
   );
 }
 
+function isBlockingMutation(url: string, method: string): boolean {
+  return BLOCKING_MUTATION_RULES.some(
+    (rule) => rule.method === method && rule.pattern.test(url),
+  );
+}
+
 export function isSilentRequest(input: RequestInfo | URL, init?: RequestInit): boolean {
   const url = requestUrl(input);
   if (SILENT_URL_SUFFIXES.some((suffix) => url.includes(suffix))) {
@@ -219,11 +239,22 @@ export function isSilentRequest(input: RequestInfo | URL, init?: RequestInit): b
   }
 
   const method = requestMethod(input, init);
+
+  // All GETs are background data loads — use scoped inline loading in views/panels.
+  if (method === 'GET') {
+    return true;
+  }
+
+  if (isBlockingMutation(url, method)) {
+    return false;
+  }
+
   if (isSilentInteraction(url, method)) {
     return true;
   }
 
-  return false;
+  // Default: silent (upload, admin writes, profile PATCH, etc. use local spinners).
+  return true;
 }
 
 /** Wrap window.fetch once so non-silent requests drive the global overlay. */

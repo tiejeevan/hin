@@ -8,6 +8,7 @@ import { PostCard, getPostEngagementId } from './PostCard';
 import { FeedModeSelector } from './FeedModeSelector';
 import { ExploreHashtags } from './ExploreHashtags';
 import { ActiveEventsBanner } from '../gamification/ActiveEventsBanner';
+import { PostCardSkeleton } from '../ui/LoadingSkeleton';
 
 interface FeedViewProps {
   posts: Post[];
@@ -28,6 +29,7 @@ interface FeedViewProps {
   editingCommentId: number | null;
   editingCommentContent: string;
   isLoadingMore: boolean;
+  isInitialLoading?: boolean;
   hasMorePosts: boolean;
   feedMode: FeedMode;
   onFeedModeChange: (mode: FeedMode) => void;
@@ -94,6 +96,7 @@ export function FeedView({
   editingCommentId,
   editingCommentContent,
   isLoadingMore,
+  isInitialLoading = false,
   hasMorePosts,
   feedMode,
   onFeedModeChange,
@@ -203,7 +206,13 @@ export function FeedView({
       )}
 
       <div className="space-y-4">
-        {posts.length === 0 ? (
+        {isInitialLoading ? (
+          <>
+            <PostCardSkeleton />
+            <PostCardSkeleton />
+            <PostCardSkeleton />
+          </>
+        ) : posts.length === 0 ? (
           <div className="text-center py-12 border border-dashed border-border-custom rounded-2xl text-text-muted text-sm">
             {feedMode === 'following'
               ? 'Follow people to see their posts here.'

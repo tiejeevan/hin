@@ -11,6 +11,7 @@ import { ChatMessageBubble, ReplyQuoteBar } from '../chat';
 import { formatLastSeen } from '../../lib/formatRelativeTime';
 import { chatStrings } from '../../lib/chatStrings';
 import { getFocusableElements, trapFocus } from '../../lib/focusTrap';
+import { MessageBubbleSkeleton, PanelRefreshSpinner, ThreadRowSkeleton } from '../ui/LoadingSkeleton';
 import { isAllowedChatImageFile } from '../../lib/chatMediaMime';
 import { usePanelExpandFlip } from '../../hooks/usePanelExpandFlip';
 
@@ -47,6 +48,8 @@ interface MessagesPanelProps {
   isExpanded: boolean;
   onToggleExpand: () => void;
   threads: ChatThread[];
+  threadsLoading?: boolean;
+  messagesLoading?: boolean;
   currentUser: UserType;
   chatRecipient: ChatRecipient | null;
   chatMessages: Message[];
@@ -86,6 +89,8 @@ export function MessagesPanel({
   isExpanded,
   onToggleExpand,
   threads,
+  threadsLoading = false,
+  messagesLoading = false,
   currentUser,
   chatRecipient,
   chatMessages,
@@ -405,7 +410,9 @@ export function MessagesPanel({
           <>
             <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden bg-chat-bg animate-thread-enter">
             <div ref={chatScrollRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-3 min-h-0">
-              {chatMessages.length === 0 ? (
+              {messagesLoading && chatMessages.length === 0 ? (
+                <MessageBubbleSkeleton />
+              ) : chatMessages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-text-muted text-[11px] gap-1.5 py-8">
                   <MessageCircle className="h-7 w-7 opacity-40" />
                   <span>{chatStrings.noMessagesYetHello}</span>
@@ -558,11 +565,16 @@ export function MessagesPanel({
                     disabled={sendingMedia}
                     className="h-10 w-10 rounded-full border border-border-custom bg-input-bg text-text-muted hover:text-text-primary hover:bg-bg-tertiary flex items-center justify-center cursor-pointer disabled:opacity-40"
                     aria-label={chatStrings.attachImage}
+                    aria-busy={sendingMedia}
                     aria-haspopup="menu"
                     aria-expanded={attachMenuOpen}
                     title={chatStrings.attachImage}
                   >
-                    <ImagePlus className="h-4 w-4" />
+                    {sendingMedia ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    ) : (
+                      <ImagePlus className="h-4 w-4" />
+                    )}
                   </button>
                   {attachMenuOpen && (
                     <div
@@ -681,7 +693,19 @@ export function MessagesPanel({
         ) : (
           <div className="flex-1 min-h-0 overflow-hidden">
           <div ref={listScrollRef} className="h-full overflow-y-auto overflow-x-hidden overscroll-contain">
-            {sorted.length === 0 ? (
+            {threadsLoading && sorted.length > 0 && (
+              <div className="px-3 py-1.5 flex items-center gap-1.5 text-[10px] text-text-muted border-b border-border-custom/50">
+                <PanelRefreshSpinner />
+                <span>Updating…</span>
+              </div>
+            )}
+            {threadsLoading && sorted.length === 0 ? (
+              <>
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <ThreadRowSkeleton key={i} />
+                ))}
+              </>
+            ) : sorted.length === 0 ? (
               <div className="px-3 py-10 text-center text-[11px] text-text-muted leading-snug flex flex-col items-center gap-2">
                 <SquarePen className="h-4 w-4 opacity-50" />
                 {chatStrings.noMessagesYet}

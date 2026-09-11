@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { Trophy, X } from 'lucide-react';
 import { Notification, isGamificationNotification, resolveNotificationCategory } from '@hin/types';
 import { NotificationItem } from './NotificationItem';
+import { NotificationRowSkeleton, PanelRefreshSpinner } from '../ui/LoadingSkeleton';
 
 type InboxTab = 'social' | 'gamification';
 
 interface NotificationPanelProps {
   isOpen: boolean;
   notifications: Notification[];
+  isLoading?: boolean;
   unreadCount: number;
   gamificationEnabled: boolean;
   anchorRef: React.RefObject<HTMLDivElement | null>;
@@ -19,6 +21,7 @@ interface NotificationPanelProps {
 export function NotificationPanel({
   isOpen,
   notifications,
+  isLoading = false,
   unreadCount,
   gamificationEnabled,
   anchorRef,
@@ -100,6 +103,7 @@ export function NotificationPanel({
       >
         <PanelHeader
           unreadCount={unreadCount}
+          isRefreshing={isLoading && notifications.length > 0}
           onClose={onClose}
           onMarkAllRead={() => onMarkAllRead(gamificationEnabled ? activeTab : undefined)}
           tabUnread={tabUnread}
@@ -123,7 +127,13 @@ export function NotificationPanel({
         )}
 
         <div className="overflow-y-auto divide-y divide-border-custom/40 flex-1 min-h-0">
-          {visibleNotifications.length === 0 ? (
+          {isLoading && notifications.length === 0 ? (
+            <>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <NotificationRowSkeleton key={i} />
+              ))}
+            </>
+          ) : visibleNotifications.length === 0 ? (
             <div className="px-4 py-10 text-center text-[11px] text-text-muted leading-snug">
               {activeTab === 'gamification'
                 ? 'No system notifications yet.'
@@ -185,11 +195,13 @@ function TabButton({
 function PanelHeader({
   unreadCount,
   tabUnread,
+  isRefreshing = false,
   onClose,
   onMarkAllRead,
 }: {
   unreadCount: number;
   tabUnread: number;
+  isRefreshing?: boolean;
   onClose: () => void;
   onMarkAllRead: () => void;
 }) {
@@ -197,6 +209,12 @@ function PanelHeader({
     <div className="px-3.5 py-2.5 flex items-center justify-between border-b border-border-custom/50 shrink-0 bg-bg-primary/40">
       <div className="flex items-center gap-2">
         <span className="text-xs font-semibold text-text-primary tracking-tight">Notifications</span>
+        {isRefreshing && (
+          <>
+            <PanelRefreshSpinner />
+            <span className="sr-only">Refreshing notifications</span>
+          </>
+        )}
         {unreadCount > 0 && (
           <span className="text-[10px] bg-indigo-500/15 text-indigo-400 px-1.5 py-0.5 rounded-full font-semibold leading-none">
             {unreadCount} new
