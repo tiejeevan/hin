@@ -1,6 +1,8 @@
 name = "hin"
 main = "src/index.ts"
 compatibility_date = "2024-05-24"
+# Keep workers.dev for Pages _worker.js internal API fetch (same-zone custom-domain fetch loops).
+workers_dev = true
 
 [[d1_databases]]
 binding = "DB"
@@ -21,9 +23,23 @@ new_sqlite_classes = ["RealtimeDO"]
 binding = "MEDIA"
 bucket_name = "gmart"
 
+# Same-origin API on hingot.com (Pages serves SPA; Worker handles API/WS/sitemap).
+[[routes]]
+pattern = "hingot.com/api/*"
+zone_name = "hingot.com"
+
+[[routes]]
+pattern = "hingot.com/ws"
+zone_name = "hingot.com"
+
+[[routes]]
+pattern = "hingot.com/sitemap.xml"
+zone_name = "hingot.com"
+
 [vars]
-# SITE_URL / API_PUBLIC_URL — set in Cloudflare dashboard for production (e.g. https://hingot.com).
-# For local dev, add to apps/api/.dev.vars (see .dev.vars.example).
+# Production public origins (override locally via apps/api/.dev.vars).
+SITE_URL = "https://hingot.com"
+API_PUBLIC_URL = "https://hingot.com"
 GOOGLE_CLIENT_ID = "374278266123-6i29t1ve6t76cdb6vsvumvn4nghonpd8.apps.googleusercontent.com"
 # Add via `wrangler secret` / dashboard (do not commit real values):
 # OCI_SMTP_HOST, OCI_SMTP_PORT, OCI_SMTP_USERNAME, OCI_SMTP_PASSWORD,

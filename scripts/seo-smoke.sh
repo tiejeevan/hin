@@ -55,14 +55,14 @@ while IFS= read -r loc; do
     "${SITE_URL}"*) ;;
     *) fail "Sitemap contains loc outside SITE_URL: ${loc}" ;;
   esac
-done < <(echo "$web_sitemap" | sed -n 's:.*<loc>\([^<]*\)</loc>.*:\1:p')
+done < <(echo "$web_sitemap" | sed -n 's#.*<loc>\([^<]*\)</loc>.*#\1#p')
 
 pass "Sitemap URLs match SITE_URL"
 
 # Discover post id
 POST_ID="${POST_ID:-}"
 if [[ -z "$POST_ID" ]]; then
-  POST_ID="$(echo "$web_sitemap" | sed -n 's:.*<loc>'"${SITE_URL}"'/post/\([0-9]*\)</loc>.*:\1:p' | head -1)"
+  POST_ID="$(echo "$web_sitemap" | sed -n "s#.*<loc>${SITE_URL}/post/\\([0-9]*\\)</loc>.*#\\1#p" | head -1)"
 fi
 [[ -n "$POST_ID" ]] || fail "Could not discover POST_ID from sitemap; set POST_ID env"
 

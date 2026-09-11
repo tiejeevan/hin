@@ -72,3 +72,5 @@ jobs:
         run: npm run build --workspace=apps/web
         env:
           VITE_CHAT_WASM: '1'
+          VITE_SITE_URL: https://example.com
+          VITE_API_URL: https://example.com

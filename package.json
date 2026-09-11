@@ -20,7 +20,8 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:polls": "playwright test e2e/polls.spec.ts",
     "test:e2e:notifications": "playwright test e2e/notifications.spec.ts",
-    "test:smoke:perf": "bash scripts/smoke-perf.sh"
+    "test:smoke:perf": "bash scripts/smoke-perf.sh",
+    "test:smoke:seo": "bash scripts/seo-smoke.sh"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

@@ -84,10 +84,11 @@ ASYNC=1 API_URL=... ADMIN_TOKEN=... ./scripts/backfill-share-previews.sh
 ### 5. Post-deploy smoke (mandatory)
 
 ```bash
-SITE_URL=https://your-domain.com API_URL=https://your-domain.com ./scripts/seo-smoke.sh
+SITE_URL=https://your-domain.com API_URL=https://your-domain.com ./scripts/seo-deploy-check.sh
+# or: npm run test:smoke:seo (with SITE_URL + API_URL exported)
 ```
 
-The script exits non-zero if `SITE_URL` or `API_URL` are unset — no silent defaults to a specific domain.
+The scripts exit non-zero if `SITE_URL` or `API_URL` are unset — no silent defaults to a specific domain. `seo-deploy-check.sh` also rejects localhost in robots/canonical before running the full smoke suite.
 
 ## Switching domains / rebranding
 
@@ -114,14 +115,38 @@ Each environment should use its own D1 database (or run backfill against that DB
 
 Pick one canonical host in `SITE_URL`. Redirect the other with a 301. Use a single Search Console property for the canonical host.
 
+## hingot.com same-origin checklist
+
+Production example (`https://hingot.com`):
+
+1. **API Worker (`hin`)** — [`apps/api/wrangler.toml`](../apps/api/wrangler.toml):
+   - `[vars]` `SITE_URL` + `API_PUBLIC_URL` = `https://hingot.com`
+   - Routes: `hingot.com/api/*`, `hingot.com/ws`, `hingot.com/sitemap.xml`
+   - Deploy: `npm run deploy --workspace=apps/api`
+2. **Pages (`konnect`)** — [`apps/web/wrangler.toml`](../apps/web/wrangler.toml):
+   - `[vars]` `SITE_URL` = `https://hingot.com`
+   - `[vars]` `API_URL` = `https://hin.tiejeevan.workers.dev` (internal fetch for `_worker.js` only; browser uses `VITE_API_URL=https://hingot.com`)
+3. **Web build** (mandatory prod URLs):
+   ```bash
+   VITE_SITE_URL=https://hingot.com VITE_API_URL=https://hingot.com npm run build --workspace=apps/web
+   ```
+   Deploy: `npx wrangler pages deploy dist --project-name konnect` from `apps/web`
+4. **Backfill** — `./scripts/backfill-share-previews.sh` with prod `API_URL` + admin JWT
+5. **Verify** — `SITE_URL=... API_URL=... ./scripts/seo-deploy-check.sh` or `npm run test:smoke:seo`
+
+**Why `/sitemap.xml` is on the Worker:** Pages `_worker.js` proxies sitemap to `API_URL/sitemap.xml`. When both are `https://hingot.com`, the Worker route must handle `/sitemap.xml` directly to avoid a proxy loop.
+
 ## Common failure modes
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
+| Sitemap 500 / Internal Server Error | `SITE_URL` missing on API Worker | Set `SITE_URL` + `API_PUBLIC_URL`; redeploy API |
+| robots.txt / canonical show localhost | Web built without `VITE_SITE_URL` | Rebuild with prod env; use guarded `npm run build --workspace=apps/web` |
+| `/api/*` returns SPA HTML | Worker routes not attached on domain | Add `hingot.com/api/*` route; redeploy `hin` Worker |
 | Sitemap shows SPA title | `_worker.js` not deployed | Redeploy Pages with worker |
 | Sitemap URLs wrong domain | Backfill with old/missing `SITE_URL` | Fix env; re-run backfill |
 | Share previews generic | `API_URL` binding wrong | Fix Pages env; run smoke script |
-| Empty sitemap | Backfill not run | Run `./scripts/backfill-share-previews.sh` |
+| Empty sitemap (home only) | Backfill not run | Run `./scripts/backfill-share-previews.sh` |
 | Protected-account posts indexed | Stale cache | Re-run backfill (purge step removes orphans) |
 | Privacy toggle slow / timeout | Old sync refresh of every post preview | Fixed: bulk privacy update returns immediately; full refresh runs in background via `waitUntil` |
 

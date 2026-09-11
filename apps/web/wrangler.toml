@@ -1,0 +1,9 @@
+name = "konnect"
+pages_build_output_dir = "dist"
+compatibility_date = "2024-05-24"
+
+# Pages Functions runtime bindings for _worker.js (bot OG + sitemap proxy).
+# API_URL is the internal fetch target only (browser uses VITE_API_URL=https://hingot.com).
+[vars]
+SITE_URL = "https://hingot.com"
+API_URL = "https://hin.tiejeevan.workers.dev"

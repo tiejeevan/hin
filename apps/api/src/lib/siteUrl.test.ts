@@ -28,6 +28,12 @@ describe('resolveSiteUrls', () => {
       apiOrigin: 'http://192.168.1.5:8787',
     });
   });
+
+  it('throws when SITE_URL is unset and origin is not a local API dev server', () => {
+    expect(() => resolveSiteUrls({}, 'https://hin.tiejeevan.workers.dev')).toThrow(
+      /SITE_URL is not configured/,
+    );
+  });
 });
 
 describe('linkPreviewBotUserAgent', () => {
