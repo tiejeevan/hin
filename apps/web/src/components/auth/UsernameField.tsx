@@ -76,7 +76,7 @@ export function UsernameField({
         type="text"
         required
         autoComplete="username"
-        placeholder="your_username"
+        placeholder="Username"
         value={value}
         onChange={(e) => onChange(e.target.value.toLowerCase())}
         disabled={disabled}

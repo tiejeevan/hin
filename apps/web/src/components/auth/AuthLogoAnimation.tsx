@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 
 interface AuthLogoAnimationProps {
   className?: string;
+  /** Smaller variant for inside the auth card header. */
+  size?: 'default' | 'compact';
 }
 
 function usePrefersReducedMotion(): boolean {
@@ -18,22 +20,23 @@ function usePrefersReducedMotion(): boolean {
   return reduced;
 }
 
-export function AuthLogoAnimation({ className = '' }: AuthLogoAnimationProps) {
+export function AuthLogoAnimation({ className = '', size = 'default' }: AuthLogoAnimationProps) {
   const reducedMotion = usePrefersReducedMotion();
+  const sizeClass = size === 'compact' ? 'auth-logo-animation-compact' : '';
 
   if (reducedMotion) {
     return (
       <img
         src="/icons/hin-logo.png"
         alt="Hin"
-        className={`h-16 w-auto mx-auto object-contain ${className}`}
+        className={`${size === 'compact' ? 'h-12' : 'h-16'} w-auto mx-auto object-contain ${className}`}
       />
     );
   }
 
   return (
     <div
-      className={`auth-logo-animation ${className}`}
+      className={`auth-logo-animation ${sizeClass} ${className}`.trim()}
       role="img"
       aria-label="Hin logo"
     >

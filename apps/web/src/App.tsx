@@ -4667,6 +4667,7 @@ export default function App() {
             onSignIn={() => handleGuestSignIn()}
             onRegister={() => handleGuestSignIn({ register: true })}
             onGoHome={() => goHome()}
+            onlineCount={presenceEnabled ? onlineUserIds.size : undefined}
           />
         ) : currentUser ? (
           <AppHeader

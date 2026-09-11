@@ -1,5 +1,5 @@
 import { AuthForm } from './AuthForm';
-import { AuthLogoAnimation } from './AuthLogoAnimation';
+import { AuthTagline } from './AuthTagline';
 
 interface AuthLandingProps {
   isRegisterMode: boolean;
@@ -21,10 +21,7 @@ export function AuthLanding(props: AuthLandingProps) {
     <div className="flex-grow flex flex-col items-center justify-center p-4 bg-radial from-indigo-900/10 via-transparent to-transparent">
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-3">
-          <AuthLogoAnimation />
-          <p className="text-sm font-medium tracking-wide text-text-secondary">
-            Connect share repeat
-          </p>
+          <AuthTagline />
         </div>
 
         <AuthForm embedded {...props} />

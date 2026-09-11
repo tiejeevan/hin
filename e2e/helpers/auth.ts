@@ -46,7 +46,7 @@ export async function registerUser(
     (resp) => resp.url().includes('/api/auth/register') && resp.request().method() === 'POST',
   );
   await page.goto('/');
-  await page.getByRole('button', { name: 'Join free' }).click();
+  await page.getByRole('button', { name: 'Sign up' }).click();
   await page.getByPlaceholder('your_username').fill(username);
   await page.getByPlaceholder('you@example.com').fill(userEmail);
   await page.getByPlaceholder('••••••••').fill(password);

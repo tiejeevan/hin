@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Lock, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { GOOGLE_CLIENT_ID, TURNSTILE_SITE_KEY, API_URL } from '../../config';
+import { AuthLogoAnimation } from './AuthLogoAnimation';
 import { GoogleSignInButton } from './GoogleSignInButton';
 import { TurnstileWidget, type TurnstileWidgetHandle } from './TurnstileWidget';
 import { ForgotPasswordForm } from './ForgotPasswordForm';
@@ -98,22 +99,19 @@ export function AuthForm({
       : 'Any password with at least 1 character')
     : null;
 
+  const canSubmit = isRegisterMode
+    ? usernameInput.trim().length > 0 && emailInput.trim().length > 0 && passwordInput.trim().length > 0
+    : usernameInput.trim().length > 0 && passwordInput.trim().length > 0;
+
   const card = (
       <div className="max-w-md w-full bg-bg-secondary border border-border-custom rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
 
         <div className="text-center mb-6">
-          <div className="inline-flex h-14 w-14 rounded-2xl bg-indigo-600/10 text-indigo-400 items-center justify-center mb-3">
-            <Lock className="h-8 w-8" />
-          </div>
+          <AuthLogoAnimation size="compact" className="mb-1" />
           <h2 className="text-2xl font-bold text-text-primary">
             {isRegisterMode ? 'Create Account' : 'Welcome Back'}
           </h2>
-          <p className="text-xs text-text-muted mt-2">
-            {isRegisterMode
-              ? 'Register with a unique username, email, and password'
-              : 'Sign in with your username or email'}
-          </p>
         </div>
 
         {showGoogleSignIn && (
@@ -150,7 +148,7 @@ export function AuthForm({
                 type="text"
                 required
                 autoComplete="username"
-                placeholder="username or you@example.com"
+                placeholder="Email or username"
                 value={usernameInput}
                 onChange={e => onUsernameChange(e.target.value)}
                 className="w-full bg-bg-primary border border-border-custom rounded-xl px-4 py-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
@@ -165,7 +163,7 @@ export function AuthForm({
                 type="email"
                 required
                 autoComplete="email"
-                placeholder="you@example.com"
+                placeholder="Email"
                 value={emailInput}
                 onChange={e => onEmailChange(e.target.value)}
                 className="w-full bg-bg-primary border border-border-custom rounded-xl px-4 py-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
@@ -212,7 +210,7 @@ export function AuthForm({
           )}
           <button
             type="submit"
-            disabled={isAuthLoading || (turnstileRequired && !turnstileToken)}
+            disabled={isAuthLoading || !canSubmit || (turnstileRequired && !turnstileToken)}
             className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white font-semibold text-sm py-3 rounded-xl transition-all shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2 cursor-pointer min-h-[44px]"
           >
             {isAuthLoading ? 'Please wait...' : isRegisterMode ? 'Register Account' : 'Sign In'}

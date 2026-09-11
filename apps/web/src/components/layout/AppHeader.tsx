@@ -1,5 +1,5 @@
 import { LogOut, Search, Shield, User, Gavel } from 'lucide-react';
-import { BrandMark } from './BrandMark';
+import { HeaderBrandCluster } from './HeaderBrandCluster';
 import { User as UserType, Notification, type GamificationPublic } from '@hin/types';
 import { NotificationBell } from '../notifications/NotificationBell';
 import { NotificationPanel } from '../notifications/NotificationPanel';
@@ -71,33 +71,11 @@ export function AppHeader({
   }, [profileMenuOpen]);
 
   return (
-    <header className="sticky top-0 z-40 bg-bg-secondary/85 backdrop-blur-md border-b border-border-custom px-4 py-3 flex items-center justify-between transition-colors duration-200 shrink-0">
-      <div className="flex items-center gap-2.5 min-w-0">
-        <button
-          type="button"
-          onClick={onGoHome}
-          className="cursor-pointer rounded-xl hover:opacity-90 transition-opacity"
-          aria-label="Go home"
-        >
-          <BrandMark size="md" />
-        </button>
-        {currentUser && typeof onlineCount === 'number' && onlineCount > 0 && (
-          <span
-            className="inline-flex items-center gap-1 text-[11px] text-text-muted tabular-nums"
-            title={`${onlineCount} ${onlineCount === 1 ? 'person' : 'people'} online`}
-            aria-label={`${onlineCount} ${onlineCount === 1 ? 'person' : 'people'} online`}
-          >
-            <span className="relative flex h-1.5 w-1.5 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            </span>
-            {onlineCount}
-          </span>
-        )}
-      </div>
+    <header className="sticky top-0 z-40 h-14 px-4 flex items-center justify-between gap-4 bg-bg-secondary/85 backdrop-blur-md border-b border-border-custom transition-colors duration-200 shrink-0">
+      <HeaderBrandCluster onGoHome={onGoHome} onlineCount={onlineCount} />
 
       {currentUser && (
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           {showGamification && gamification && (gamification.level != null || gamification.totalPoints != null) && (
             <div className="hidden sm:flex items-center gap-2 pr-1 border-r border-border-custom">
               {gamification.level != null && <LevelBadge level={gamification.level} />}
@@ -108,7 +86,7 @@ export function AppHeader({
             <button
               type="button"
               onClick={onOpenAdmin}
-              className={`min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+              className={`h-10 w-10 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
                 isAdminTab
                   ? 'text-amber-500 bg-amber-500/10'
                   : 'text-amber-500/70 hover:text-amber-400 hover:bg-bg-tertiary'
@@ -123,7 +101,7 @@ export function AppHeader({
             <button
               type="button"
               onClick={onOpenOlabid}
-              className={`min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+              className={`h-10 w-10 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
                 isOlabidTab
                   ? 'text-amber-500 bg-amber-500/10'
                   : 'text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
@@ -140,7 +118,7 @@ export function AppHeader({
             <button
               type="button"
               onClick={onOpenSearch}
-              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors cursor-pointer"
+              className="h-10 w-10 flex items-center justify-center rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors cursor-pointer"
               title="Search"
               aria-label="Search"
             >
@@ -171,7 +149,7 @@ export function AppHeader({
             <button
               type="button"
               onClick={() => setProfileMenuOpen(prev => !prev)}
-              className="flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg hover:bg-bg-tertiary transition-colors cursor-pointer"
+              className="flex items-center justify-center h-10 w-10 rounded-lg hover:bg-bg-tertiary transition-colors cursor-pointer"
               aria-label="Account menu"
               aria-expanded={profileMenuOpen}
               aria-haspopup="menu"
