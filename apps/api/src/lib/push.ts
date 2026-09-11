@@ -164,11 +164,13 @@ export async function sendWebPushForNotification(
 
     const payload = pushCopyForNotification(notification);
 
-    for (const sub of subs) {
-      const result = await sendWebPushToSubscription(env, sub, payload);
-      if (result.gone) {
+    const results = await Promise.all(
+      subs.map((sub) => sendWebPushToSubscription(env, sub, payload)),
+    );
+    for (let i = 0; i < subs.length; i++) {
+      if (results[i]?.gone) {
         await db.delete(schema.pushSubscriptions)
-          .where(eq(schema.pushSubscriptions.id, sub.id))
+          .where(eq(schema.pushSubscriptions.id, subs[i].id))
           .run();
       }
     }

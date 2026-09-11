@@ -1,5 +1,5 @@
 import { drizzle } from 'drizzle-orm/d1';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import { parseMediaUrls } from './media';
 import { resolveSiteUrls, type SiteUrlEnv } from './siteUrl';
@@ -398,6 +398,78 @@ export async function refreshPostSharePreviewsForUser(
   return posts.length;
 }
 
+/** Fast path for privacy toggle — upserts previews without per-post poll/link fetches. */
+export async function bulkUpdateSharePreviewsForPrivacyChange(
+  db: Db,
+  userId: number,
+  isPrivate: boolean,
+  env: SiteUrlEnv,
+  requestOrigin?: string,
+): Promise<{ postsUpdated: number; profileUpdated: boolean }> {
+  const user = await db.select({
+    username: schema.users.username,
+    bio: schema.users.bio,
+    avatarUrl: schema.users.avatarUrl,
+    coverUrl: schema.users.coverUrl,
+    deletedAt: schema.users.deletedAt,
+  })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .get();
+
+  if (!user || user.deletedAt) {
+    return { postsUpdated: 0, profileUpdated: false };
+  }
+
+  const urls = getSharePreviewUrls(env, requestOrigin);
+  const profileDto = buildProfileSharePreviewFields({
+    username: user.username,
+    bio: user.bio,
+    avatarUrl: user.avatarUrl,
+    coverUrl: user.coverUrl,
+    isPrivate,
+    deleted: false,
+    urls,
+  });
+  await upsertSharePreviewRow(db, profileDto);
+
+  const posts = await db.select({
+    id: schema.posts.id,
+    content: schema.posts.content,
+    type: schema.posts.type,
+    mediaUrls: schema.posts.mediaUrls,
+    visibility: schema.posts.visibility,
+    deletedAt: schema.posts.deletedAt,
+  })
+    .from(schema.posts)
+    .where(
+      and(
+        eq(schema.posts.userId, userId),
+        isNull(schema.posts.parentPostId),
+        isNull(schema.posts.deletedAt),
+      ),
+    )
+    .all();
+
+  for (const post of posts) {
+    const dto = buildPostSharePreviewFields({
+      postId: post.id,
+      username: user.username,
+      content: post.content,
+      type: post.type,
+      mediaUrls: post.mediaUrls,
+      authorAvatarUrl: user.avatarUrl,
+      visibility: post.visibility ?? 'public',
+      authorIsPrivate: isPrivate,
+      deleted: false,
+      urls,
+    });
+    await upsertSharePreviewRow(db, dto);
+  }
+
+  return { postsUpdated: posts.length, profileUpdated: true };
+}
+
 function rowToDto(row: typeof schema.sharePreviews.$inferSelect): SharePreviewDto {
   return {
     title: row.title,
@@ -554,6 +626,9 @@ export interface BackfillBatchResult {
   phase: 'posts' | 'profiles' | 'purge';
 }
 
+/** Cursor values >= this base denote the profiles backfill phase (offset = cursor - base). */
+export const BACKFILL_PROFILE_CURSOR_BASE = 1_000_000_000;
+
 export async function backfillSharePreviewsBatch(
   db: Db,
   env: SiteUrlEnv,
@@ -561,56 +636,73 @@ export async function backfillSharePreviewsBatch(
   cursor: number,
   limit: number,
 ): Promise<BackfillBatchResult> {
-  await ensureHomeSharePreview(db, env, requestOrigin);
-
-  const publicPosts = await db.select({ id: schema.posts.id })
-    .from(schema.posts)
-    .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
-    .where(
-      and(
-        eq(schema.posts.visibility, 'public'),
-        eq(schema.users.isPrivate, 0),
-        sql`${schema.posts.deletedAt} IS NULL`,
-        sql`${schema.users.deletedAt} IS NULL`,
-        isNull(schema.posts.parentPostId),
-      ),
-    )
-    .orderBy(schema.posts.id)
-    .all();
-
-  if (cursor < publicPosts.length) {
-    const slice = publicPosts.slice(cursor, cursor + limit);
-    for (const row of slice) {
-      await refreshPostSharePreview(db, row.id, env, requestOrigin);
-    }
-    return {
-      processed: slice.length,
-      nextCursor: cursor + slice.length,
-      done: false,
-      phase: 'posts',
-    };
+  if (cursor === 0) {
+    await ensureHomeSharePreview(db, env, requestOrigin);
   }
 
-  const publicProfiles = await db.select({ username: schema.users.username })
+  if (cursor < BACKFILL_PROFILE_CURSOR_BASE) {
+    const postRows = await db.select({ id: schema.posts.id })
+      .from(schema.posts)
+      .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
+      .where(
+        and(
+          gt(schema.posts.id, cursor),
+          eq(schema.posts.visibility, 'public'),
+          eq(schema.users.isPrivate, 0),
+          sql`${schema.posts.deletedAt} IS NULL`,
+          sql`${schema.users.deletedAt} IS NULL`,
+          isNull(schema.posts.parentPostId),
+        ),
+      )
+      .orderBy(schema.posts.id)
+      .limit(limit)
+      .all();
+
+    if (postRows.length > 0) {
+      for (const row of postRows) {
+        await refreshPostSharePreview(db, row.id, env, requestOrigin);
+      }
+      return {
+        processed: postRows.length,
+        nextCursor: postRows[postRows.length - 1].id,
+        done: false,
+        phase: 'posts',
+      };
+    }
+
+    return backfillSharePreviewsBatch(
+      db,
+      env,
+      requestOrigin,
+      BACKFILL_PROFILE_CURSOR_BASE,
+      limit,
+    );
+  }
+
+  const profileIdCursor = cursor - BACKFILL_PROFILE_CURSOR_BASE;
+  const profileRows = await db.select({
+    id: schema.users.id,
+    username: schema.users.username,
+  })
     .from(schema.users)
     .where(
       and(
+        gt(schema.users.id, profileIdCursor),
         eq(schema.users.isPrivate, 0),
         sql`${schema.users.deletedAt} IS NULL`,
       ),
     )
     .orderBy(schema.users.id)
+    .limit(limit)
     .all();
 
-  const profileCursor = cursor - publicPosts.length;
-  if (profileCursor < publicProfiles.length) {
-    const slice = publicProfiles.slice(profileCursor, profileCursor + limit);
-    for (const row of slice) {
+  if (profileRows.length > 0) {
+    for (const row of profileRows) {
       await refreshProfileSharePreview(db, row.username, env, requestOrigin);
     }
     return {
-      processed: slice.length,
-      nextCursor: publicPosts.length + profileCursor + slice.length,
+      processed: profileRows.length,
+      nextCursor: BACKFILL_PROFILE_CURSOR_BASE + profileRows[profileRows.length - 1].id,
       done: false,
       phase: 'profiles',
     };

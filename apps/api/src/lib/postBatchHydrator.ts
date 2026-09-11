@@ -6,10 +6,22 @@ import { parseMediaUrls } from './media';
 import { loadPollsForPosts } from './polls';
 import { isGamificationEnabled } from './gamification/settings';
 import { loadEquippedBadgesForUsers } from './gamification/equipped';
-import { canViewPost } from './postVisibility';
 import { getHiddenAuthorIds } from './blocks';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
+
+function canViewPostWithFollowSet(
+  viewerId: number | null,
+  post: { userId: number; visibility: string | null | undefined },
+  followingAuthorIds: Set<number>,
+): boolean {
+  const visibility = (post.visibility ?? 'public') as PostVisibility;
+  if (viewerId === post.userId) return true;
+  if (visibility === 'public') return true;
+  if (visibility === 'only_me') return false;
+  if (!viewerId) return false;
+  return followingAuthorIds.has(post.userId);
+}
 
 export type PostHydrationRow = {
   id: number;
@@ -304,6 +316,23 @@ export async function buildPostsResponseBatch(
           ? new Set(await getHiddenAuthorIds(db, currentUserId))
           : new Set<number>();
 
+      const originalAuthorIds = [...new Set(originalRows.map((r) => r.userId))];
+      const followingAuthorIds = currentUserId != null && originalAuthorIds.length > 0
+        ? new Set(
+          (await db
+            .select({ followingId: schema.userFollows.followingId })
+            .from(schema.userFollows)
+            .where(
+              and(
+                eq(schema.userFollows.followerId, currentUserId),
+                inArray(schema.userFollows.followingId, originalAuthorIds),
+                isNull(schema.userFollows.deletedAt),
+              ),
+            )
+            .all()).map((r) => r.followingId),
+        )
+        : new Set<number>();
+
       for (const originalId of originalIds) {
         const row = originalRows.find((r) => r.id === originalId);
         if (!row) {
@@ -314,10 +343,10 @@ export async function buildPostsResponseBatch(
           embedByOriginalId.set(originalId, { id: originalId, unavailable: true });
           continue;
         }
-        const allowed = await canViewPost(db, currentUserId, {
+        const allowed = canViewPostWithFollowSet(currentUserId, {
           userId: row.userId,
           visibility: row.visibility,
-        });
+        }, followingAuthorIds);
         if (!allowed) {
           embedByOriginalId.set(originalId, { id: originalId, unavailable: true });
           continue;

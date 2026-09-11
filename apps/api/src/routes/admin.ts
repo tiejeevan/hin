@@ -19,7 +19,6 @@ import { isValidEmail, normalizeEmail } from '../lib/otp';
 import { sign } from 'hono/jwt';
 import type { Env } from '../types';
 import { getAuthUser, getJwtSecret } from '../lib/auth';
-import { isNotificationEnabled, toPublicSettings } from '../lib/user-settings';
 import { listReports, reviewReport } from '../lib/reports';
 import { softDeleteUser, reinstateUser, computeAccountStatus } from '../lib/user-lifecycle';
 import { getSystemSettings, updateSystemSettings } from '../lib/system-settings';
@@ -50,18 +49,29 @@ admin.get('/stats', async (c) => {
   const totalComments = await db.select({ value: count() }).from(schema.comments).where(sql`${schema.comments.deletedAt} IS NULL`).get();
   const totalMessages = await db.select({ value: count() }).from(schema.messages).where(sql`${schema.messages.deletedAt} IS NULL`).get();
 
-  const allUsers = await db.select({
-    id: schema.users.id,
-    username: schema.users.username,
-    role: schema.users.role,
-    createdAt: schema.users.createdAt,
-    deletedAt: schema.users.deletedAt,
-    deletionSource: schema.users.deletionSource,
-    country: schema.users.country,
-    postCount: sql<number>`(SELECT COUNT(*) FROM posts WHERE posts.user_id = ${schema.users.id} AND posts.deleted_at IS NULL)`,
-  })
-  .from(schema.users)
-  .all();
+  const [allUsers, postCountRows] = await Promise.all([
+    db.select({
+      id: schema.users.id,
+      username: schema.users.username,
+      role: schema.users.role,
+      createdAt: schema.users.createdAt,
+      deletedAt: schema.users.deletedAt,
+      deletionSource: schema.users.deletionSource,
+      country: schema.users.country,
+    })
+      .from(schema.users)
+      .all(),
+    db.select({
+      userId: schema.posts.userId,
+      value: count(),
+    })
+      .from(schema.posts)
+      .where(isNull(schema.posts.deletedAt))
+      .groupBy(schema.posts.userId)
+      .all(),
+  ]);
+
+  const postCountByUserId = new Map(postCountRows.map((r) => [r.userId, r.value ?? 0]));
 
   return c.json({
     stats: {
@@ -79,7 +89,7 @@ admin.get('/stats', async (c) => {
       deletedAt: u.deletedAt,
       deletionSource: u.deletionSource,
       country: u.country,
-      postCount: u.postCount ?? 0,
+      postCount: postCountByUserId.get(u.id) ?? 0,
       accountStatus: computeAccountStatus(u.deletedAt, u.deletionSource),
     })),
   });
@@ -241,35 +251,14 @@ admin.post('/broadcast', async (c) => {
   let notificationsCreated = 0;
 
   if (sendNotification) {
-    const [recipients, allSettingsRows] = await Promise.all([
-      db
-        .select({ id: schema.users.id })
-        .from(schema.users)
-        .where(isNull(schema.users.deletedAt))
-        .all(),
-      db.select().from(schema.userSettings).all(),
-    ]);
-
-    const settingsByUserId = new Map(allSettingsRows.map(row => [row.userId, row]));
-    const eligibleRecipients = recipients.filter(recipient => {
-      const row = settingsByUserId.get(recipient.id);
-      const settings = toPublicSettings(row ?? {
-        userId: recipient.id,
-        notifyLikes: 1,
-        notifyComments: 1,
-        notifyMentions: 1,
-        notifyDms: 1,
-        notifySystem: 1,
-        notifyReposts: 1,
-        notifyPushEnabled: 1,
-        muteAllToasts: 0,
-        chatIconMode: 'global',
-        chatIconPages: '[]',
-        extensionsJson: '{}',
-        updatedAt: new Date().toISOString(),
-      }, false);
-      return isNotificationEnabled(settings, 'system');
-    });
+    const eligibleRecipients = await db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .leftJoin(schema.userSettings, eq(schema.users.id, schema.userSettings.userId))
+      .where(
+        sql`${schema.users.deletedAt} IS NULL AND COALESCE(${schema.userSettings.notifySystem}, 1) = 1`,
+      )
+      .all();
 
     const BATCH_SIZE = 50;
     const createdNotifs: Notification[] = [];

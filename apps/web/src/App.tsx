@@ -229,6 +229,7 @@ export default function App() {
   const [lastSeenByUserId, setLastSeenByUserId] = useState<Record<number, string>>({});
   const typingTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const typingClearTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+  const markReadDebounceRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const lastTypingSentRef = useRef<Record<number, number>>({});
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -1809,10 +1810,16 @@ export default function App() {
                     clearTimeout(typingClearTimeoutRef.current[msg.senderId]);
                     delete typingClearTimeoutRef.current[msg.senderId];
                   }
-                  fetch(`${API_URL}/api/messages/read/${partnerId}`, {
-                    method: 'POST',
-                    headers: getHeaders(),
-                  });
+                  if (markReadDebounceRef.current[partnerId]) {
+                    clearTimeout(markReadDebounceRef.current[partnerId]);
+                  }
+                  markReadDebounceRef.current[partnerId] = setTimeout(() => {
+                    delete markReadDebounceRef.current[partnerId];
+                    fetch(`${API_URL}/api/messages/read/${partnerId}`, {
+                      method: 'POST',
+                      headers: getHeaders(),
+                    });
+                  }, 500);
                 }
               }
 

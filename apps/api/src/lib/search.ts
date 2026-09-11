@@ -7,6 +7,7 @@ import { getHiddenAuthorIds } from './blocks';
 import { buildVisibilitySqlConditions } from './postVisibility';
 import { loadEquippedBadgesForUsers } from './gamification/equipped';
 import { isGamificationEnabled } from './gamification/settings';
+import { batchFollowStatuses } from './follows';
 import { buildPostsResponseBatch } from './postBatchHydrator';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -39,6 +40,7 @@ export async function searchUsers(
     .select(USER_PUBLIC_FIELDS)
     .from(schema.users)
     .where(and(...conditions))
+    .limit(Math.max(limit + offset, 200))
     .all();
 
   if (matchingUsers.length === 0) return [];
@@ -61,11 +63,12 @@ export async function searchUsers(
       .all();
     followedSet = new Set(followed.map(f => f.followingId));
 
-    // Fetch interacted users from messages
-    const interactions = await db
+    const partnerRows = await db
       .select({
-        senderId: schema.messages.senderId,
-        receiverId: schema.messages.receiverId,
+        partnerId: sql<number>`CASE
+          WHEN ${schema.messages.senderId} = ${viewerId} THEN ${schema.messages.receiverId}
+          ELSE ${schema.messages.senderId}
+        END`.as('partner_id'),
       })
       .from(schema.messages)
       .where(
@@ -77,11 +80,11 @@ export async function searchUsers(
           isNull(schema.messages.deletedAt),
         ),
       )
+      .groupBy(sql`partner_id`)
       .all();
 
-    for (const m of interactions) {
-      if (m.senderId !== viewerId) interactedSet.add(m.senderId);
-      if (m.receiverId !== viewerId) interactedSet.add(m.receiverId);
+    for (const row of partnerRows) {
+      interactedSet.add(row.partnerId);
     }
   }
 
@@ -93,51 +96,9 @@ export async function searchUsers(
 
   const userIds = matchingUsers.map(u => u.id);
 
-  // Load follower/following statuses for all results if viewer is logged in
-  const followStatuses = new Map<number, FollowStatus>();
-  if (viewerId && userIds.length > 0) {
-    const [followedByRows, requestedRows] = await Promise.all([
-      db
-        .select({ followerId: schema.userFollows.followerId })
-        .from(schema.userFollows)
-        .where(
-          and(
-            eq(schema.userFollows.followingId, viewerId),
-            inArray(schema.userFollows.followerId, userIds),
-            isNull(schema.userFollows.deletedAt),
-          ),
-        )
-        .all(),
-      db
-        .select({ targetId: schema.followRequests.targetId })
-        .from(schema.followRequests)
-        .where(
-          and(
-            eq(schema.followRequests.requesterId, viewerId),
-            inArray(schema.followRequests.targetId, userIds),
-            isNull(schema.followRequests.deletedAt),
-          ),
-        )
-        .all(),
-    ]);
-
-    const followedBySet = new Set(followedByRows.map(r => r.followerId));
-    const requestedSet = new Set(requestedRows.map(r => r.targetId));
-
-    for (const id of userIds) {
-      if (id === viewerId) {
-        followStatuses.set(id, 'none');
-      } else if (followedSet.has(id)) {
-        followStatuses.set(id, 'following');
-      } else if (requestedSet.has(id)) {
-        followStatuses.set(id, 'requested');
-      } else if (followedBySet.has(id)) {
-        followStatuses.set(id, 'follows_you');
-      } else {
-        followStatuses.set(id, 'none');
-      }
-    }
-  }
+  const followStatuses = viewerId && userIds.length > 0
+    ? await batchFollowStatuses(db, viewerId, userIds)
+    : new Map<number, FollowStatus>();
 
   const mapped = matchingUsers.map(u => {
     const publicUser = toPublicUser(u, {

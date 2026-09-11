@@ -123,6 +123,17 @@ Pick one canonical host in `SITE_URL`. Redirect the other with a 301. Use a sing
 | Share previews generic | `API_URL` binding wrong | Fix Pages env; run smoke script |
 | Empty sitemap | Backfill not run | Run `./scripts/backfill-share-previews.sh` |
 | Protected-account posts indexed | Stale cache | Re-run backfill (purge step removes orphans) |
+| Privacy toggle slow / timeout | Old sync refresh of every post preview | Fixed: bulk privacy update returns immediately; full refresh runs in background via `waitUntil` |
+
+### Privacy toggle and share previews
+
+When a user toggles **Private account**, the API:
+
+1. Updates `users.is_private` and synchronously upserts share-preview rows for the profile and all root posts (visibility-aware, no per-post poll/link fetches).
+2. Returns the settings response without waiting for a full preview rebuild.
+3. Schedules a background `refreshPostSharePreviewsForUser` pass (poll titles, link images, etc.) via the Worker `waitUntil` hook.
+
+Share-preview JSON for crawlers reflects the privacy change immediately after step 1. Step 3 may refine titles/images within seconds. Run `./scripts/smoke-perf.sh` after deploy to verify PATCH latency and preview flip.
 
 ## Local verification
 
@@ -132,6 +143,7 @@ curl -s http://localhost:5173/sitemap.xml | head
 curl -s http://localhost:5173/robots.txt | grep -i GPTBot
 curl -s http://localhost:8787/api/seo/health
 npm run test:e2e -- e2e/seo.spec.ts
+npm run test:smoke:perf
 ```
 
 Note: Facebook-style HTML shell for crawlers only works on **Cloudflare Pages**, not Vite dev (API JSON share-preview works locally).

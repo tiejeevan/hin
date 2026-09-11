@@ -154,23 +154,24 @@ export function CreatePostForm({
     setUploading(true);
 
     try {
-      for (let i = 0; i < placeholders.length; i++) {
-        const placeholder = placeholders[i];
-        try {
-          const result = await uploadCompressedImage(placeholder.file, 'post', token, API_URL);
-          setImages(prev =>
-            prev.map(img =>
-              img.previewUrl === placeholder.previewUrl
-                ? { ...img, remoteUrl: result.url, uploadId: result.id }
-                : img,
-            ),
-          );
-        } catch (e) {
-          setImages(prev => prev.filter(img => img.previewUrl !== placeholder.previewUrl));
-          URL.revokeObjectURL(placeholder.previewUrl);
-          setError(e instanceof Error ? e.message : 'Upload failed');
-        }
-      }
+      await Promise.all(
+        placeholders.map(async (placeholder) => {
+          try {
+            const result = await uploadCompressedImage(placeholder.file, 'post', token, API_URL);
+            setImages(prev =>
+              prev.map(img =>
+                img.previewUrl === placeholder.previewUrl
+                  ? { ...img, remoteUrl: result.url, uploadId: result.id }
+                  : img,
+              ),
+            );
+          } catch (e) {
+            setImages(prev => prev.filter(img => img.previewUrl !== placeholder.previewUrl));
+            URL.revokeObjectURL(placeholder.previewUrl);
+            setError(e instanceof Error ? e.message : 'Upload failed');
+          }
+        }),
+      );
     } finally {
       setUploading(false);
     }

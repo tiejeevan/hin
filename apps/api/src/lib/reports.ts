@@ -1,5 +1,5 @@
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and, desc, lt, sql, count } from 'drizzle-orm';
+import { eq, and, desc, lt, sql, count, inArray } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import type {
   ContentReport,
@@ -139,6 +139,72 @@ export async function createReport(
   };
 }
 
+async function batchTargetPreviews(
+  db: Db,
+  rows: { targetType: string; targetId: number }[],
+): Promise<Map<string, { targetPreview?: string | null; targetUsername?: string | null }>> {
+  const result = new Map<string, { targetPreview?: string | null; targetUsername?: string | null }>();
+  const key = (type: string, id: number) => `${type}:${id}`;
+
+  const userIds = rows.filter((r) => r.targetType === 'user').map((r) => r.targetId);
+  const postIds = rows.filter((r) => r.targetType === 'post').map((r) => r.targetId);
+  const commentIds = rows.filter((r) => r.targetType === 'comment').map((r) => r.targetId);
+
+  if (userIds.length > 0) {
+    const users = await db
+      .select({ id: schema.users.id, username: schema.users.username })
+      .from(schema.users)
+      .where(inArray(schema.users.id, userIds))
+      .all();
+    for (const user of users) {
+      result.set(key('user', user.id), {
+        targetUsername: user.username,
+        targetPreview: user.username,
+      });
+    }
+  }
+
+  if (postIds.length > 0) {
+    const posts = await db
+      .select({
+        id: schema.posts.id,
+        content: schema.posts.content,
+        username: schema.users.username,
+      })
+      .from(schema.posts)
+      .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
+      .where(inArray(schema.posts.id, postIds))
+      .all();
+    for (const post of posts) {
+      result.set(key('post', post.id), {
+        targetPreview: post.content?.slice(0, 120) ?? null,
+        targetUsername: post.username ?? null,
+      });
+    }
+  }
+
+  if (commentIds.length > 0) {
+    const comments = await db
+      .select({
+        id: schema.comments.id,
+        content: schema.comments.content,
+        username: schema.users.username,
+      })
+      .from(schema.comments)
+      .innerJoin(schema.users, eq(schema.comments.userId, schema.users.id))
+      .where(inArray(schema.comments.id, commentIds))
+      .all();
+    for (const comment of comments) {
+      result.set(key('comment', comment.id), {
+        targetPreview: comment.content?.slice(0, 120) ?? null,
+        targetUsername: comment.username ?? null,
+      });
+    }
+  }
+
+  return result;
+}
+
 async function getTargetPreview(
   db: Db,
   targetType: ReportTargetType,
@@ -213,29 +279,26 @@ export async function listReports(
   const hasMore = rows.length > limit;
   const pageRows = hasMore ? rows.slice(0, limit) : rows;
 
-  const reports: ContentReport[] = await Promise.all(
-    pageRows.map(async (row) => {
-      const preview = await getTargetPreview(
-        db,
-        row.targetType as ReportTargetType,
-        row.targetId,
-      );
-      return {
-        id: row.id,
-        reporterId: row.reporterId,
-        reporterUsername: row.reporterUsername,
-        targetType: row.targetType as ReportTargetType,
-        targetId: row.targetId,
-        reason: row.reason as ReportReason,
-        details: row.details,
-        status: row.status as ReportStatus,
-        reviewedBy: row.reviewedBy,
-        reviewedAt: row.reviewedAt,
-        createdAt: row.createdAt,
-        ...preview,
-      };
-    }),
-  );
+  const previewMap = await batchTargetPreviews(db, pageRows);
+  const previewKey = (type: string, id: number) => `${type}:${id}`;
+
+  const reports: ContentReport[] = pageRows.map((row) => {
+    const preview = previewMap.get(previewKey(row.targetType, row.targetId)) ?? {};
+    return {
+      id: row.id,
+      reporterId: row.reporterId,
+      reporterUsername: row.reporterUsername,
+      targetType: row.targetType as ReportTargetType,
+      targetId: row.targetId,
+      reason: row.reason as ReportReason,
+      details: row.details,
+      status: row.status as ReportStatus,
+      reviewedBy: row.reviewedBy,
+      reviewedAt: row.reviewedAt,
+      createdAt: row.createdAt,
+      ...preview,
+    };
+  });
 
   const nextCursor = hasMore ? pageRows[pageRows.length - 1].id : null;
   return { reports, nextCursor };

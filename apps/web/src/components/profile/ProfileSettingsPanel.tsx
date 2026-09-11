@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Bell, Lock, MessageSquare, Settings, UserX, AlertTriangle, ShieldCheck, Bug } from 'lucide-react';
 import {
   ChatIconPage,
@@ -85,10 +85,15 @@ export function ProfileSettingsPanel({
     if (tourSection) setOpenSection(tourSection);
   }, [tourSection]);
 
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPatchRef = useRef<Partial<UserSettings>>({});
+
   const patchSettings = useCallback(
     async (patch: Partial<UserSettings>, key: string) => {
-      const previous = settings;
-      const optimistic = { ...settings, ...patch, updatedAt: new Date().toISOString() };
+      const previous = settingsRef.current;
+      const optimistic = { ...previous, ...patch, updatedAt: new Date().toISOString() };
       onSettingsChange(optimistic);
       setSavingKey(key);
       setError(null);
@@ -116,8 +121,37 @@ export function ProfileSettingsPanel({
         setSavingKey(null);
       }
     },
-    [settings, token, onSettingsChange],
+    [token, onSettingsChange],
   );
+
+  const flushDebouncedPatch = useCallback(async () => {
+    const patch = pendingPatchRef.current;
+    if (Object.keys(patch).length === 0) return;
+    pendingPatchRef.current = {};
+    await patchSettings(patch, 'debounced');
+  }, [patchSettings]);
+
+  const queueDebouncedPatch = useCallback(
+    (patch: Partial<UserSettings>, key: string) => {
+      pendingPatchRef.current = { ...pendingPatchRef.current, ...patch };
+      const optimistic = {
+        ...settingsRef.current,
+        ...pendingPatchRef.current,
+        updatedAt: new Date().toISOString(),
+      };
+      onSettingsChange(optimistic);
+      setSavingKey(key);
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = setTimeout(() => {
+        void flushDebouncedPatch();
+      }, 300);
+    },
+    [flushDebouncedPatch, onSettingsChange],
+  );
+
+  useEffect(() => () => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+  }, []);
 
   const toggleSection = (
     section: 'privacy' | 'notifications' | 'chat' | 'blocked' | 'security' | 'danger' | 'debug',
@@ -150,7 +184,7 @@ export function ProfileSettingsPanel({
     const pages = settings.chatIconPages.includes(page)
       ? settings.chatIconPages.filter(p => p !== page)
       : [...settings.chatIconPages, page];
-    void patchSettings({ chatIconPages: pages }, `chat-page-${page}`);
+    queueDebouncedPatch({ chatIconPages: pages }, `chat-page-${page}`);
   };
 
   return (
@@ -252,49 +286,49 @@ export function ProfileSettingsPanel({
               description="When someone likes your post or comment."
               checked={settings.notifyLikes}
               disabled={savingKey === 'notifyLikes'}
-              onChange={checked => void patchSettings({ notifyLikes: checked }, 'notifyLikes')}
+              onChange={checked => queueDebouncedPatch({ notifyLikes: checked }, 'notifyLikes')}
             />
             <SettingsToggle
               label="Comments"
               description="When someone comments on your post or replies to you."
               checked={settings.notifyComments}
               disabled={savingKey === 'notifyComments'}
-              onChange={checked => void patchSettings({ notifyComments: checked }, 'notifyComments')}
+              onChange={checked => queueDebouncedPatch({ notifyComments: checked }, 'notifyComments')}
             />
             <SettingsToggle
               label="Mentions"
               description="When someone @mentions you."
               checked={settings.notifyMentions}
               disabled={savingKey === 'notifyMentions'}
-              onChange={checked => void patchSettings({ notifyMentions: checked }, 'notifyMentions')}
+              onChange={checked => queueDebouncedPatch({ notifyMentions: checked }, 'notifyMentions')}
             />
             <SettingsToggle
               label="Reposts & quotes"
               description="When someone reposts or quotes your post."
               checked={settings.notifyReposts}
               disabled={savingKey === 'notifyReposts'}
-              onChange={checked => void patchSettings({ notifyReposts: checked }, 'notifyReposts')}
+              onChange={checked => queueDebouncedPatch({ notifyReposts: checked }, 'notifyReposts')}
             />
             <SettingsToggle
               label="Direct messages"
               description="When you receive a new DM."
               checked={settings.notifyDms}
               disabled={savingKey === 'notifyDms'}
-              onChange={checked => void patchSettings({ notifyDms: checked }, 'notifyDms')}
+              onChange={checked => queueDebouncedPatch({ notifyDms: checked }, 'notifyDms')}
             />
             <SettingsToggle
               label="System broadcasts"
               description="Admin announcements and system messages."
               checked={settings.notifySystem}
               disabled={savingKey === 'notifySystem'}
-              onChange={checked => void patchSettings({ notifySystem: checked }, 'notifySystem')}
+              onChange={checked => queueDebouncedPatch({ notifySystem: checked }, 'notifySystem')}
             />
             <SettingsToggle
               label="Push notifications"
               description="OS alerts when the app is closed (requires browser permission)."
               checked={settings.notifyPushEnabled}
               disabled={savingKey === 'notifyPushEnabled'}
-              onChange={checked => void patchSettings({ notifyPushEnabled: checked }, 'notifyPushEnabled')}
+              onChange={checked => queueDebouncedPatch({ notifyPushEnabled: checked }, 'notifyPushEnabled')}
             />
 
             <div className="pt-2 border-t border-border-custom">
@@ -302,7 +336,7 @@ export function ProfileSettingsPanel({
                 token={token}
                 notifyPushEnabled={settings.notifyPushEnabled}
                 onNotifyPushEnabledChange={(checked) =>
-                  void patchSettings({ notifyPushEnabled: checked }, 'notifyPushEnabled')
+                  queueDebouncedPatch({ notifyPushEnabled: checked }, 'notifyPushEnabled')
                 }
               />
             </div>
@@ -313,7 +347,7 @@ export function ProfileSettingsPanel({
                 description="Notifications still appear in your inbox."
                 checked={settings.muteAllToasts}
                 disabled={savingKey === 'muteAllToasts'}
-                onChange={checked => void patchSettings({ muteAllToasts: checked }, 'muteAllToasts')}
+                onChange={checked => queueDebouncedPatch({ muteAllToasts: checked }, 'muteAllToasts')}
               />
             </div>
           </div>
@@ -338,7 +372,7 @@ export function ProfileSettingsPanel({
                   type="radio"
                   name="chat-icon-mode"
                   checked={settings.chatIconMode === 'global'}
-                  onChange={() => void patchSettings({ chatIconMode: 'global' }, 'chatIconMode-global')}
+                  onChange={() => queueDebouncedPatch({ chatIconMode: 'global' }, 'chatIconMode-global')}
                   className="accent-indigo-600"
                 />
                 <span className="text-sm text-text-primary">Everywhere</span>
@@ -349,7 +383,7 @@ export function ProfileSettingsPanel({
                   name="chat-icon-mode"
                   checked={settings.chatIconMode === 'selected_pages'}
                   onChange={() =>
-                    void patchSettings({ chatIconMode: 'selected_pages' }, 'chatIconMode-selected')
+                    queueDebouncedPatch({ chatIconMode: 'selected_pages' }, 'chatIconMode-selected')
                   }
                   className="accent-indigo-600"
                 />

@@ -1,5 +1,5 @@
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and, isNull, desc, lt } from 'drizzle-orm';
+import { eq, and, isNull, desc, lt, inArray } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import type { BlockListUser, BlockStatus } from '@hin/types';
 import type { Env } from '../types';
@@ -107,6 +107,64 @@ export async function shouldDeliverNotification(
     hasMuted(db, recipientId, senderId),
   ]);
   return !blocked && !muted;
+}
+
+/** Batch block/mute check for notification fan-out (3 queries vs 2×N). */
+export async function shouldDeliverNotificationToRecipients(
+  db: Db,
+  recipientIds: number[],
+  senderId: number,
+): Promise<Set<number>> {
+  const deliverable = new Set<number>();
+  const uniqueRecipients = [...new Set(recipientIds.filter((id) => id !== senderId))];
+  if (uniqueRecipients.length === 0) return deliverable;
+
+  const [recipientBlockedSender, senderBlockedRecipient, mutedByRecipient] = await Promise.all([
+    db
+      .select({ blockerId: schema.userBlocks.blockerId })
+      .from(schema.userBlocks)
+      .where(
+        and(
+          inArray(schema.userBlocks.blockerId, uniqueRecipients),
+          eq(schema.userBlocks.blockedId, senderId),
+          isNull(schema.userBlocks.deletedAt),
+        ),
+      )
+      .all(),
+    db
+      .select({ blockedId: schema.userBlocks.blockedId })
+      .from(schema.userBlocks)
+      .where(
+        and(
+          inArray(schema.userBlocks.blockedId, uniqueRecipients),
+          eq(schema.userBlocks.blockerId, senderId),
+          isNull(schema.userBlocks.deletedAt),
+        ),
+      )
+      .all(),
+    db
+      .select({ muterId: schema.userMutes.muterId })
+      .from(schema.userMutes)
+      .where(
+        and(
+          inArray(schema.userMutes.muterId, uniqueRecipients),
+          eq(schema.userMutes.mutedId, senderId),
+          isNull(schema.userMutes.deletedAt),
+        ),
+      )
+      .all(),
+  ]);
+
+  const excluded = new Set<number>([
+    ...recipientBlockedSender.map((r) => r.blockerId),
+    ...senderBlockedRecipient.map((r) => r.blockedId),
+    ...mutedByRecipient.map((r) => r.muterId),
+  ]);
+
+  for (const id of uniqueRecipients) {
+    if (!excluded.has(id)) deliverable.add(id);
+  }
+  return deliverable;
 }
 
 async function hasMuted(db: Db, muterId: number, mutedId: number): Promise<boolean> {

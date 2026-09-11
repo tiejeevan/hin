@@ -51,17 +51,82 @@ export async function getFollowStatus(
   targetId: number,
 ): Promise<FollowStatus> {
   if (!viewerId || viewerId === targetId) return 'none';
+  const statuses = await batchFollowStatuses(db, viewerId, [targetId]);
+  return statuses.get(targetId) ?? 'none';
+}
 
-  const [following, followedBy, requested] = await Promise.all([
-    isFollowing(db, viewerId, targetId),
-    isFollowing(db, targetId, viewerId),
-    hasPendingRequest(db, viewerId, targetId),
+/** Batch follow status for list endpoints (3 queries total vs 3×N). */
+export async function batchFollowStatuses(
+  db: Db,
+  viewerId: number | null,
+  targetIds: number[],
+): Promise<Map<number, FollowStatus>> {
+  const result = new Map<number, FollowStatus>();
+  for (const id of targetIds) {
+    result.set(id, 'none');
+  }
+  if (!viewerId || targetIds.length === 0) {
+    return result;
+  }
+
+  const uniqueIds = [...new Set(targetIds.filter((id) => id !== viewerId))];
+  if (uniqueIds.length === 0) {
+    return result;
+  }
+
+  const [followingRows, followedByRows, requestedRows] = await Promise.all([
+    db
+      .select({ followingId: schema.userFollows.followingId })
+      .from(schema.userFollows)
+      .where(
+        and(
+          eq(schema.userFollows.followerId, viewerId),
+          inArray(schema.userFollows.followingId, uniqueIds),
+          isNull(schema.userFollows.deletedAt),
+        ),
+      )
+      .all(),
+    db
+      .select({ followerId: schema.userFollows.followerId })
+      .from(schema.userFollows)
+      .where(
+        and(
+          eq(schema.userFollows.followingId, viewerId),
+          inArray(schema.userFollows.followerId, uniqueIds),
+          isNull(schema.userFollows.deletedAt),
+        ),
+      )
+      .all(),
+    db
+      .select({ targetId: schema.followRequests.targetId })
+      .from(schema.followRequests)
+      .where(
+        and(
+          eq(schema.followRequests.requesterId, viewerId),
+          inArray(schema.followRequests.targetId, uniqueIds),
+          isNull(schema.followRequests.deletedAt),
+        ),
+      )
+      .all(),
   ]);
 
-  if (following) return 'following';
-  if (requested) return 'requested';
-  if (followedBy) return 'follows_you';
-  return 'none';
+  const followingSet = new Set(followingRows.map((r) => r.followingId));
+  const followedBySet = new Set(followedByRows.map((r) => r.followerId));
+  const requestedSet = new Set(requestedRows.map((r) => r.targetId));
+
+  for (const id of uniqueIds) {
+    if (followingSet.has(id)) {
+      result.set(id, 'following');
+    } else if (requestedSet.has(id)) {
+      result.set(id, 'requested');
+    } else if (followedBySet.has(id)) {
+      result.set(id, 'follows_you');
+    } else {
+      result.set(id, 'none');
+    }
+  }
+
+  return result;
 }
 
 export async function canViewUserPosts(
@@ -604,15 +669,15 @@ export async function listFollowers(
 
   const ids = pageRows.map(r => r.followerId);
   const infoMap = await enrichFollowListUsers(db, ids);
-  const statuses = viewerId
-    ? await Promise.all(ids.map(id => getFollowStatus(db, viewerId, id)))
-    : ids.map(() => 'none' as FollowStatus);
+  const statusMap = viewerId
+    ? await batchFollowStatuses(db, viewerId, ids)
+    : new Map<number, FollowStatus>();
 
   const users: FollowListUser[] = pageRows.map((r, i) => ({
     id: r.followerId,
     username: infoMap.get(r.followerId)?.username || 'unknown',
     avatarUrl: infoMap.get(r.followerId)?.avatarUrl ?? null,
-    followStatus: statuses[i],
+    followStatus: statusMap.get(r.followerId) ?? 'none',
   }));
 
   return { users, nextCursor };
@@ -651,15 +716,15 @@ export async function listFollowing(
 
   const ids = pageRows.map(r => r.followingId);
   const infoMap = await enrichFollowListUsers(db, ids);
-  const statuses = viewerId
-    ? await Promise.all(ids.map(id => getFollowStatus(db, viewerId, id)))
-    : ids.map(() => 'none' as FollowStatus);
+  const statusMap = viewerId
+    ? await batchFollowStatuses(db, viewerId, ids)
+    : new Map<number, FollowStatus>();
 
-  const users: FollowListUser[] = pageRows.map((r, i) => ({
+  const users: FollowListUser[] = pageRows.map((r) => ({
     id: r.followingId,
     username: infoMap.get(r.followingId)?.username || 'unknown',
     avatarUrl: infoMap.get(r.followingId)?.avatarUrl ?? null,
-    followStatus: statuses[i],
+    followStatus: statusMap.get(r.followingId) ?? 'none',
   }));
 
   return { users, nextCursor };

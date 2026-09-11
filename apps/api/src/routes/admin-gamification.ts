@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and, isNull, asc, sql } from 'drizzle-orm';
+import { eq, and, isNull, asc, sql, inArray } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import {
   UpdateGamificationSettingsSchema,
@@ -129,11 +129,31 @@ adminGamification.get('/badges', async (c) => {
     .orderBy(asc(schema.badges.id))
     .all();
 
-  const result: AdminBadge[] = [];
-  for (const badge of badges) {
-    const loaded = await loadBadgeWithRule(db, badge.id);
-    if (loaded) result.push(loaded);
-  }
+  const badgeIds = badges.map((b) => b.id);
+  const rules = badgeIds.length > 0
+    ? await db
+      .select({
+        badgeId: schema.badgeRules.badgeId,
+        metricKey: schema.badgeRules.metricKey,
+        operator: schema.badgeRules.operator,
+        threshold: schema.badgeRules.threshold,
+      })
+      .from(schema.badgeRules)
+      .where(inArray(schema.badgeRules.badgeId, badgeIds))
+      .all()
+    : [];
+
+  const ruleByBadgeId = new Map(rules.map((r) => [r.badgeId, r]));
+  const result: AdminBadge[] = badges.map((badge) => ({
+    id: badge.id,
+    name: badge.name,
+    description: badge.description,
+    imageUrl: badge.imageUrl,
+    isActive: badge.isActive === 1,
+    createdAt: badge.createdAt,
+    deletedAt: badge.deletedAt,
+    rule: ruleByBadgeId.get(badge.id) ?? null,
+  }));
 
   return c.json({ badges: result });
 });
@@ -424,11 +444,39 @@ adminGamification.get('/events', async (c) => {
     .orderBy(asc(schema.events.id))
     .all();
 
-  const result: AdminEvent[] = [];
-  for (const row of eventRows) {
-    const loaded = await loadEventWithRules(db, row.id);
-    if (loaded) result.push(loaded);
+  const eventIds = eventRows.map((e) => e.id);
+  const allRules = eventIds.length > 0
+    ? await db
+      .select()
+      .from(schema.eventRules)
+      .where(inArray(schema.eventRules.eventId, eventIds))
+      .all()
+    : [];
+
+  const rulesByEventId = new Map<number, typeof allRules>();
+  for (const rule of allRules) {
+    const list = rulesByEventId.get(rule.eventId) ?? [];
+    list.push(rule);
+    rulesByEventId.set(rule.eventId, list);
   }
+
+  const result: AdminEvent[] = eventRows.map((event) => ({
+    id: event.id,
+    name: event.name,
+    description: event.description,
+    startsAt: event.startsAt,
+    endsAt: event.endsAt,
+    status: event.status as AdminEvent['status'],
+    bannerUrl: event.bannerUrl,
+    requiresOptIn: event.requiresOptIn === 1,
+    createdAt: event.createdAt,
+    rules: (rulesByEventId.get(event.id) ?? []).map((r) => ({
+      id: r.id,
+      metricKey: r.metricKey,
+      winType: r.winType as AdminEventRule['winType'],
+      config: JSON.parse(r.config) as EventRuleConfig,
+    })),
+  }));
 
   return c.json({ events: result });
 });

@@ -1,4 +1,4 @@
-import { eq, and, count, isNull } from 'drizzle-orm';
+import { eq, and, count, inArray, isNull } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import { registerActionHandler } from './registry';
 import { getCounterValue, setCounterValue } from './counters';
@@ -29,14 +29,22 @@ async function recalcMaxLikesForUser(
     .where(and(eq(schema.posts.userId, userId), isNull(schema.posts.deletedAt)))
     .all();
 
+  if (posts.length === 0) {
+    await setCounterValue(tx, userId, 'max_likes_single_post', 0);
+    return;
+  }
+
+  const postIds = posts.map((post) => post.id);
+  const likeCounts = await tx
+    .select({ postId: schema.likes.postId, value: count() })
+    .from(schema.likes)
+    .where(and(inArray(schema.likes.postId, postIds), isNull(schema.likes.deletedAt)))
+    .groupBy(schema.likes.postId)
+    .all();
+
   let maxLikes = 0;
-  for (const post of posts) {
-    const res = await tx
-      .select({ value: count() })
-      .from(schema.likes)
-      .where(and(eq(schema.likes.postId, post.id), isNull(schema.likes.deletedAt)))
-      .get();
-    maxLikes = Math.max(maxLikes, res?.value ?? 0);
+  for (const row of likeCounts) {
+    maxLikes = Math.max(maxLikes, row.value ?? 0);
   }
 
   await setCounterValue(tx, userId, 'max_likes_single_post', maxLikes);

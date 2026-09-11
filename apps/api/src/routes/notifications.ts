@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, desc, and } from 'drizzle-orm';
+import { eq, desc, and, lt } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import { Notification, type NotificationCategory } from '@hin/types';
 import type { Env } from '../types';
@@ -23,12 +23,31 @@ notifications.get('/unread-count', async (c) => {
   return c.json({ count });
 });
 
-// Get notifications
+const NOTIFICATIONS_DEFAULT_LIMIT = 50;
+const NOTIFICATIONS_MAX_LIMIT = 1000;
+
+// Get notifications (paginated when ?limit= is set; otherwise returns up to max cap)
 notifications.get('/', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
 
   const db = drizzle(c.env.DB, { schema });
+  const limitParam = c.req.query('limit');
+  const cursorParam = c.req.query('cursor');
+  const usePagination = limitParam !== undefined || cursorParam !== undefined;
+  const limit = usePagination
+    ? Math.min(Math.max(parseInt(limitParam ?? String(NOTIFICATIONS_DEFAULT_LIMIT), 10) || NOTIFICATIONS_DEFAULT_LIMIT, 1), NOTIFICATIONS_MAX_LIMIT)
+    : NOTIFICATIONS_MAX_LIMIT;
+  const cursor = cursorParam !== undefined ? parseInt(cursorParam, 10) : null;
+
+  if (cursorParam !== undefined && (Number.isNaN(cursor!) || cursor! < 0)) {
+    return c.json({ error: 'Invalid cursor' }, 400);
+  }
+
+  const conditions = [eq(schema.notifications.userId, authUser.id)];
+  if (cursor !== null) {
+    conditions.push(lt(schema.notifications.id, cursor));
+  }
 
   const rawNotifs = await db
     .select({
@@ -47,11 +66,15 @@ notifications.get('/', async (c) => {
     })
     .from(schema.notifications)
     .leftJoin(schema.users, eq(schema.notifications.senderId, schema.users.id))
-    .where(eq(schema.notifications.userId, authUser.id))
-    .orderBy(desc(schema.notifications.createdAt))
+    .where(and(...conditions))
+    .orderBy(desc(schema.notifications.id))
+    .limit(limit + 1)
     .all();
 
-  const populatedNotifs: Notification[] = rawNotifs.map((notif) => ({
+  const hasMore = rawNotifs.length > limit;
+  const pageRows = hasMore ? rawNotifs.slice(0, limit) : rawNotifs;
+
+  const populatedNotifs: Notification[] = pageRows.map((notif) => ({
     id: notif.id,
     userId: notif.userId,
     senderId: notif.senderId,
@@ -65,6 +88,13 @@ notifications.get('/', async (c) => {
     read: notif.read === 1,
     createdAt: notif.createdAt,
   }));
+
+  if (usePagination) {
+    return c.json({
+      notifications: populatedNotifs,
+      nextCursor: hasMore ? pageRows[pageRows.length - 1].id : null,
+    });
+  }
 
   return c.json(populatedNotifs);
 });

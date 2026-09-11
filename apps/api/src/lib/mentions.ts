@@ -1,10 +1,10 @@
 import { and, inArray, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '@hin/db';
-import { Notification } from '@hin/types';
+import { DEFAULT_USER_SETTINGS, Notification } from '@hin/types';
 import type { Env } from '../types';
-import { getOrCreateUserSettings, isNotificationEnabled } from '../lib/user-settings';
-import { shouldDeliverNotification } from './blocks';
+import { isNotificationEnabled, toPublicSettings } from '../lib/user-settings';
+import { shouldDeliverNotificationToRecipients } from './blocks';
 import { sendWebPushForNotification } from './push';
 import { broadcastNotification, deferBroadcast, type RealtimeScheduler } from './realtime';
 
@@ -68,10 +68,30 @@ export async function notifyMentions(
   const notificationContent = `${opts.senderUsername} mentioned you in a ${contextLabel}.`;
   const commentId = opts.commentId ?? null;
 
+  const recipientIds = recipients.map((r) => r.id);
+  const [settingsRows, privacyRows, deliverableIds] = await Promise.all([
+    db.select()
+      .from(schema.userSettings)
+      .where(inArray(schema.userSettings.userId, recipientIds))
+      .all(),
+    db.select({ id: schema.users.id, isPrivate: schema.users.isPrivate })
+      .from(schema.users)
+      .where(inArray(schema.users.id, recipientIds))
+      .all(),
+    shouldDeliverNotificationToRecipients(db, recipientIds, opts.senderId),
+  ]);
+
+  const settingsByUserId = new Map(settingsRows.map((row) => [row.userId, row]));
+  const isPrivateByUserId = new Map(privacyRows.map((row) => [row.id, row.isPrivate === 1]));
+
   for (const recipient of recipients) {
-    const recipientSettings = await getOrCreateUserSettings(db, recipient.id);
+    const isPrivate = isPrivateByUserId.get(recipient.id) ?? false;
+    const settingsRow = settingsByUserId.get(recipient.id);
+    const recipientSettings = settingsRow
+      ? toPublicSettings(settingsRow, isPrivate)
+      : { ...DEFAULT_USER_SETTINGS, isPrivate, updatedAt: new Date().toISOString() };
     if (!isNotificationEnabled(recipientSettings, 'mention')) continue;
-    if (!await shouldDeliverNotification(db, recipient.id, opts.senderId)) continue;
+    if (!deliverableIds.has(recipient.id)) continue;
 
     const [notif] = await db
       .insert(schema.notifications)

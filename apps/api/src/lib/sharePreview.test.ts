@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BACKFILL_PROFILE_CURSOR_BASE,
   buildHomeSharePreview,
   buildPostSharePreviewFields,
   buildProfileSharePreviewFields,
@@ -156,6 +157,61 @@ describe('parseSharePath', () => {
     expect(parseSharePath('/post/12')).toEqual({ type: 'post', key: '12' });
     expect(parseSharePath('/profile/alice')).toEqual({ type: 'profile', key: 'alice' });
     expect(parseSharePath('/')).toEqual({ type: 'home', key: 'home' });
+  });
+});
+
+describe('backfill cursor encoding', () => {
+  it('uses profile phase base cursor constant', () => {
+    expect(BACKFILL_PROFILE_CURSOR_BASE).toBe(1_000_000_000);
+  });
+});
+
+describe('privacy bulk preview semantics', () => {
+  it('marks public-visibility posts non-public when author becomes private', () => {
+    const dto = buildPostSharePreviewFields({
+      postId: 1,
+      username: 'alice',
+      content: 'Hello',
+      type: 'text',
+      mediaUrls: null,
+      visibility: 'public',
+      authorIsPrivate: true,
+      deleted: false,
+      urls,
+    });
+    expect(dto.isPublic).toBe(false);
+    expect(dto.robots).toBe('noindex,nofollow');
+  });
+
+  it('restores public posts when author is public again', () => {
+    const dto = buildPostSharePreviewFields({
+      postId: 1,
+      username: 'alice',
+      content: 'Hello',
+      type: 'text',
+      mediaUrls: null,
+      visibility: 'public',
+      authorIsPrivate: false,
+      deleted: false,
+      urls,
+    });
+    expect(dto.isPublic).toBe(true);
+    expect(dto.robots).toBe('index,follow');
+  });
+
+  it('keeps followers-only posts private when author is public', () => {
+    const dto = buildPostSharePreviewFields({
+      postId: 1,
+      username: 'alice',
+      content: 'Hello',
+      type: 'text',
+      mediaUrls: null,
+      visibility: 'followers',
+      authorIsPrivate: false,
+      deleted: false,
+      urls,
+    });
+    expect(dto.isPublic).toBe(false);
   });
 });
 

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, and, count, sql, or, like, isNull } from 'drizzle-orm';
+import { eq, and, count, sql, or, like, isNull, gt, asc } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
@@ -18,26 +18,57 @@ import { toGamificationPublic, emptyGamificationPublic } from '../lib/gamificati
 import { isGamificationEnabled } from '../lib/gamification/settings';
 import { loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
 import { writeAuditLog, softDeleteUserAuditLogs } from '../lib/audit';
-import {
-  refreshPostSharePreviewsForUserSafe,
-  refreshProfileSharePreviewSafe,
-} from '../lib/sharePreviewHooks';
+import { deferBroadcast } from '../lib/realtime';
+import { bulkUpdateSharePreviewsForPrivacyChange } from '../lib/sharePreview';
+import { refreshPostSharePreviewsForUserSafe } from '../lib/sharePreviewHooks';
 import bcrypt from 'bcryptjs';
 
 const users = new Hono<{ Bindings: Env }>();
 
-// Get all users (for chat list and user details)
+const USERS_LIST_DEFAULT_LIMIT = 500;
+const USERS_LIST_MAX_LIMIT = 1000;
+
+// Get users (paginated; default first page preserves array response shape)
 users.get('/', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
 
   const db = drizzle(c.env.DB, { schema });
-  const allUsers = await db.select(USER_PUBLIC_FIELDS)
-  .from(schema.users)
-  .where(sql`${schema.users.deletedAt} IS NULL`) // Skip soft deleted users
-  .all();
+  const cursorParam = c.req.query('cursor');
+  const limitParam = c.req.query('limit');
+  const cursor = cursorParam !== undefined ? parseInt(cursorParam, 10) : 0;
+  const limit = limitParam !== undefined
+    ? Math.min(Math.max(parseInt(limitParam, 10) || USERS_LIST_DEFAULT_LIMIT, 1), USERS_LIST_MAX_LIMIT)
+    : USERS_LIST_DEFAULT_LIMIT;
 
-  return c.json(allUsers.map(u => toPublicUser(u)));
+  if (Number.isNaN(cursor) || cursor < 0) {
+    return c.json({ error: 'Invalid cursor' }, 400);
+  }
+
+  const rows = await db.select(USER_PUBLIC_FIELDS)
+    .from(schema.users)
+    .where(
+      and(
+        isNull(schema.users.deletedAt),
+        cursor > 0 ? gt(schema.users.id, cursor) : sql`1=1`,
+      ),
+    )
+    .orderBy(asc(schema.users.id))
+    .limit(limit + 1)
+    .all();
+
+  const hasMore = rows.length > limit;
+  const pageRows = hasMore ? rows.slice(0, limit) : rows;
+  const usersPayload = pageRows.map(u => toPublicUser(u));
+
+  if (cursorParam !== undefined || limitParam !== undefined) {
+    return c.json({
+      users: usersPayload,
+      nextCursor: hasMore ? pageRows[pageRows.length - 1].id : null,
+    });
+  }
+
+  return c.json(usersPayload);
 });
 
 // Update own profile (registered before /:id so "me" is not captured as an id)
@@ -205,8 +236,17 @@ users.patch('/me/settings', async (c) => {
 
   if (patch.isPrivate !== undefined) {
     const origin = new URL(c.req.url).origin;
-    await refreshProfileSharePreviewSafe(db, authUser.id, c.env, origin);
-    await refreshPostSharePreviewsForUserSafe(db, authUser.id, c.env, origin);
+    await bulkUpdateSharePreviewsForPrivacyChange(
+      db,
+      authUser.id,
+      !!patch.isPrivate,
+      c.env,
+      origin,
+    );
+    deferBroadcast(
+      c.executionCtx,
+      refreshPostSharePreviewsForUserSafe(db, authUser.id, c.env, origin),
+    );
   }
 
   return c.json(settings);
@@ -289,28 +329,26 @@ users.get('/search', async (c) => {
       .all();
     const followedSet = new Set(followed.map(f => f.followingId));
 
-    // 3. Fetch interacted users from messages
-    const interactions = await db.select({
-      senderId: schema.messages.senderId,
-      receiverId: schema.messages.receiverId
+    const partnerRows = await db.select({
+      partnerId: sql<number>`CASE
+        WHEN ${schema.messages.senderId} = ${authUser.id} THEN ${schema.messages.receiverId}
+        ELSE ${schema.messages.senderId}
+      END`.as('partner_id'),
     })
-    .from(schema.messages)
-    .where(
-      and(
-        or(
-          eq(schema.messages.senderId, authUser.id),
-          eq(schema.messages.receiverId, authUser.id)
+      .from(schema.messages)
+      .where(
+        and(
+          or(
+            eq(schema.messages.senderId, authUser.id),
+            eq(schema.messages.receiverId, authUser.id),
+          ),
+          isNull(schema.messages.deletedAt),
         ),
-        isNull(schema.messages.deletedAt)
       )
-    )
-    .all();
+      .groupBy(sql`partner_id`)
+      .all();
 
-    const interactedSet = new Set<number>();
-    for (const m of interactions) {
-      if (m.senderId !== authUser.id) interactedSet.add(m.senderId);
-      if (m.receiverId !== authUser.id) interactedSet.add(m.receiverId);
-    }
+    const interactedSet = new Set(partnerRows.map((r) => r.partnerId));
 
     // 4. Sort: followed first, then interacted, then alphabetical
     const equippedBadgesByUser = (await isGamificationEnabled(db))

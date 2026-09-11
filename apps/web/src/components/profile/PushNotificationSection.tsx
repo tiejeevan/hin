@@ -39,9 +39,7 @@ export function PushNotificationSection({
       const result = await registerPushSubscription(token);
       setPermission(result.permission);
       setSubscribed(result.subscribed);
-      if (result.subscribed && !notifyPushEnabled) {
-        onNotifyPushEnabledChange(true);
-      }
+      // Device subscription only — notifyPushEnabled is owned by the settings toggle.
       if (!result.subscribed && result.error) {
         setError(result.error);
       }
