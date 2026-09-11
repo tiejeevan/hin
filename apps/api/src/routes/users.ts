@@ -20,7 +20,10 @@ import { loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
 import { writeAuditLog, softDeleteUserAuditLogs } from '../lib/audit';
 import { deferBroadcast } from '../lib/realtime';
 import { bulkUpdateSharePreviewsForPrivacyChange } from '../lib/sharePreview';
-import { refreshPostSharePreviewsForUserSafe } from '../lib/sharePreviewHooks';
+import {
+  refreshPostSharePreviewsForUserSafe,
+  refreshProfileSharePreviewSafe,
+} from '../lib/sharePreviewHooks';
 import bcrypt from 'bcryptjs';
 
 const users = new Hono<{ Bindings: Env }>();

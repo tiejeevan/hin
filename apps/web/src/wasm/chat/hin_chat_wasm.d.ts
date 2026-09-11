@@ -5,11 +5,15 @@ export function apply_delivered(messages_json: string, ids_json: string, deliver
 
 export function apply_messages_read(messages_json: string, sender_id: bigint, receiver_id: bigint, read_at: string): string;
 
+export function chat_core_version(): string;
+
 export function engine_create(): number;
 
 export function engine_dispatch(engine_id: number, event_json: string): string;
 
 export function engine_snapshot(engine_id: number): string;
+
+export function extract_first_url(text: string): string | undefined;
 
 export function invert_flip_uniform(from_json: string, to_json: string): string;
 
@@ -27,6 +31,8 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly chat_core_version: () => [number, number];
+    readonly extract_first_url: (a: number, b: number) => [number, number];
     readonly merge_and_sort_messages: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly apply_delivered: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly apply_messages_read: (a: number, b: number, c: bigint, d: bigint, e: number, f: number) => [number, number, number, number];

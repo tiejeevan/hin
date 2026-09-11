@@ -62,6 +62,22 @@ export function apply_messages_read(messages_json, sender_id, receiver_id, read_
 }
 
 /**
+ * @returns {string}
+ */
+export function chat_core_version() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.chat_core_version();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * @returns {number}
  */
 export function engine_create() {
@@ -116,6 +132,22 @@ export function engine_snapshot(engine_id) {
     } finally {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
     }
+}
+
+/**
+ * @param {string} text
+ * @returns {string | undefined}
+ */
+export function extract_first_url(text) {
+    const ptr0 = passStringToWasm0(text, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.extract_first_url(ptr0, len0);
+    let v2;
+    if (ret[0] !== 0) {
+        v2 = getStringFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v2;
 }
 
 /**

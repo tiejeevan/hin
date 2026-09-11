@@ -1,6 +1,8 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const chat_core_version: () => [number, number];
+export const extract_first_url: (a: number, b: number) => [number, number];
 export const merge_and_sort_messages: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const apply_delivered: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const apply_messages_read: (a: number, b: number, c: bigint, d: bigint, e: number, f: number) => [number, number, number, number];
