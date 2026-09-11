@@ -29,6 +29,8 @@ import { getEquippedBadgesForUser, loadEquippedBadgesForUsers } from '../lib/gam
 import { sendWebPushForNotification } from '../lib/push';
 import { buildPostsResponseBatch, type PostHydrationRow } from '../lib/postBatchHydrator';
 import { broadcastEvent, broadcastNotification, deferBroadcast } from '../lib/realtime';
+import { refreshPostSharePreviewSafe } from '../lib/sharePreviewHooks';
+import { resolveSiteUrls } from '../lib/siteUrl';
 
 const posts = new Hono<{ Bindings: Env }>();
 
@@ -327,7 +329,16 @@ posts.post('/', async (c) => {
 
   const firstUrl = parseFirstUrl(inserted.content);
   if (firstUrl) {
-    const linkPreviewId = await getOrFetchLinkPreview(db, firstUrl, { olabidApiKey: c.env.OLABID_API_KEY });
+    let siteUrl: string | undefined;
+    try {
+      siteUrl = resolveSiteUrls(c.env, new URL(c.req.url).origin).siteUrl;
+    } catch {
+      siteUrl = undefined;
+    }
+    const linkPreviewId = await getOrFetchLinkPreview(db, firstUrl, {
+      olabidApiKey: c.env.OLABID_API_KEY,
+      siteUrl,
+    });
     if (linkPreviewId !== null) {
       await db.update(schema.posts).set({ linkPreviewId }).where(eq(schema.posts.id, inserted.id)).run();
       inserted.linkPreviewId = linkPreviewId;
@@ -394,6 +405,8 @@ posts.post('/', async (c) => {
 
   deferBroadcast(c.executionCtx, broadcastEvent(c.env, { type: 'post_created', payload: { post: responsePost } }));
 
+  await refreshPostSharePreviewSafe(db, inserted.id, c.env, new URL(c.req.url).origin);
+
   const gResult = await processUserActionSafe(
     db,
     c.env,
@@ -456,7 +469,15 @@ posts.put('/:id', async (c) => {
     await syncPostHashtags(db, updated.id, updated.content);
 
     const firstUrl = parseFirstUrl(updated.content);
-    const linkPreviewId = firstUrl ? await getOrFetchLinkPreview(db, firstUrl, { olabidApiKey: c.env.OLABID_API_KEY }) : null;
+    let siteUrl: string | undefined;
+    try {
+      siteUrl = resolveSiteUrls(c.env, new URL(c.req.url).origin).siteUrl;
+    } catch {
+      siteUrl = undefined;
+    }
+    const linkPreviewId = firstUrl
+      ? await getOrFetchLinkPreview(db, firstUrl, { olabidApiKey: c.env.OLABID_API_KEY, siteUrl })
+      : null;
     if (linkPreviewId !== updated.linkPreviewId) {
       [updated] = await db.update(schema.posts)
         .set({ linkPreviewId })
@@ -486,6 +507,8 @@ posts.put('/:id', async (c) => {
   }, authUser.id);
 
   deferBroadcast(c.executionCtx, broadcastEvent(c.env, { type: 'post_updated', payload: { post: responsePost } }));
+
+  await refreshPostSharePreviewSafe(db, postId, c.env, new URL(c.req.url).origin);
 
   return c.json(responsePost);
 });
@@ -1347,6 +1370,8 @@ posts.delete('/:id', async (c) => {
     owner?.username ?? 'Hin',
     { scheduler: c.executionCtx },
   );
+
+  await refreshPostSharePreviewSafe(db, postId, c.env, new URL(c.req.url).origin);
 
   return c.json({ success: true });
 });

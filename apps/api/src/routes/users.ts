@@ -18,6 +18,10 @@ import { toGamificationPublic, emptyGamificationPublic } from '../lib/gamificati
 import { isGamificationEnabled } from '../lib/gamification/settings';
 import { loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
 import { writeAuditLog, softDeleteUserAuditLogs } from '../lib/audit';
+import {
+  refreshPostSharePreviewsForUserSafe,
+  refreshProfileSharePreviewSafe,
+} from '../lib/sharePreviewHooks';
 import bcrypt from 'bcryptjs';
 
 const users = new Hono<{ Bindings: Env }>();
@@ -102,6 +106,8 @@ users.patch('/me', async (c) => {
     .set(updates)
     .where(eq(schema.users.id, authUser.id))
     .returning();
+
+  await refreshProfileSharePreviewSafe(db, authUser.id, c.env, new URL(c.req.url).origin);
 
   return c.json(toSelfUser(updated));
 });
@@ -196,6 +202,13 @@ users.patch('/me/settings', async (c) => {
   }
 
   const settings = await getOrCreateUserSettings(db, authUser.id);
+
+  if (patch.isPrivate !== undefined) {
+    const origin = new URL(c.req.url).origin;
+    await refreshProfileSharePreviewSafe(db, authUser.id, c.env, origin);
+    await refreshPostSharePreviewsForUserSafe(db, authUser.id, c.env, origin);
+  }
+
   return c.json(settings);
 });
 
@@ -232,6 +245,8 @@ users.delete('/me', async (c) => {
   });
   // Soft-delete all this user's audit logs (will be hard-purged after 90 days)
   await softDeleteUserAuditLogs(c, authUser.id);
+
+  await refreshProfileSharePreviewSafe(db, authUser.id, c.env, new URL(c.req.url).origin);
 
   return c.json({ success: true });
 });

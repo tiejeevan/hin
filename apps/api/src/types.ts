@@ -2,6 +2,12 @@ export interface Env {
   DB: D1Database;
   REALTIME_DO: DurableObjectNamespace;
   MEDIA: R2Bucket;
+  /** Public web origin, e.g. https://hingot.com */
+  SITE_URL?: string;
+  /** Public API origin for absolute media URLs; defaults to SITE_URL */
+  API_PUBLIC_URL?: string;
+  /** Google Search Console verification token */
+  GOOGLE_SITE_VERIFICATION?: string;
   GOOGLE_CLIENT_ID?: string;
   TURNSTILE_SECRET_KEY?: string;
   OLABID_API_KEY?: string;

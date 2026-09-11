@@ -5,8 +5,10 @@ import './index.css';
 import disableDevtool from 'disable-devtool';
 import { installGlobalFetchLoading } from './lib/globalLoading';
 import { GlobalLoadingOverlay } from './components/ui/GlobalLoadingOverlay';
+import { installSeoHeadSync } from './lib/seoHead';
 
 installGlobalFetchLoading();
+installSeoHeadSync();
 
 // Register PWA service worker (push handlers live in public/sw.js)
 if ('serviceWorker' in navigator) {

@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import { parseOlabidItemId, fetchOlabidItem } from './olabidApi';
 import { isOlabidEnabled } from './system-settings';
+import { linkPreviewBotUserAgent } from './siteUrl';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -173,10 +174,11 @@ async function fetchOlabidPreview(
 export async function getOrFetchLinkPreview(
   db: Db,
   rawUrl: string,
-  opts?: { olabidApiKey?: string },
+  opts?: { olabidApiKey?: string; siteUrl?: string },
 ): Promise<number | null> {
   const normalized = normalizeUrl(rawUrl);
   if (!normalized) return null;
+  const botUserAgent = linkPreviewBotUserAgent(opts?.siteUrl);
 
   let hostname: string;
   try {
@@ -215,7 +217,7 @@ export async function getOrFetchLinkPreview(
           signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
           redirect: 'follow',
           headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; HinLinkPreviewBot/1.0; +https://hin.app)',
+            'User-Agent': botUserAgent,
             'Accept': 'text/html,application/xhtml+xml',
           },
         });
@@ -237,7 +239,7 @@ export async function getOrFetchLinkPreview(
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         redirect: 'follow',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; HinLinkPreviewBot/1.0; +https://hin.app)',
+          'User-Agent': botUserAgent,
           'Accept': 'text/html,application/xhtml+xml',
         },
       });

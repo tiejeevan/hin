@@ -36,6 +36,7 @@ import auditLogsRoutes from './routes/audit-logs';
 import olabidRoutes from './routes/olabid';
 import itemCommentsRoutes from './routes/item-comments';
 import linkPreviewRoutes from './routes/link-preview';
+import seoRoutes, { sitemapHandler } from './routes/seo';
 import emailRoutes from './routes/email';
 import pushRoutes from './routes/push';
 
@@ -112,6 +113,8 @@ app.use('*', async (c, next) => {
 // Basic test endpoint
 app.get('/', (c) => c.text('Hin API is running!'));
 
+app.get('/sitemap.xml', (c) => sitemapHandler(c));
+
 app.use('/api/*', createGlobalRateLimitMiddleware());
 app.use('/api/*', createWriteRateLimitMiddleware());
 
@@ -159,6 +162,7 @@ app.route('/api/events', eventsRoutes);
 app.route('/api/olabid', olabidRoutes);
 app.route('/api/item-comments', itemCommentsRoutes);
 app.route('/api/link-preview', linkPreviewRoutes);
+app.route('/api/seo', seoRoutes);
 // Audit logs: admin full view at /api/admin/audit-logs, user partial at /api/me/audit-logs
 app.route('/api', auditLogsRoutes);
 

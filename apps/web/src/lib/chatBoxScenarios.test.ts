@@ -160,10 +160,10 @@ describe('ChatBox 1,500 Real-Time Scenario Validation Suite', () => {
           createdAt: new Date().toISOString(),
           read: false,
           status: 'sent',
-          mediaUrl: `https://cdn.hin.app/media/file_${i}.png`,
+          mediaUrl: `https://cdn.example.com/media/file_${i}.png`,
           mediaType: 'image/png',
           linkPreview: {
-            url: `https://hin.app/item/${i}`,
+            url: `https://example.com/item/${i}`,
             title: `Item Title ${i}`,
             description: `Description ${i}`,
           },

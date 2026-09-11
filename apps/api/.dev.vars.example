@@ -1,6 +1,10 @@
 # Local development environment variables for Cloudflare Workers
 # Copy this file to .dev.vars (already gitignored) and fill in your values
 
+# Public URLs for SEO / share previews / sitemap (local defaults)
+SITE_URL=http://localhost:5173
+API_PUBLIC_URL=http://localhost:8787
+
 # Olabid API Configuration
 OLABID_API_KEY=
 

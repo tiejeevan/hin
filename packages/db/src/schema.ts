@@ -92,6 +92,24 @@ export const linkPreviews = sqliteTable('link_previews', {
   fetchFailed: integer('fetch_failed').default(0).notNull(),
 });
 
+/** Cached Open Graph metadata for Hin URLs (posts, profiles, etc.) for crawlers and sitemap. */
+export const sharePreviews = sqliteTable('share_previews', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  resourceType: text('resource_type').notNull(),
+  resourceKey: text('resource_key').notNull(),
+  canonicalUrl: text('canonical_url').notNull(),
+  title: text('title').notNull(),
+  description: text('description').notNull(),
+  imageUrl: text('image_url').notNull(),
+  siteName: text('site_name').default('Hin').notNull(),
+  robots: text('robots').default('index,follow').notNull(),
+  isPublic: integer('is_public').default(1).notNull(),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  resourceUnique: uniqueIndex('share_previews_resource_unique').on(table.resourceType, table.resourceKey),
+  isPublicIdx: index('share_previews_is_public_idx').on(table.isPublic),
+}));
+
 export const posts = sqliteTable('posts', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

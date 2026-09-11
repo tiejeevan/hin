@@ -46,6 +46,8 @@ interface Window {
 interface ImportMetaEnv {
   readonly VITE_API_URL?: string;
   readonly VITE_WS_URL?: string;
+  readonly VITE_SITE_URL?: string;
+  readonly VITE_GOOGLE_SITE_VERIFICATION?: string;
   readonly VITE_GOOGLE_CLIENT_ID?: string;
   readonly VITE_TURNSTILE_SITE_KEY?: string;
 }

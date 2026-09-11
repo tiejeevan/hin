@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --port 5173 --host",
     "build": "tsc && vite build",
+    "build:web": "node -e \"if(!process.env.VITE_SITE_URL){console.error('VITE_SITE_URL is required for production web builds');process.exit(1)}\" && tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

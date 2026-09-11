@@ -22,6 +22,8 @@ binding = "MEDIA"
 bucket_name = "gmart"
 
 [vars]
+# SITE_URL / API_PUBLIC_URL — set in Cloudflare dashboard for production (e.g. https://hingot.com).
+# For local dev, add to apps/api/.dev.vars (see .dev.vars.example).
 GOOGLE_CLIENT_ID = "374278266123-6i29t1ve6t76cdb6vsvumvn4nghonpd8.apps.googleusercontent.com"
 # Add via `wrangler secret` / dashboard (do not commit real values):
 # OCI_SMTP_HOST, OCI_SMTP_PORT, OCI_SMTP_USERNAME, OCI_SMTP_PASSWORD,
