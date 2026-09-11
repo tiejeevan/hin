@@ -429,6 +429,8 @@ admin.post('/reset-data', async (c) => {
     c.env.DB.prepare('DELETE FROM posts'),
     c.env.DB.prepare('DELETE FROM hashtags'),
     c.env.DB.prepare('DELETE FROM messages'),
+    c.env.DB.prepare('DELETE FROM video_calls'),
+    c.env.DB.prepare('DELETE FROM video_call_allowlist'),
     c.env.DB.prepare('DELETE FROM notifications'),
     c.env.DB.prepare('DELETE FROM item_comment_likes'),
     c.env.DB.prepare('DELETE FROM item_comments'),

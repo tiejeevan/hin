@@ -22,6 +22,7 @@ import {
   resetIntroWalkthrough,
 } from '../lib/intro-walkthrough';
 import { toPublicUser, toSelfUser } from '../lib/users';
+import { canUserInitiateVideoCalls } from '../lib/video-calls';
 
 const me = new Hono<{ Bindings: Env }>();
 
@@ -56,6 +57,7 @@ me.get('/bootstrap', async (c) => {
     pendingFollowRequests,
     introWalkthroughCompleted,
     gamification,
+    canInitiateVideoCalls,
   ] = await Promise.all([
     getFollowedUserIds(db, authUser.id),
     getBlockedUserIds(db, authUser.id),
@@ -70,6 +72,7 @@ me.get('/bootstrap', async (c) => {
     gamificationEnabled
       ? toGamificationPublic(db, authUser.id, { includeGoals: true })
       : Promise.resolve(null),
+    canUserInitiateVideoCalls(db, authUser.id),
   ]);
 
   const self = toSelfUser(authUser);
@@ -88,6 +91,7 @@ me.get('/bootstrap', async (c) => {
     gamificationEnabled,
     needsUsernameSetup: self.needsUsernameSetup,
     needsEmailVerification: self.needsEmailVerification,
+    canInitiateVideoCalls,
     ...(gamificationEnabled && gamification ? { g: gamification } : {}),
   };
 

@@ -49,6 +49,11 @@ const SETTING_REGISTRY = {
     defaultValue: DEFAULT_SYSTEM_SETTINGS.presenceEnabled,
     parse: (raw: string | null) => parseBooleanSetting(raw, DEFAULT_SYSTEM_SETTINGS.presenceEnabled),
   },
+  videoCallsEnabled: {
+    key: 'video_calls_enabled',
+    defaultValue: DEFAULT_SYSTEM_SETTINGS.videoCallsEnabled,
+    parse: (raw: string | null) => parseBooleanSetting(raw, DEFAULT_SYSTEM_SETTINGS.videoCallsEnabled),
+  },
   strictPasswordRequirements: {
     key: 'strict_password_requirements',
     defaultValue: DEFAULT_SYSTEM_SETTINGS.strictPasswordRequirements,
@@ -138,6 +143,10 @@ export async function isOlabidEnabled(db: Db): Promise<boolean> {
 
 export async function isPresenceEnabled(db: Db): Promise<boolean> {
   return (await getSystemSettings(db)).presenceEnabled;
+}
+
+export async function isVideoCallsEnabled(db: Db): Promise<boolean> {
+  return (await getSystemSettings(db)).videoCallsEnabled;
 }
 
 export async function isEmailVerificationRequired(db: Db): Promise<boolean> {

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { History, Megaphone, Shield, Users, Flag, Settings, Award, LayoutDashboard, ShieldAlert, AlertTriangle, Gauge } from 'lucide-react';
+import { History, Megaphone, Shield, Users, Flag, Settings, Award, LayoutDashboard, ShieldAlert, AlertTriangle, Gauge, Video } from 'lucide-react';
 import { BroadcastDelivery, ContentReport, ReviewReportAction, SystemBroadcast as SystemBroadcastRecord, User as UserType } from '@hin/types';
 import type { AdminSection } from '../../lib/appRoutes';
 import { AdminData } from '../../types/ui';
@@ -14,6 +14,7 @@ import { AdminEvents } from './AdminEvents';
 import { AuditLogsPanel } from './AuditLogsPanel';
 import { ResetDataPanel } from './ResetDataPanel';
 import { AdminRateLimitsPanel } from './AdminRateLimitsPanel';
+import { AdminVideoCalls } from './AdminVideoCalls';
 
 interface AdminDashboardProps {
   section: AdminSection;
@@ -76,6 +77,7 @@ export function AdminDashboard({
   const [resetOpen, setResetOpen] = useState(false);
   const [rateLimitsOpen, setRateLimitsOpen] = useState(false);
   const [rateLimitsMounted, setRateLimitsMounted] = useState(false);
+  const [videoCallsOpen, setVideoCallsOpen] = useState(false);
 
   const toggleBroadcast = () => {
     setBroadcastOpen(prev => !prev);
@@ -274,6 +276,17 @@ export function AdminDashboard({
         onToggle={() => setUserSettingsOpen(prev => !prev)}
       >
         <AdminUserSettings token={token} />
+      </AdminCollapsibleSection>
+
+      <AdminCollapsibleSection
+        title="Video Calls"
+        description="Enable calls and manage who can start them."
+        icon={<Video className="h-5 w-5" />}
+        iconClassName="bg-sky-500/15 border-sky-500/25 text-sky-400"
+        open={videoCallsOpen}
+        onToggle={() => setVideoCallsOpen(prev => !prev)}
+      >
+        <AdminVideoCalls token={token} />
       </AdminCollapsibleSection>
 
       <AdminCollapsibleSection

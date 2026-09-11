@@ -106,6 +106,15 @@ export default defineConfig(({ command, mode }) => {
       host: true,
       port: 5173,
       proxy: {
+        '/api': {
+          target: apiProxyTarget,
+          changeOrigin: true,
+        },
+        '/ws': {
+          target: apiProxyTarget,
+          ws: true,
+          changeOrigin: true,
+        },
         '/sitemap.xml': {
           target: apiProxyTarget,
           changeOrigin: true,

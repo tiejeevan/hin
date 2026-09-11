@@ -39,6 +39,8 @@ import linkPreviewRoutes from './routes/link-preview';
 import seoRoutes, { sitemapHandler } from './routes/seo';
 import emailRoutes from './routes/email';
 import pushRoutes from './routes/push';
+import callsRoutes from './routes/calls';
+import adminVideoCallsRoutes from './routes/admin-video-calls';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -147,6 +149,7 @@ app.route('/', mediaRoutes);
 app.route('/api/posts', postsRoutes);
 app.route('/api/comments', commentsRoutes);
 app.route('/api/messages', messagesRoutes);
+app.route('/api/calls', callsRoutes);
 app.route('/api/notifications', notificationsRoutes);
 app.route('/api/follows', followsRoutes);
 app.route('/api/blocks', blocksRoutes);
@@ -157,6 +160,7 @@ app.route('/api/me', meRoutes);
 app.route('/api/hashtags', hashtagsRoutes);
 app.route('/api/search', searchRoutes);
 app.route('/api/admin', adminRoutes);
+app.route('/api/admin/video-calls', adminVideoCallsRoutes);
 app.route('/api/admin/gamification', adminGamificationRoutes);
 app.route('/api/events', eventsRoutes);
 app.route('/api/olabid', olabidRoutes);

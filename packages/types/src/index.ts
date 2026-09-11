@@ -42,6 +42,8 @@ export interface User {
   needsUsernameSetup?: boolean;
   /** Self-only — password signup must verify email OTP before full access. */
   needsEmailVerification?: boolean;
+  /** Self-only — admin allowlist grants permission to start video calls. */
+  canInitiateVideoCalls?: boolean;
 }
 
 export const USERNAME_MIN_LENGTH = 4;
@@ -282,6 +284,8 @@ export interface SystemSettings {
    * no presence WS events, no header online count, no chat online/offline indicators.
    */
   presenceEnabled: boolean;
+  /** When false (default), video calling is disabled platform-wide. */
+  videoCallsEnabled: boolean;
   /** When true, enforce industry-standard password complexity on register/change/reset. */
   strictPasswordRequirements: boolean;
   /**
@@ -333,6 +337,8 @@ export interface MeBootstrap {
   /** Self account setup flags (refreshed on bootstrap). */
   needsUsernameSetup?: boolean;
   needsEmailVerification?: boolean;
+  /** True when admin allowlist grants video call initiation. */
+  canInitiateVideoCalls?: boolean;
 }
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -342,6 +348,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   turnstileEnabled: false,
   olabidEnabled: true,
   presenceEnabled: false,
+  videoCallsEnabled: false,
   strictPasswordRequirements: false,
   emailVerificationRequired: true,
   outboundFromEmail: DEFAULT_OUTBOUND_FROM_EMAIL,
@@ -761,6 +768,50 @@ export type ClientMessage =
   | { type: 'typing'; payload: { receiverId: number; isTyping: boolean } }
   | { type: 'ack_delivered'; payload: { messageIds: number[] } };
 
+export type VideoCallStatus =
+  | 'ringing'
+  | 'accepted'
+  | 'declined'
+  | 'cancelled'
+  | 'missed'
+  | 'ended';
+
+export type CallType = 'audio' | 'video';
+
+export interface VideoCallPeer {
+  userId: number;
+  username: string;
+  avatarUrl?: string | null;
+}
+
+export interface VideoCallSession {
+  callId: number;
+  meetingId: string;
+  status: VideoCallStatus;
+  callType: CallType;
+  caller: VideoCallPeer;
+  callee: VideoCallPeer;
+  authToken?: string;
+  createdAt: string;
+}
+
+export interface VideoCallAllowlistEntry {
+  userId: number;
+  username: string;
+  email?: string | null;
+  avatarUrl?: string | null;
+  grantedAt: string;
+  grantedByAdminId: number;
+}
+
+export interface VideoCallAllowlistSearchResult {
+  userId: number;
+  username: string;
+  email?: string | null;
+  avatarUrl?: string | null;
+  alreadyAllowlisted: boolean;
+}
+
 export type ServerMessage =
   | { type: 'joined'; payload: { userId: number } }
   | { type: 'error'; payload: { message: string } }
@@ -790,7 +841,38 @@ export type ServerMessage =
   | { type: 'user_online'; payload: { userId: number } }
   | { type: 'user_offline'; payload: { userId: number; lastSeenAt?: string } }
   | { type: 'system_toast'; payload: { content: string } }
-  | { type: 'system_settings_changed'; payload: { settings: SystemSettings } };
+  | { type: 'system_settings_changed'; payload: { settings: SystemSettings } }
+  | { type: 'call_invite'; payload: { callId: number; caller: VideoCallPeer; callType: CallType; createdAt: string } }
+  | { type: 'call_accepted'; payload: { callId: number; callee: VideoCallPeer; callType: CallType } }
+  | { type: 'call_declined'; payload: { callId: number; calleeUserId: number } }
+  | { type: 'call_cancelled'; payload: { callId: number; reason: 'cancelled' | 'missed' | 'busy' } }
+  | { type: 'call_ended'; payload: { callId: number; endedByUserId: number } }
+  | { type: 'call_busy'; payload: { callId: number; calleeUserId: number } };
+
+export const VideoCallInviteSchema = z.object({
+  calleeUserId: z.number().int().positive(),
+  callType: z.enum(['audio', 'video']).optional().default('video'),
+});
+
+export const VideoCallActionSchema = z.object({
+  callId: z.number().int().positive(),
+});
+
+export const VideoCallsSettingsSchema = z.object({
+  videoCallsEnabled: z.boolean(),
+});
+
+export const VideoCallAllowlistSearchQuerySchema = z.object({
+  q: z.string().trim().min(2).max(100),
+});
+
+export const VideoCallAllowlistAddSchema = z.object({
+  identifier: z.string().min(1).max(254).optional(),
+  userId: z.number().int().positive().optional(),
+}).refine(
+  data => !!data.identifier || !!data.userId,
+  { message: 'identifier or userId required' },
+);
 
 export const BroadcastSystemMessageSchema = z.object({
   message: z.string().min(1, 'Message cannot be empty').max(500, 'Message is too long'),

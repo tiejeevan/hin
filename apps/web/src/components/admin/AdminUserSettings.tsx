@@ -179,9 +179,9 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
       ? (pendingBoolValue ? 'Require email verification?' : 'Disable email verification?')
       : confirmKind === 'olabid'
       ? (pendingBoolValue ? 'Enable Olabid panel?' : 'Disable Olabid panel?')
-      : confirmKind === 'presence'
+        : confirmKind === 'presence'
         ? (pendingBoolValue ? 'Enable users online presence?' : 'Disable users online presence?')
-        : (pendingBoolValue ? 'Enable bot protection?' : 'Disable bot protection?');
+          : (pendingBoolValue ? 'Enable bot protection?' : 'Disable bot protection?');
 
   const confirmBody =
     confirmKind === 'emailVerification'
@@ -196,7 +196,7 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
         ? (pendingBoolValue
           ? 'Enabling presence shows who is online in the header and in messages, and starts broadcasting online/offline events to connected clients.'
           : 'Disabling presence hides the online count and all online/offline indicators. The server will stop sending presence events entirely—no snapshots, online, or offline broadcasts.')
-        : (pendingBoolValue
+          : (pendingBoolValue
           ? 'Enabling Cloudflare Turnstile adds a secure, non-intrusive bot verification challenge to the login and registration pages. Please ensure that VITE_TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY are correctly configured.'
           : 'Disabling Cloudflare Turnstile removes the bot verification challenge on the login and registration pages. This makes the platform more vulnerable to automated spam registrations and brute-force attempts.');
 

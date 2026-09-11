@@ -795,3 +795,36 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
   endpointIdx: uniqueIndex('push_subscriptions_endpoint_idx').on(table.endpoint),
   userIdIdx: index('push_subscriptions_user_id_idx').on(table.userId),
 }));
+
+/** Admin-granted permission to initiate 1:1 video calls. */
+export const videoCallAllowlist = sqliteTable('video_call_allowlist', {
+  userId: integer('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  grantedByAdminId: integer('granted_by_admin_id').notNull().references(() => users.id),
+  grantedAt: text('granted_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export type VideoCallStatus =
+  | 'ringing'
+  | 'accepted'
+  | 'declined'
+  | 'cancelled'
+  | 'missed'
+  | 'ended';
+
+/** Active and historical 1:1 video call sessions. */
+export const videoCalls = sqliteTable('video_calls', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  callerId: integer('caller_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  calleeId: integer('callee_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  meetingId: text('meeting_id').notNull(),
+  callerParticipantId: text('caller_participant_id').notNull(),
+  calleeParticipantId: text('callee_participant_id').notNull(),
+  status: text('status').default('ringing').notNull(),
+  callType: text('call_type').default('video').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  endedAt: text('ended_at'),
+}, (table) => ({
+  callerStatusIdx: index('video_calls_caller_status_idx').on(table.callerId, table.status),
+  calleeStatusIdx: index('video_calls_callee_status_idx').on(table.calleeId, table.status),
+}));

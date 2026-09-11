@@ -30,4 +30,12 @@ export interface Env {
   VAPID_PRIVATE_KEY?: string;
   /** mailto:… or https://… subject for VAPID JWT */
   VAPID_SUBJECT?: string;
+  /** Cloudflare RealtimeKit — create via dashboard, set via wrangler secret. */
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  CLOUDFLARE_API_TOKEN?: string;
+  REALTIMEKIT_APP_ID?: string;
+  /** Preset name configured in RealtimeKit dashboard (both peers need publish/subscribe). */
+  REALTIMEKIT_DM_PRESET?: string;
+  /** Audio-only preset for voice calls (no video publish/subscribe). */
+  REALTIMEKIT_AUDIO_PRESET?: string;
 }

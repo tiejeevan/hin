@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { X, Shield, SquarePen, ChevronLeft, Maximize2, Minimize2, Send, MessageCircle, ImagePlus, Camera, Loader2 } from 'lucide-react';
-import { ChatThread, LinkPreview, Message, User as UserType } from '@hin/types';
+import { X, Shield, SquarePen, ChevronLeft, Maximize2, Minimize2, Send, MessageCircle, ImagePlus, Camera, Loader2, Video, Phone } from 'lucide-react';
+import { CallType, ChatThread, LinkPreview, Message, User as UserType } from '@hin/types';
+import { prefetchActiveCallRoom } from '../calls/ActiveCallPanel';
+import { CallControlButton } from '../calls/CallControlButton';
 import { ChatRecipient } from '../../types/ui';
 import { UserAvatar } from '../profile/UserAvatar';
 import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
@@ -82,6 +84,10 @@ interface MessagesPanelProps {
   olabidEnabled?: boolean;
   /** When false, hide all online/offline indicators (no presence feature). */
   presenceEnabled?: boolean;
+  /** When true, show voice/video call buttons in active chat header. */
+  canInitiateVideoCalls?: boolean;
+  onStartCall?: (recipient: ChatRecipient, callType: CallType) => void;
+  videoCallBusy?: boolean;
 }
 
 export function MessagesPanel({
@@ -121,6 +127,9 @@ export function MessagesPanel({
   onClearDraftMedia,
   olabidEnabled = true,
   presenceEnabled = false,
+  canInitiateVideoCalls = false,
+  onStartCall,
+  videoCallBusy = false,
 }: MessagesPanelProps) {
   const sorted = useMemo(() => sortThreads(threads), [threads]);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -404,6 +413,9 @@ export function MessagesPanel({
           onToggleExpand={onToggleExpand}
           onClose={onClose}
           onOpenProfile={onOpenProfile}
+          canInitiateVideoCalls={canInitiateVideoCalls}
+          onStartCall={onStartCall}
+          videoCallBusy={videoCallBusy}
         />
 
         {showingChat && chatRecipient ? (
@@ -823,6 +835,9 @@ function PanelHeader({
   onToggleExpand,
   onClose,
   onOpenProfile,
+  canInitiateVideoCalls,
+  onStartCall,
+  videoCallBusy,
 }: {
   showingChat: boolean;
   chatRecipient: ChatRecipient | null;
@@ -835,6 +850,9 @@ function PanelHeader({
   onToggleExpand: () => void;
   onClose: () => void;
   onOpenProfile: (userId: number, opts?: { username?: string }) => void;
+  canInitiateVideoCalls?: boolean;
+  onStartCall?: (recipient: ChatRecipient, callType: CallType) => void;
+  videoCallBusy?: boolean;
 }) {
   const presenceLabel = isOnline
     ? chatStrings.online
@@ -895,6 +913,32 @@ function PanelHeader({
       </div>
 
       <div className="flex items-center gap-0.5 shrink-0">
+        {showingChat && chatRecipient && canInitiateVideoCalls && onStartCall && (
+          <>
+            <CallControlButton
+              variant="compact-voice"
+              size="sm"
+              icon={<Phone className="h-4 w-4" />}
+              onClick={() => onStartCall(chatRecipient, 'audio')}
+              onMouseEnter={prefetchActiveCallRoom}
+              onFocus={prefetchActiveCallRoom}
+              disabled={videoCallBusy}
+              aria-label={`Voice call ${chatRecipient.username}`}
+              title="Voice call"
+            />
+            <CallControlButton
+              variant="compact-video"
+              size="sm"
+              icon={<Video className="h-4 w-4" />}
+              onClick={() => onStartCall(chatRecipient, 'video')}
+              onMouseEnter={prefetchActiveCallRoom}
+              onFocus={prefetchActiveCallRoom}
+              disabled={videoCallBusy}
+              aria-label={`Video call ${chatRecipient.username}`}
+              title="Video call"
+            />
+          </>
+        )}
         <button
           onClick={onToggleExpand}
           className="h-8 w-8 flex items-center justify-center rounded-lg text-text-muted hover:text-text-primary hover:bg-bg-tertiary cursor-pointer transition-colors"

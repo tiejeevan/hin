@@ -35,3 +35,11 @@ JWT_SECRET=
 VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 VAPID_SUBJECT=mailto:noreply@hingot.com
+
+# Cloudflare RealtimeKit (1:1 video calls) — see docs/REALTIMEKIT_SETUP.md
+CLOUDFLARE_ACCOUNT_ID=
+CLOUDFLARE_API_TOKEN=
+REALTIMEKIT_APP_ID=
+# Optional preset overrides (configure in RealtimeKit dashboard)
+# REALTIMEKIT_DM_PRESET=group_call_participant
+# REALTIMEKIT_AUDIO_PRESET=hin-dm-audio

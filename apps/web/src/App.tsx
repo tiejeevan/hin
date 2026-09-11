@@ -98,6 +98,9 @@ import { FollowersModal } from './components/profile/FollowersModal';
 import { ReportModal } from './components/moderation/ReportModal';
 import { applyGamificationReward } from './components/gamification/GamificationToast';
 import { useSessionTick } from './hooks/useSessionTick';
+import { useVideoCallManager } from './hooks/useVideoCallManager';
+import { IncomingCallOverlay } from './components/calls/IncomingCallOverlay';
+import { ActiveCallPanel } from './components/calls/ActiveCallPanel';
 import { useIntroWalkthrough } from './hooks/useIntroWalkthrough';
 import { useProfileTour } from './hooks/useProfileTour';
 import {
@@ -269,11 +272,16 @@ export default function App() {
   const presenceEnabledRef = useRef(false);
   const [gamificationEnabled, setGamificationEnabled] = useState(false);
   const [introWalkthroughCompleted, setIntroWalkthroughCompleted] = useState<boolean | null>(null);
+  const [canInitiateVideoCalls, setCanInitiateVideoCalls] = useState(false);
   const [myGamification, setMyGamification] = useState<GamificationPublic | null>(null);
   const [profileGamification, setProfileGamification] = useState<GamificationPublic | null>(null);
   const userSettingsRef = useRef<UserSettings | null>(null);
 
   useSessionTick(token, gamificationEnabled);
+
+  const videoCall = useVideoCallManager(token, currentUser?.id);
+  const handleVideoCallWsRef = useRef(videoCall.handleWsMessage);
+  handleVideoCallWsRef.current = videoCall.handleWsMessage;
 
   useEffect(() => {
     userSettingsRef.current = userSettings;
@@ -847,6 +855,7 @@ export default function App() {
         setGamificationEnabled(!!data.gamificationEnabled);
         setMyGamification(data.g ?? null);
         setIntroWalkthroughCompleted(!!data.introWalkthroughCompleted);
+        setCanInitiateVideoCalls(!!data.canInitiateVideoCalls);
         if (data.needsUsernameSetup !== undefined || data.needsEmailVerification !== undefined) {
           setCurrentUser((prev) => {
             if (!prev) return prev;
@@ -1055,6 +1064,9 @@ export default function App() {
   // Treat as OFF until the public/bootstrap flag is known so /olabid never fetches early.
   const olabidEnabled = olabidFlagKnown && systemSettings?.olabidEnabled === true;
   const presenceEnabled = systemSettings?.presenceEnabled === true;
+  const videoCallsEnabled = systemSettings?.videoCallsEnabled === true;
+  const showVideoCallButton = videoCallsEnabled && canInitiateVideoCalls;
+  const videoCallBusy = videoCall.state.phase !== 'idle' && videoCall.state.phase !== 'ended';
   const emailVerificationRequired = systemSettings?.emailVerificationRequired ?? true;
   const showEmailVerificationGate =
     !!currentUser?.needsEmailVerification && emailVerificationRequired;
@@ -2092,6 +2104,14 @@ export default function App() {
               }
               break;
             }
+            case 'call_invite':
+            case 'call_accepted':
+            case 'call_declined':
+            case 'call_cancelled':
+            case 'call_ended':
+            case 'call_busy':
+              handleVideoCallWsRef.current(message);
+              break;
             case 'system_settings_changed': {
               const { settings } = message.payload as { settings: SystemSettings };
               setSystemSettings(settings);
@@ -5206,6 +5226,39 @@ export default function App() {
             onClearDraftMedia={clearDraftMedia}
             olabidEnabled={olabidEnabled}
             presenceEnabled={presenceEnabled}
+            canInitiateVideoCalls={showVideoCallButton}
+            videoCallBusy={videoCallBusy}
+            onStartCall={(recipient, callType) => {
+              void videoCall.startCall(recipient.id, recipient.username, callType).then(err => {
+                if (err) addToast(err, 'system', undefined, { skipPrefCheck: true });
+              });
+            }}
+          />
+        )}
+
+        {(videoCall.state.phase === 'outgoing_ring'
+          || videoCall.state.phase === 'incoming_ring'
+          || videoCall.state.phase === 'connecting'
+          || (videoCall.state.phase === 'ended' && videoCall.state.endReason)) && (
+          <IncomingCallOverlay
+            phase={videoCall.state.phase === 'ended' ? 'ended' : videoCall.state.phase}
+            callType={videoCall.state.callType ?? videoCall.state.call?.callType ?? 'video'}
+            remotePeer={videoCall.state.remotePeer}
+            endReason={videoCall.state.endReason}
+            onAccept={() => void videoCall.acceptIncoming()}
+            onDecline={() => void videoCall.declineIncoming()}
+            onCancel={() => void videoCall.cancelOutgoing()}
+          />
+        )}
+
+        {videoCall.state.phase === 'in_call'
+          && videoCall.state.authToken
+          && videoCall.state.remotePeer && (
+          <ActiveCallPanel
+            authToken={videoCall.state.authToken}
+            callType={videoCall.state.callType ?? videoCall.state.call?.callType ?? 'video'}
+            remotePeer={videoCall.state.remotePeer}
+            onHangUp={() => void videoCall.hangUp()}
           />
         )}
 
