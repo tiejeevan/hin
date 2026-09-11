@@ -6,6 +6,10 @@ export type AccountBlockReason = 'username_setup_required' | 'email_verification
 
 export type AccountGuardUser = Parameters<typeof getAccountBlockReason>[0];
 
+export type AccountGuardOptions = {
+  emailVerificationRequired?: boolean;
+};
+
 function hasPasswordAccount(user: { passwordHash?: string | null }): boolean {
   return !!(user.passwordHash && user.passwordHash.length > 0);
 }
@@ -15,12 +19,16 @@ function hasEmailOnFile(user: { email?: string | null }): boolean {
 }
 
 /** Password signup users with an email must verify inbox OTP before full access. */
-export function userNeedsEmailVerification(user: {
-  email?: string | null;
-  emailVerifiedAt?: string | null;
-  passwordHash?: string | null;
-  googleId?: string | null;
-}): boolean {
+export function userNeedsEmailVerification(
+  user: {
+    email?: string | null;
+    emailVerifiedAt?: string | null;
+    passwordHash?: string | null;
+    googleId?: string | null;
+  },
+  options?: AccountGuardOptions,
+): boolean {
+  if (options?.emailVerificationRequired === false) return false;
   return (
     hasPasswordAccount(user)
     && !user.googleId
@@ -29,24 +37,30 @@ export function userNeedsEmailVerification(user: {
   );
 }
 
-export function getAccountBlockReason(user: {
-  needsUsernameSetup?: number | boolean | null;
-  email?: string | null;
-  emailVerifiedAt?: string | null;
-  passwordHash?: string | null;
-  googleId?: string | null;
-}): AccountBlockReason | null {
+export function getAccountBlockReason(
+  user: {
+    needsUsernameSetup?: number | boolean | null;
+    email?: string | null;
+    emailVerifiedAt?: string | null;
+    passwordHash?: string | null;
+    googleId?: string | null;
+  },
+  options?: AccountGuardOptions,
+): AccountBlockReason | null {
   if (user.needsUsernameSetup) {
     return 'username_setup_required';
   }
-  if (userNeedsEmailVerification(user)) {
+  if (userNeedsEmailVerification(user, options)) {
     return 'email_verification_required';
   }
   return null;
 }
 
-export function isAccountSetupComplete(user: AccountGuardUser): boolean {
-  return getAccountBlockReason(user) === null;
+export function isAccountSetupComplete(
+  user: AccountGuardUser,
+  options?: AccountGuardOptions,
+): boolean {
+  return getAccountBlockReason(user, options) === null;
 }
 
 export function getAccountBlockMessage(reason: AccountBlockReason): string {

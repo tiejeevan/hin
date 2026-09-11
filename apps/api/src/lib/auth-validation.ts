@@ -99,15 +99,14 @@ export async function checkEmailAvailableForRegistration(
   const existing = await db.select({
     id: schema.users.id,
     googleId: schema.users.googleId,
-    deletedAt: schema.users.deletedAt,
   })
     .from(schema.users)
-    .where(eq(schema.users.email, normalized))
+    .where(and(
+      eq(schema.users.email, normalized),
+      isNull(schema.users.deletedAt),
+    ))
     .get();
 
-  if (existing && existing.deletedAt) {
-    return { ok: false, error: 'This email is not available' };
-  }
   if (existing && excludeUserId && existing.id === excludeUserId) {
     return { ok: true };
   }
@@ -136,7 +135,10 @@ export async function isUsernameAvailable(
   const normalized = normalizeUsername(username);
   const existing = await db.select({ id: schema.users.id })
     .from(schema.users)
-    .where(eq(schema.users.username, normalized))
+    .where(and(
+      eq(schema.users.username, normalized),
+      isNull(schema.users.deletedAt),
+    ))
     .get();
 
   if (existing && excludeUserId && existing.id === excludeUserId) {

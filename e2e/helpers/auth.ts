@@ -41,19 +41,31 @@ export async function registerUser(
   verificationCode?: string,
 ) {
   const userEmail = email ?? uniqueEmail('reg');
+  let devCode = verificationCode;
+  const registerResponse = page.waitForResponse(
+    (resp) => resp.url().includes('/api/auth/register') && resp.request().method() === 'POST',
+  );
   await page.goto('/');
   await page.getByRole('button', { name: 'Join free' }).click();
-  await page.getByPlaceholder('Enter username').fill(username);
+  await page.getByPlaceholder('your_username').fill(username);
   await page.getByPlaceholder('you@example.com').fill(userEmail);
   await page.getByPlaceholder('••••••••').fill(password);
   await page.getByRole('button', { name: 'Register Account' }).click();
 
+  if (!devCode) {
+    const regResp = await registerResponse;
+    if (regResp.ok()) {
+      const regData = await regResp.json();
+      devCode = regData.devVerificationCode as string | undefined;
+    }
+  }
+
   const verifyHeading = page.getByRole('heading', { name: 'Verify your email' });
   if (await verifyHeading.isVisible().catch(() => false)) {
-    if (!verificationCode) {
+    if (!devCode) {
       throw new Error('Registration requires email verification; pass verificationCode from devVerificationCode');
     }
-    await completeEmailVerificationIfPresent(page, verificationCode);
+    await completeEmailVerificationIfPresent(page, devCode);
   }
 
   await expectLoggedIn(page);
@@ -69,7 +81,7 @@ export async function loginUser(
   await page.getByRole('button', { name: 'Sign in' }).click();
   await page.getByPlaceholder('username or you@example.com').fill(identifier);
   await page.getByPlaceholder('••••••••').fill(password);
-  await page.getByRole('button', { name: 'Sign In' }).click();
+  await page.getByRole('button', { name: 'Sign In', exact: true }).click();
   await expectLoggedIn(page);
   await dismissWalkthroughIfPresent(page);
 }

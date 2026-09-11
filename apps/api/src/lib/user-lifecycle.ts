@@ -1,5 +1,5 @@
 import { drizzle } from 'drizzle-orm/d1';
-import { eq, or, and, isNull } from 'drizzle-orm';
+import { eq, or, and, isNull, ne } from 'drizzle-orm';
 import * as schema from '@hin/db';
 import bcrypt from 'bcryptjs';
 import type { AccountStatus, DeletionSource } from '@hin/types';
@@ -37,6 +37,8 @@ export async function softDeleteUser(
   const user = await db
     .select({
       id: schema.users.id,
+      username: schema.users.username,
+      email: schema.users.email,
       deletedAt: schema.users.deletedAt,
       role: schema.users.role,
     })
@@ -48,10 +50,18 @@ export async function softDeleteUser(
   if (user.deletedAt) return { ok: false, error: 'User already deleted', code: 400 };
 
   const batchAt = new Date().toISOString();
+  const tombstoneUsername = `__del_${userId}`;
 
   await db
     .update(schema.users)
-    .set({ deletedAt: batchAt, deletionSource: source })
+    .set({
+      deletedAt: batchAt,
+      deletionSource: source,
+      originalUsername: user.username,
+      originalEmail: user.email ?? null,
+      username: tombstoneUsername,
+      email: null,
+    })
     .where(eq(schema.users.id, userId))
     .run();
 
@@ -158,6 +168,10 @@ export async function reinstateUser(
     .select({
       id: schema.users.id,
       deletedAt: schema.users.deletedAt,
+      username: schema.users.username,
+      email: schema.users.email,
+      originalUsername: schema.users.originalUsername,
+      originalEmail: schema.users.originalEmail,
     })
     .from(schema.users)
     .where(eq(schema.users.id, userId))
@@ -167,10 +181,62 @@ export async function reinstateUser(
   if (!user.deletedAt) return { ok: false, error: 'User is not deleted', code: 400 };
 
   const batchAt = user.deletedAt;
+  const restoreUsername = user.originalUsername
+    ?? (user.username.startsWith('__del_') ? null : user.username);
+  const restoreEmail = user.originalEmail ?? user.email;
+
+  if (!restoreUsername) {
+    return {
+      ok: false,
+      error: 'Cannot reinstate: original username is not available',
+      code: 409,
+    };
+  }
+
+  const usernameTaken = await db.select({ id: schema.users.id })
+      .from(schema.users)
+      .where(and(
+        eq(schema.users.username, restoreUsername),
+        ne(schema.users.id, userId),
+        isNull(schema.users.deletedAt),
+      ))
+      .get();
+    if (usernameTaken) {
+      return {
+        ok: false,
+        error: `Cannot reinstate: username @${restoreUsername} is already taken`,
+        code: 409,
+      };
+    }
+
+  if (restoreEmail) {
+    const emailTaken = await db.select({ id: schema.users.id })
+      .from(schema.users)
+      .where(and(
+        eq(schema.users.email, restoreEmail),
+        ne(schema.users.id, userId),
+        isNull(schema.users.deletedAt),
+      ))
+      .get();
+    if (emailTaken) {
+      return {
+        ok: false,
+        error: 'Cannot reinstate: email is already in use by another account',
+        code: 409,
+      };
+    }
+  }
 
   await db
     .update(schema.users)
-    .set({ deletedAt: null, deletionSource: null })
+    .set({
+      deletedAt: null,
+      deletionSource: null,
+      username: restoreUsername,
+      email: restoreEmail,
+      originalUsername: null,
+      originalEmail: null,
+    })
     .where(eq(schema.users.id, userId))
     .run();
 

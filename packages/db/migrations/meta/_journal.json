@@ -337,6 +337,13 @@
       "when": 1784900000000,
       "tag": "0048_auth_registration_upgrade",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1785000000000,
+      "tag": "0049_registration_failures",
+      "breakpoints": true
     }
   ]
 }

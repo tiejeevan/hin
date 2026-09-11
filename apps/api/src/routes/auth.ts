@@ -12,14 +12,23 @@ import {
 } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
-import { getJwtSecret } from '../lib/auth';
+import { getJwtSecret, JWT_SECRET_DEV_FALLBACK } from '../lib/auth';
 import { toPublicUser, toSelfUser, seedAdminUser } from '../lib/users';
 import { writeAuditLog } from '../lib/audit';
 import { verifyGoogleIdToken } from '../lib/google-auth';
 import { requireTurnstile } from '../lib/turnstile';
 import { getSystemSettings } from '../lib/system-settings';
-import { sendPasswordResetOtpEmail, sendOtpEmail } from '../lib/email/resend';
+import { sendPasswordResetOtpEmail } from '../lib/email/resend';
 import { getOutboundFromEmail } from '../lib/email/outbound-from';
+import {
+  registrationOtpFailureReason,
+  sendRegistrationVerificationOtp,
+} from '../lib/email/verification-otp';
+import {
+  createRegistrationAccount,
+  logRegistrationFailure,
+  type RegistrationFailureReason,
+} from '../lib/registration';
 import {
   checkEmailAvailableForRegistration,
   checkGoogleEmailCollision,
@@ -44,13 +53,15 @@ import {
   OTP_RESET_SEND_USER_PER_HOUR,
   OTP_RESET_VERIFY_IP_PER_DAY,
   OTP_RESET_VERIFY_IP_PER_HOUR,
+  OTP_VERIFY_IP_PER_DAY,
+  OTP_VERIFY_IP_PER_HOUR,
   codesMatch,
   generateOtpCode,
   hashOtpCode,
   normalizeEmail,
   otpExpiresAt,
 } from '../lib/otp';
-import { clientIpFromRequest, consumeRateLimit } from '../lib/rate-limit';
+import { clientIpFromRequest, consumeRateLimit, refundRateLimit } from '../lib/rate-limit';
 import {
   buildBucketKey,
   resolveClientIp,
@@ -109,45 +120,7 @@ async function issueAuthToken(
   }, jwtSecret, 'HS256');
 }
 
-async function sendEmailVerificationOtp(
-  c: { env: Env; req: { raw: Request } },
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  userId: number,
-  email: string,
-): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
-  const from = await getOutboundFromEmail(db);
-  const ip = clientIpFromRequest(c.req.raw) ?? 'unknown';
-
-  await db.update(schema.otpChallenges)
-    .set({ consumedAt: new Date().toISOString() })
-    .where(and(
-      eq(schema.otpChallenges.userId, userId),
-      eq(schema.otpChallenges.purpose, OTP_PURPOSE_EMAIL_VERIFY),
-      isNull(schema.otpChallenges.consumedAt),
-    ))
-    .run();
-
-  const code = generateOtpCode();
-  const codeHash = await hashOtpCode(code, c.env.OTP_PEPPER);
-
-  await db.insert(schema.otpChallenges).values({
-    purpose: OTP_PURPOSE_EMAIL_VERIFY,
-    userId,
-    email,
-    codeHash,
-    attempts: 0,
-    expiresAt: otpExpiresAt(),
-    ipAddress: ip === 'unknown' ? null : ip,
-  }).run();
-
-  const sent = await sendOtpEmail({ env: c.env, from, to: email, code });
-  if (!sent.ok) {
-    return { ok: false, error: sent.error || 'Failed to send verification email', status: 502 };
-  }
-  return { ok: true };
-}
-
-// Register — creates account and sends email OTP (verification required before full access)
+// Register — send verification email before creating account (when required)
 auth.post('/register', createAuthRouteRateLimit('register'), async (c) => {
   const db = drizzle(c.env.DB, { schema });
   await seedAdminUser(db);
@@ -205,38 +178,125 @@ auth.post('/register', createAuthRouteRateLimit('register'), async (c) => {
   const passwordHash = await bcrypt.hash(password!, 10);
   const cf = (c.req.raw as any).cf;
   const country = (cf?.country as string) ?? null;
+  const ip = clientIpFromRequest(c.req.raw);
+  const ipForLog = ip ?? null;
+  const registerBucketKey = buildBucketKey('auth:register', 'ip', resolveClientIp(c.req.raw));
 
-  const [inserted] = await db.insert(schema.users).values({
-    username: normalizedUsername,
-    email: normalizedEmail,
-    passwordHash,
-    role: 'user',
-    country,
-    needsUsernameSetup: 0,
-  }).returning();
+  const failRegistration = async (
+    failureReason: RegistrationFailureReason,
+    failureDetail: string | null,
+    auditReason: string,
+    status: 502 | 500,
+    message: string,
+  ) => {
+    await logRegistrationFailure(db, {
+      username: normalizedUsername,
+      email: normalizedEmail,
+      failureReason,
+      failureDetail,
+      ipAddress: ipForLog,
+      sessionId: sessionId ?? null,
+    });
+    await refundRateLimit(db, registerBucketKey);
+    await writeAuditLog(c, {
+      eventType: 'register',
+      success: false,
+      failureReason: auditReason,
+      clientLocalTime,
+      sessionId,
+    });
+    return c.json({ error: message }, status);
+  };
 
-  await db.insert(schema.userSettings).values({ userId: inserted.id });
+  try {
+    let devVerificationCode: string | undefined;
+    let inserted: typeof schema.users.$inferSelect;
 
-  const otpResult = await sendEmailVerificationOtp(c, db, inserted.id, normalizedEmail);
-  if (!otpResult.ok) {
-    return c.json({ error: otpResult.error }, otpResult.status as 502);
+    if (settings.emailVerificationRequired) {
+      const otpSend = await sendRegistrationVerificationOtp(c.env, db, normalizedEmail);
+      if (!otpSend.ok) {
+        return failRegistration(
+          registrationOtpFailureReason(c.env, otpSend.error),
+          otpSend.error ?? null,
+          'email_send_failed',
+          502,
+          'Could not send verification email. Please try again.',
+        );
+      }
+      devVerificationCode = otpSend.devCode;
+
+      try {
+        inserted = await createRegistrationAccount(db, {
+          username: normalizedUsername,
+          email: normalizedEmail,
+          passwordHash,
+          country,
+          otp: {
+            email: normalizedEmail,
+            codeHash: otpSend.codeHash,
+            ipAddress: ipForLog,
+          },
+        });
+      } catch (err) {
+        console.error('[register] account create failed after verification email sent', err);
+        return failRegistration(
+          'account_create_failed',
+          err instanceof Error ? err.message : 'insert failed',
+          'account_create_failed',
+          500,
+          'Could not create your account. Please try again.',
+        );
+      }
+    } else {
+      const verifiedAt = new Date().toISOString();
+      try {
+        inserted = await createRegistrationAccount(db, {
+          username: normalizedUsername,
+          email: normalizedEmail,
+          passwordHash,
+          country,
+          emailVerifiedAt: verifiedAt,
+        });
+      } catch (err) {
+        console.error('[register] account create failed', err);
+        return failRegistration(
+          'account_create_failed',
+          err instanceof Error ? err.message : 'insert failed',
+          'account_create_failed',
+          500,
+          'Could not create your account. Please try again.',
+        );
+      }
+    }
+
+    const token = await issueAuthToken(inserted, getJwtSecret(c.env));
+
+    await writeAuditLog(c, {
+      userId: inserted.id,
+      eventType: 'register',
+      success: true,
+      clientLocalTime,
+      sessionId,
+    });
+
+    const guardOptions = { emailVerificationRequired: settings.emailVerificationRequired };
+
+    return c.json({
+      token,
+      user: toSelfUser(inserted),
+      registrationComplete: !getAccountBlockReason(inserted, guardOptions),
+      ...(devVerificationCode ? { devVerificationCode } : {}),
+    });
+  } catch (err) {
+    console.error('[register] unexpected error', err);
+    return failRegistration(
+      'account_create_failed',
+      err instanceof Error ? err.message : 'unexpected error',
+      'account_create_failed',
+      500,
+      'Could not create your account. Please try again.',
+    );
   }
-
-  const token = await issueAuthToken(inserted, getJwtSecret(c.env));
-
-  await writeAuditLog(c, {
-    userId: inserted.id,
-    eventType: 'register',
-    success: true,
-    clientLocalTime,
-    sessionId,
-  });
-
-  return c.json({
-    token,
-    user: toSelfUser(inserted),
-    registrationComplete: false,
-  });
 });
 
 auth.post('/verify-registration', async (c) => {
@@ -257,6 +317,18 @@ auth.post('/verify-registration', async (c) => {
   const email = authUser.email ? normalizeEmail(authUser.email) : null;
   if (!email) {
     return c.json({ error: 'No email on file' }, 400);
+  }
+
+  const ip = clientIpFromRequest(c.req.raw) ?? 'unknown';
+
+  const ipLimitHour = await consumeRateLimit(db, `otp_verify:ip:${ip}:h`, OTP_VERIFY_IP_PER_HOUR, 3600);
+  if (!ipLimitHour.ok) {
+    return rateLimitExceeded(c, ipLimitHour);
+  }
+
+  const ipLimitDay = await consumeRateLimit(db, `otp_verify:ip:${ip}:d`, OTP_VERIFY_IP_PER_DAY, 86400);
+  if (!ipLimitDay.ok) {
+    return rateLimitExceeded(c, ipLimitDay);
   }
 
   const challenge = await db.select().from(schema.otpChallenges)
@@ -452,10 +524,14 @@ auth.post('/login', createAuthRouteRateLimit('login'), async (c) => {
     sessionId,
   });
 
+  const settings = await getSystemSettings(db);
+
   return c.json({
     token,
     user: toSelfUser(user),
-    registrationComplete: !getAccountBlockReason(user),
+    registrationComplete: !getAccountBlockReason(user, {
+      emailVerificationRequired: settings.emailVerificationRequired,
+    }),
   });
 });
 

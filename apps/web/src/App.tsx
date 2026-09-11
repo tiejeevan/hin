@@ -1049,6 +1049,9 @@ export default function App() {
   // Treat as OFF until the public/bootstrap flag is known so /olabid never fetches early.
   const olabidEnabled = olabidFlagKnown && systemSettings?.olabidEnabled === true;
   const presenceEnabled = systemSettings?.presenceEnabled === true;
+  const emailVerificationRequired = systemSettings?.emailVerificationRequired ?? true;
+  const showEmailVerificationGate =
+    !!currentUser?.needsEmailVerification && emailVerificationRequired;
   olabidFlagKnownRef.current = olabidFlagKnown;
   olabidEnabledRef.current = olabidEnabled;
   presenceEnabledRef.current = presenceEnabled;
@@ -1662,7 +1665,11 @@ export default function App() {
       disconnectWS();
       return;
     }
-    if (currentUser.needsEmailVerification || currentUser.needsUsernameSetup) {
+    if (currentUser.needsUsernameSetup) {
+      disconnectWS();
+      return;
+    }
+    if (showEmailVerificationGate) {
       disconnectWS();
       return;
     }
@@ -2342,7 +2349,7 @@ export default function App() {
       window.removeEventListener('online', onOnline);
       disconnectWS();
     };
-  }, [currentUser, token, clearWsReconnectTimer, disconnectWS]);
+  }, [currentUser, token, showEmailVerificationGate, clearWsReconnectTimer, disconnectWS]);
 
   // Auto-scroll is owned by MessagesPanel (smart near-bottom + new-messages pill).
 
@@ -4515,7 +4522,7 @@ export default function App() {
             token={token}
             onComplete={(data) => completeAuthSuccess(data)}
           />
-        ) : currentUser?.needsEmailVerification && token ? (
+        ) : showEmailVerificationGate && token ? (
           <EmailVerificationGate
             token={token}
             user={currentUser}

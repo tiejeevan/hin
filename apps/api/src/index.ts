@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { drizzle } from 'drizzle-orm/d1';
+import * as schema from '@hin/db';
 import type { Env } from './types';
 import { getAuthUser } from './lib/auth';
 import {
@@ -7,6 +9,7 @@ import {
   getAccountBlockReason,
   isIncompleteAccountPathAllowed,
 } from './lib/account-guard';
+import { getSystemSettings } from './lib/system-settings';
 import {
   createGlobalRateLimitMiddleware,
   createWriteRateLimitMiddleware,
@@ -122,7 +125,11 @@ app.use('/api/*', async (c, next) => {
   if (!authUser) {
     return next();
   }
-  const blockReason = getAccountBlockReason(authUser);
+  const db = drizzle(c.env.DB, { schema });
+  const systemSettings = await getSystemSettings(db);
+  const blockReason = getAccountBlockReason(authUser, {
+    emailVerificationRequired: systemSettings.emailVerificationRequired,
+  });
   if (blockReason) {
     return c.json({ error: getAccountBlockMessage(blockReason), code: blockReason }, 403);
   }

@@ -284,6 +284,11 @@ export interface SystemSettings {
   presenceEnabled: boolean;
   /** When true, enforce industry-standard password complexity on register/change/reset. */
   strictPasswordRequirements: boolean;
+  /**
+   * When true (default), password signups must verify inbox OTP before full API/WS access.
+   * When false, verification is not enforced and new registrations are auto-verified.
+   */
+  emailVerificationRequired: boolean;
   /** Outbound From address for OTP and system email (must be @hingot.com). */
   outboundFromEmail: string;
 }
@@ -338,6 +343,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   olabidEnabled: true,
   presenceEnabled: false,
   strictPasswordRequirements: false,
+  emailVerificationRequired: true,
   outboundFromEmail: DEFAULT_OUTBOUND_FROM_EMAIL,
 };
 
@@ -881,6 +887,7 @@ export const UpdateSystemSettingsSchema = z.object({
   olabidEnabled: z.boolean().optional(),
   presenceEnabled: z.boolean().optional(),
   strictPasswordRequirements: z.boolean().optional(),
+  emailVerificationRequired: z.boolean().optional(),
   outboundFromEmail: z.string().email().max(254).optional(),
 }).refine(
   data => data.maxPinnedPostsPerUser !== undefined
@@ -890,6 +897,7 @@ export const UpdateSystemSettingsSchema = z.object({
     || data.olabidEnabled !== undefined
     || data.presenceEnabled !== undefined
     || data.strictPasswordRequirements !== undefined
+    || data.emailVerificationRequired !== undefined
     || data.outboundFromEmail !== undefined,
   { message: 'At least one setting must be provided' },
 );

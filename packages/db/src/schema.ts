@@ -39,6 +39,10 @@ export const users = sqliteTable('users', {
   lastSeenAt: text('last_seen_at'),
   /** 1 until Google (or migrated) user picks a public username. */
   needsUsernameSetup: integer('needs_username_setup').default(0).notNull(),
+  /** Saved on soft delete so reinstate can restore the public username when still free. */
+  originalUsername: text('original_username'),
+  /** Saved on soft delete so reinstate can restore the email when still free. */
+  originalEmail: text('original_email'),
 }, (table) => ({
   deletedAtIdx: index('users_deleted_at_idx').on(table.deletedAt),
   isPrivateIdx: index('users_is_private_idx').on(table.isPrivate),
@@ -735,6 +739,21 @@ export const otpChallenges = sqliteTable('otp_challenges', {
   ),
   emailPurposeIdx: index('otp_challenges_email_purpose_idx').on(table.email, table.purpose),
   expiresAtIdx: index('otp_challenges_expires_at_idx').on(table.expiresAt),
+}));
+
+/** Failed signup attempts after validation (no secrets stored). */
+export const registrationFailures = sqliteTable('registration_failures', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  username: text('username').notNull(),
+  email: text('email'),
+  failureReason: text('failure_reason').notNull(),
+  failureDetail: text('failure_detail'),
+  ipAddress: text('ip_address'),
+  sessionId: text('session_id'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  createdAtIdx: index('registration_failures_created_at_idx').on(table.createdAt),
+  emailIdx: index('registration_failures_email_idx').on(table.email),
 }));
 
 /** Reusable fixed-window rate limit counters (IP / user / email keys). */

@@ -120,6 +120,8 @@ export function getRateLimitCatalog(): RateLimitCatalogResponse {
     otpEntry('Email OTP send', 'Email', OTP_SEND_EMAIL_PER_DAY, 86400, 'POST /api/users/me/email/request'),
     otpEntry('Email OTP verify', 'IP', OTP_VERIFY_IP_PER_HOUR, 3600, 'POST /api/users/me/email/verify'),
     otpEntry('Email OTP verify', 'IP', OTP_VERIFY_IP_PER_DAY, 86400, 'POST /api/users/me/email/verify'),
+    otpEntry('Registration OTP verify', 'IP', OTP_VERIFY_IP_PER_HOUR, 3600, 'POST /api/auth/verify-registration'),
+    otpEntry('Registration OTP verify', 'IP', OTP_VERIFY_IP_PER_DAY, 86400, 'POST /api/auth/verify-registration'),
     otpEntry('Password reset send', 'IP (minute)', OTP_RESET_SEND_IP_PER_MINUTE, 60, 'POST /api/auth/password-reset/request'),
     otpEntry('Password reset send', 'IP', OTP_RESET_SEND_IP_PER_HOUR, 3600, 'POST /api/auth/password-reset/request'),
     otpEntry('Password reset send', 'IP', OTP_RESET_SEND_IP_PER_DAY, 86400, 'POST /api/auth/password-reset/request'),

@@ -10,6 +10,7 @@ import {
 import { JWT_SECRET } from '../lib/auth';
 import type { Env } from '../types';
 import type { Notification } from '@hin/types';
+import { DEFAULT_SYSTEM_SETTINGS } from '@hin/types';
 
 vi.mock('../lib/blocks', () => ({
   isBlocked: vi.fn().mockResolvedValue(false),
@@ -22,9 +23,10 @@ vi.mock('../lib/linkPreview', () => ({
 
 vi.mock('../lib/system-settings', () => ({
   isPresenceEnabled: vi.fn().mockResolvedValue(true),
+  getSystemSettings: vi.fn(),
 }));
 
-import { isPresenceEnabled } from '../lib/system-settings';
+import { isPresenceEnabled, getSystemSettings } from '../lib/system-settings';
 
 function readySession(overrides: Partial<RealtimeSession> = {}): RealtimeSession {
   return {
@@ -194,6 +196,7 @@ describe('RealtimeDO hibernation session routing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (isPresenceEnabled as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (getSystemSettings as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(DEFAULT_SYSTEM_SETTINGS);
     socketsRef = { current: [] };
     state = createMockState(socketsRef);
     env = { DB: {} as D1Database, OLABID_API_KEY: '' } as Env;
@@ -252,6 +255,31 @@ describe('RealtimeDO hibernation session routing', () => {
     });
     expect(ws.closed).toBe(true);
     expect(ws.closeCode).toBe(ACCOUNT_SETUP_BLOCKED_CLOSE_CODE);
+  });
+
+  it('allows join for unverified password user when email verification is disabled', async () => {
+    (getSystemSettings as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...DEFAULT_SYSTEM_SETTINGS,
+      emailVerificationRequired: false,
+    });
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(createDbMock({
+      getQueue: [{
+        needsUsernameSetup: 0,
+        email: 'user@example.com',
+        emailVerifiedAt: null,
+        passwordHash: 'hash',
+        googleId: null,
+      }],
+    }));
+
+    const ws = dob.addSocket();
+    await dob.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({
+      type: 'join',
+      payload: { token: await makeToken(1, 'alice') },
+    }));
+
+    expect(ws.attachment).toEqual(readySession({ userId: 1, username: 'alice' }));
+    expect(ws.eventsOfType('joined')).toHaveLength(1);
   });
 
   it('rejects join when username setup is required', async () => {
@@ -951,6 +979,7 @@ describe('RealtimeDO websocket rate limits', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (isPresenceEnabled as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (getSystemSettings as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(DEFAULT_SYSTEM_SETTINGS);
     socketsRef = { current: [] };
     state = createMockState(socketsRef);
     env = { DB: {} as D1Database, OLABID_API_KEY: '' } as Env;

@@ -10,8 +10,10 @@ import {
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { toSelfUser } from '../lib/users';
-import { sendOtpEmail } from '../lib/email/resend';
-import { getOutboundFromEmail } from '../lib/email/outbound-from';
+import {
+  persistEmailVerificationOtp,
+  sendVerificationOtpEmail,
+} from '../lib/email/verification-otp';
 import { isDisposableEmail } from '../lib/email/disposable';
 import { getEmailChangeStatus } from '../lib/email/change-cooldown';
 import {
@@ -33,7 +35,6 @@ import {
   isValidEmail,
   maskEmail,
   normalizeEmail,
-  otpExpiresAt,
 } from '../lib/otp';
 import { clientIpFromRequest, consumeRateLimit } from '../lib/rate-limit';
 import { rateLimitExceeded } from '../lib/rate-limit-middleware';
@@ -60,7 +61,6 @@ emailRoutes.post('/request', async (c) => {
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
 
   const db = drizzle(c.env.DB, { schema });
-  const from = await getOutboundFromEmail(db);
 
   const body = await c.req.json().catch(() => null);
   const parsed = RequestEmailVerificationSchema.safeParse(body);
@@ -151,7 +151,7 @@ emailRoutes.post('/request', async (c) => {
     }
   }
 
-  // Invalidate any prior unused challenges for this user+purpose.
+  // Invalidate prior challenges before generating a new code.
   await db.update(schema.otpChallenges)
     .set({ consumedAt: new Date().toISOString() })
     .where(
@@ -165,21 +165,22 @@ emailRoutes.post('/request', async (c) => {
 
   const code = generateOtpCode();
   const codeHash = await hashOtpCode(code, c.env.OTP_PEPPER);
-  const expiresAt = otpExpiresAt();
 
-  await db.insert(schema.otpChallenges).values({
-    purpose: OTP_PURPOSE_EMAIL_VERIFY,
-    userId: authUser.id,
-    email,
-    codeHash,
-    attempts: 0,
-    expiresAt,
-    ipAddress: ip === 'unknown' ? null : ip,
-  });
-
-  const sent = await sendOtpEmail({ env: c.env, from, to: email, code });
+  const sent = await sendVerificationOtpEmail(c.env, db, email, code);
   if (!sent.ok) {
     return c.json({ error: sent.error || 'Failed to send verification email' }, 502);
+  }
+
+  try {
+    await persistEmailVerificationOtp(db, {
+      userId: authUser.id,
+      email,
+      codeHash,
+      ipAddress: ip === 'unknown' ? null : ip,
+    });
+  } catch (err) {
+    console.error('[email] OTP persist failed after send', err);
+    return c.json({ error: 'Failed to send verification email' }, 502);
   }
 
   return c.json({

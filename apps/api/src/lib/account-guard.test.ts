@@ -39,6 +39,14 @@ describe('userNeedsEmailVerification', () => {
       emailVerifiedAt: null,
     })).toBe(false);
   });
+
+  it('does not require verification when platform flag is disabled', () => {
+    expect(userNeedsEmailVerification({
+      passwordHash: 'hash',
+      email: 'user@example.com',
+      emailVerifiedAt: null,
+    }, { emailVerificationRequired: false })).toBe(false);
+  });
 });
 
 describe('getAccountBlockMessage', () => {
@@ -62,5 +70,23 @@ describe('getAccountBlockReason', () => {
       emailVerifiedAt: null,
       needsUsernameSetup: 0,
     })).toBe(true);
+  });
+
+  it('returns null for unverified password users when platform flag is disabled', () => {
+    expect(getAccountBlockReason({
+      passwordHash: 'hash',
+      email: 'user@example.com',
+      emailVerifiedAt: null,
+      needsUsernameSetup: 0,
+    }, { emailVerificationRequired: false })).toBeNull();
+  });
+
+  it('still returns username_setup_required when email verification is disabled', () => {
+    expect(getAccountBlockReason({
+      needsUsernameSetup: 1,
+      passwordHash: 'hash',
+      email: 'user@example.com',
+      emailVerifiedAt: null,
+    }, { emailVerificationRequired: false })).toBe('username_setup_required');
   });
 });

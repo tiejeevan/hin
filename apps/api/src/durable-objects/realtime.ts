@@ -7,7 +7,7 @@ import type { Env } from '../types';
 import { getJwtSecret } from '../lib/auth';
 import { isBlocked } from '../lib/blocks';
 import { parseFirstUrl, getOrFetchLinkPreview } from '../lib/linkPreview';
-import { isPresenceEnabled } from '../lib/system-settings';
+import { isPresenceEnabled, getSystemSettings } from '../lib/system-settings';
 import { markMessagesReadSet, toMessageDto, loadReplyToMap } from '../lib/messages';
 import { buildWsBucketKey, MemoryRateLimiter } from '../lib/rate-limit-memory';
 import { WS_SEND_MESSAGE, WS_TYPING } from '../lib/rate-limit-policy';
@@ -314,11 +314,16 @@ export class RealtimeDO implements DurableObject {
         const username = payload.username as string;
         const role = typeof payload.role === 'string' && payload.role ? payload.role : 'user';
 
-        const guardUser = await loadUserForAccountGuard(db, userId);
+        const [guardUser, systemSettings] = await Promise.all([
+          loadUserForAccountGuard(db, userId),
+          getSystemSettings(db),
+        ]);
         if (!guardUser) {
           throw new Error('User not found');
         }
-        const blockReason = getAccountBlockReason(guardUser);
+        const blockReason = getAccountBlockReason(guardUser, {
+          emailVerificationRequired: systemSettings.emailVerificationRequired,
+        });
         if (blockReason) {
           const blockMessage = getAccountBlockMessage(blockReason);
           this.sendSafely(ws, { type: 'error', payload: { message: blockMessage, code: blockReason } });

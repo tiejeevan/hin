@@ -21,10 +21,11 @@ type FormState = {
   olabidEnabled: boolean;
   presenceEnabled: boolean;
   strictPasswordRequirements: boolean;
+  emailVerificationRequired: boolean;
   outboundFromEmail: string;
 };
 
-type ConfirmKind = 'turnstile' | 'olabid' | 'presence';
+type ConfirmKind = 'turnstile' | 'olabid' | 'presence' | 'emailVerification';
 
 function settingsToForm(settings: SystemSettings): FormState {
   return {
@@ -35,6 +36,7 @@ function settingsToForm(settings: SystemSettings): FormState {
     olabidEnabled: !!settings.olabidEnabled,
     presenceEnabled: !!settings.presenceEnabled,
     strictPasswordRequirements: !!settings.strictPasswordRequirements,
+    emailVerificationRequired: settings.emailVerificationRequired !== false,
     outboundFromEmail: settings.outboundFromEmail,
   };
 }
@@ -67,6 +69,8 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
       setForm(prev => ({ ...prev, olabidEnabled: pendingBoolValue }));
     } else if (confirmKind === 'presence') {
       setForm(prev => ({ ...prev, presenceEnabled: pendingBoolValue }));
+    } else if (confirmKind === 'emailVerification') {
+      setForm(prev => ({ ...prev, emailVerificationRequired: pendingBoolValue }));
     }
     setConfirmKind(null);
   };
@@ -101,6 +105,7 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
     const olabidEnabled = form.olabidEnabled;
     const presenceEnabled = form.presenceEnabled;
     const strictPasswordRequirements = form.strictPasswordRequirements;
+    const emailVerificationRequired = form.emailVerificationRequired;
     const outboundFromEmail = form.outboundFromEmail.trim().toLowerCase();
 
     if (
@@ -147,6 +152,7 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
           olabidEnabled,
           presenceEnabled,
           strictPasswordRequirements,
+          emailVerificationRequired,
           outboundFromEmail,
         }),
       });
@@ -169,14 +175,20 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
   }
 
   const confirmTitle =
-    confirmKind === 'olabid'
+    confirmKind === 'emailVerification'
+      ? (pendingBoolValue ? 'Require email verification?' : 'Disable email verification?')
+      : confirmKind === 'olabid'
       ? (pendingBoolValue ? 'Enable Olabid panel?' : 'Disable Olabid panel?')
       : confirmKind === 'presence'
         ? (pendingBoolValue ? 'Enable users online presence?' : 'Disable users online presence?')
         : (pendingBoolValue ? 'Enable bot protection?' : 'Disable bot protection?');
 
   const confirmBody =
-    confirmKind === 'olabid'
+    confirmKind === 'emailVerification'
+      ? (pendingBoolValue
+        ? 'Password signups must verify their inbox OTP before posts, DMs, and most API routes. WebSocket join is blocked until verified.'
+        : 'Unverified accounts get full API and WebSocket access. New signups are auto-verified without OTP. Re-enabling will block existing unverified users again.')
+      : confirmKind === 'olabid'
       ? (pendingBoolValue
         ? 'Enabling Olabid shows the auctions tab, item pages, discussion, and share-to-chat flows for all users. The app will resume calling Olabid-related APIs.'
         : 'Disabling Olabid hides the auctions tab and all Olabid UI for every user. No Olabid API calls will be made. Existing discussion data remains stored but inaccessible until re-enabled.')
@@ -252,6 +264,29 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
 
       <section className="space-y-3">
         <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Email</h4>
+        <div className="flex items-center justify-between max-w-md p-3.5 rounded-xl border border-border-custom bg-bg-primary">
+          <div className="space-y-0.5 pr-3">
+            <span className="text-xs font-medium text-text-secondary block">Require email verification</span>
+            <span className="text-[10px] text-text-muted block">
+              When on, password signups must confirm inbox OTP before full access. When off, new signups are auto-verified.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => openConfirm('emailVerification', !form.emailVerificationRequired)}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              form.emailVerificationRequired ? 'bg-indigo-600' : 'bg-zinc-700'
+            }`}
+            aria-pressed={form.emailVerificationRequired}
+            aria-label="Toggle email verification requirement"
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                form.emailVerificationRequired ? 'translate-x-4' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
         <label className="block space-y-2 max-w-md">
           <span className="text-xs font-medium text-text-secondary">Outbound From address</span>
           <div className="flex gap-2">
@@ -413,6 +448,7 @@ export function AdminUserSettings({ token }: AdminUserSettingsProps) {
           {' '}Olabid is {settings.olabidEnabled ? 'enabled' : 'disabled'}.
           {' '}Presence is {settings.presenceEnabled ? 'enabled' : 'disabled'}.
           {' '}Strict passwords are {settings.strictPasswordRequirements ? 'enabled' : 'disabled'}.
+          {' '}Email verification is {settings.emailVerificationRequired !== false ? 'required' : 'disabled'}.
           {' '}Outbound From is {settings.outboundFromEmail}.
           {' '}Cloudflare Turnstile is {settings.turnstileEnabled ? 'enabled' : 'disabled'}.
         </p>

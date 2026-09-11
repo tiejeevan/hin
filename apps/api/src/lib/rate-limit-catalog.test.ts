@@ -11,6 +11,7 @@ describe('getRateLimitCatalog', () => {
     const tiers = catalog.entries.map((e) => e.tier);
     expect(tiers).toContain('Global API baseline');
     expect(tiers).toContain('Login');
+    expect(tiers).toContain('Registration OTP verify');
     expect(tiers).toContain('Chat send_message');
   });
 });

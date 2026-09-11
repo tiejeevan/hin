@@ -71,6 +71,31 @@ async function consumeRateLimitInner(
   return { ok: true, remaining: Math.max(0, limit - existing.count - 1) };
 }
 
+/** Decrement a rate-limit bucket after a failed register attempt (refund one consumed slot). */
+export async function refundRateLimit(
+  db: Db,
+  bucketKey: string,
+): Promise<void> {
+  try {
+    const nowIso = new Date().toISOString();
+    const existing = await db.select()
+      .from(schema.rateLimitBuckets)
+      .where(eq(schema.rateLimitBuckets.bucketKey, bucketKey))
+      .get();
+
+    if (!existing || existing.windowEndsAt <= nowIso || existing.count <= 0) {
+      return;
+    }
+
+    await db.update(schema.rateLimitBuckets)
+      .set({ count: existing.count - 1 })
+      .where(eq(schema.rateLimitBuckets.bucketKey, bucketKey))
+      .run();
+  } catch (e) {
+    console.error('Rate limit refund failed (ignored):', e);
+  }
+}
+
 export function clientIpFromRequest(req: Request): string | null {
   const ip = resolveClientIp(req);
   return ip === 'unknown' ? null : ip;

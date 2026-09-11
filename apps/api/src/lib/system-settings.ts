@@ -54,6 +54,11 @@ const SETTING_REGISTRY = {
     defaultValue: DEFAULT_SYSTEM_SETTINGS.strictPasswordRequirements,
     parse: (raw: string | null) => parseBooleanSetting(raw, DEFAULT_SYSTEM_SETTINGS.strictPasswordRequirements),
   },
+  emailVerificationRequired: {
+    key: 'email_verification_required',
+    defaultValue: DEFAULT_SYSTEM_SETTINGS.emailVerificationRequired,
+    parse: (raw: string | null) => parseBooleanSetting(raw, DEFAULT_SYSTEM_SETTINGS.emailVerificationRequired),
+  },
   outboundFromEmail: {
     key: 'outbound_from_email',
     defaultValue: DEFAULT_SYSTEM_SETTINGS.outboundFromEmail,
@@ -133,6 +138,10 @@ export async function isOlabidEnabled(db: Db): Promise<boolean> {
 
 export async function isPresenceEnabled(db: Db): Promise<boolean> {
   return (await getSystemSettings(db)).presenceEnabled;
+}
+
+export async function isEmailVerificationRequired(db: Db): Promise<boolean> {
+  return (await getSystemSettings(db)).emailVerificationRequired;
 }
 
 export async function getSystemSettings(db: Db): Promise<SystemSettings> {
