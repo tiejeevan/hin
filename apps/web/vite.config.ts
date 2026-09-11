@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import obfuscator from 'vite-plugin-javascript-obfuscator';
@@ -20,19 +20,22 @@ function loadRobotsTemplate(): string {
   return fs.readFileSync(templatePath, 'utf8');
 }
 
-function seoBuildPlugin(): Plugin {
-  const siteUrl = localDevSiteUrl();
-  const apiUrl = localDevApiUrl(siteUrl);
-  const googleVerification = process.env.VITE_GOOGLE_SITE_VERIFICATION || '';
+function seoBuildPlugin(env: Record<string, string>): Plugin {
+  const resolveSiteUrl = () =>
+    (env.VITE_SITE_URL || process.env.VITE_SITE_URL || 'http://localhost:5173').replace(/\/$/, '');
+  const resolveApiUrl = (siteUrl: string) =>
+    (env.VITE_API_URL || process.env.VITE_API_URL || 'http://localhost:8787').replace(/\/$/, '');
   const robotsTemplate = loadRobotsTemplate();
 
-  const patchSeoFiles = (contents: string) =>
+  const patchSeoFiles = (contents: string, siteUrl: string) =>
     contents.replace(/__HIN_SITE_URL__/g, siteUrl);
 
   return {
     name: 'hin-seo-build',
     transformIndexHtml(html) {
-      let out = patchSeoFiles(html);
+      const siteUrl = resolveSiteUrl();
+      let out = patchSeoFiles(html, siteUrl);
+      const googleVerification = env.VITE_GOOGLE_SITE_VERIFICATION || process.env.VITE_GOOGLE_SITE_VERIFICATION || '';
       if (googleVerification) {
         out = out.replace(
           '<!-- google-site-verification: set VITE_GOOGLE_SITE_VERIFICATION at build time -->',
@@ -44,7 +47,7 @@ function seoBuildPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         if (req.url === '/robots.txt') {
-          const robots = patchSeoFiles(robotsTemplate);
+          const robots = patchSeoFiles(robotsTemplate, resolveSiteUrl());
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.end(robots);
           return;
@@ -53,21 +56,24 @@ function seoBuildPlugin(): Plugin {
       });
     },
     closeBundle() {
+      const siteUrl = resolveSiteUrl();
+      const apiUrl = resolveApiUrl(siteUrl);
       const workerPath = path.resolve('dist', '_worker.js');
       if (fs.existsSync(workerPath)) {
-        const worker = patchSeoFiles(fs.readFileSync(workerPath, 'utf8'))
+        const worker = patchSeoFiles(fs.readFileSync(workerPath, 'utf8'), siteUrl)
           .replace(/__HIN_API_URL__/g, apiUrl);
         fs.writeFileSync(workerPath, worker);
       }
 
       const robotsPath = path.resolve('dist', 'robots.txt');
-      fs.writeFileSync(robotsPath, patchSeoFiles(robotsTemplate));
+      fs.writeFileSync(robotsPath, patchSeoFiles(robotsTemplate, siteUrl));
     },
   };
 }
 
-export default defineConfig(({ command }) => {
-  const plugins = [wasm(), topLevelAwait(), react(), tailwindcss(), seoBuildPlugin()];
+export default defineConfig(({ command, mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  const plugins = [wasm(), topLevelAwait(), react(), tailwindcss(), seoBuildPlugin(env)];
 
   if (command === 'build') {
     plugins.push(
