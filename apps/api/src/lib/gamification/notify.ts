@@ -5,40 +5,39 @@ import type { GamificationRewardPayload, Notification } from '@hin/types';
 import type { Env } from '../../types';
 import { getOrCreateUserSettings, isNotificationEnabled } from '../user-settings';
 import { sendWebPushForNotification } from '../push';
+import {
+  broadcastNotification,
+  broadcastUserEvent,
+  deferBroadcast,
+  type RealtimeScheduler,
+} from '../realtime';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
-async function broadcastNotification(env: Env, db: Db, recipientId: number, notification: Notification) {
-  try {
-    const doId = env.REALTIME_DO.idFromName('global');
-    const doStub = env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-notification', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipientId, notification }),
-    }));
-  } catch (_e) {}
-  await sendWebPushForNotification(env, db, notification);
+async function dispatchNotification(
+  env: Env,
+  db: Db,
+  recipientId: number,
+  notification: Notification,
+  scheduler?: RealtimeScheduler,
+): Promise<void> {
+  deferBroadcast(scheduler, broadcastNotification(env, recipientId, notification));
+  deferBroadcast(scheduler, sendWebPushForNotification(env, db, notification));
 }
 
 export async function broadcastGamificationReward(
   env: Env,
   userId: number,
   payload: GamificationRewardPayload,
+  scheduler?: RealtimeScheduler,
 ): Promise<void> {
-  try {
-    const doId = env.REALTIME_DO.idFromName('global');
-    const doStub = env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-user-event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recipientId: userId,
-        type: 'gamification_reward',
-        payload,
-      }),
-    }));
-  } catch (_e) {}
+  deferBroadcast(
+    scheduler,
+    broadcastUserEvent(env, userId, {
+      type: 'gamification_reward',
+      payload,
+    }),
+  );
 }
 
 export async function notifyBadgeAwards(
@@ -47,6 +46,7 @@ export async function notifyBadgeAwards(
   userId: number,
   badgeIds: number[],
   senderUsername: string,
+  scheduler?: RealtimeScheduler,
 ): Promise<void> {
   if (badgeIds.length === 0) return;
 
@@ -87,7 +87,7 @@ export async function notifyBadgeAwards(
       createdAt: notif.createdAt,
     };
 
-    await broadcastNotification(env, db, userId, payload);
+    await dispatchNotification(env, db, userId, payload, scheduler);
   }
 }
 
@@ -97,6 +97,7 @@ export async function notifyLevelUp(
   userId: number,
   level: number,
   senderUsername: string,
+  scheduler?: RealtimeScheduler,
 ): Promise<void> {
   const settings = await getOrCreateUserSettings(db, userId);
   if (!isNotificationEnabled(settings, 'level_up')) return;
@@ -128,7 +129,7 @@ export async function notifyLevelUp(
     createdAt: notif.createdAt,
   };
 
-  await broadcastNotification(env, db, userId, payload);
+  await dispatchNotification(env, db, userId, payload, scheduler);
 }
 
 export async function notifyEventWins(
@@ -137,6 +138,7 @@ export async function notifyEventWins(
   userId: number,
   eventIds: number[],
   senderUsername: string,
+  scheduler?: RealtimeScheduler,
 ): Promise<void> {
   if (eventIds.length === 0) return;
 
@@ -177,12 +179,11 @@ export async function notifyEventWins(
       createdAt: notif.createdAt,
     };
 
-    await broadcastNotification(env, db, userId, payload);
-
+    await dispatchNotification(env, db, userId, payload, scheduler);
     await broadcastGamificationReward(env, userId, {
       pt: 0,
       lv: 1,
       eventWin: { eventId: event.id, eventName: event.name },
-    });
+    }, scheduler);
   }
 }

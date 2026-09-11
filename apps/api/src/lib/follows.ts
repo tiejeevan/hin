@@ -6,6 +6,12 @@ import type { Env } from '../types';
 import { isBlocked, shouldDeliverNotification } from './blocks';
 import { processUserActionSafe } from './gamification/hub';
 import { sendWebPushForNotification } from './push';
+import {
+  broadcastNotification,
+  broadcastUserEvent,
+  deferBroadcast,
+  type RealtimeScheduler,
+} from './realtime';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -131,29 +137,19 @@ async function broadcastFollowNotification(
   db: Db,
   recipientId: number,
   notification: Notification,
+  scheduler?: RealtimeScheduler,
 ) {
-  try {
-    const doId = env.REALTIME_DO.idFromName('global');
-    const doStub = env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-notification', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipientId, notification }),
-    }));
-  } catch (_e) {}
-  await sendWebPushForNotification(env, db, notification);
+  deferBroadcast(scheduler, broadcastNotification(env, recipientId, notification));
+  deferBroadcast(scheduler, sendWebPushForNotification(env, db, notification));
 }
 
-async function broadcastFollowEvent(env: Env, recipientId: number, event: object) {
-  try {
-    const doId = env.REALTIME_DO.idFromName('global');
-    const doStub = env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-user-event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipientId, ...event }),
-    }));
-  } catch (_e) {}
+async function broadcastFollowEvent(
+  env: Env,
+  recipientId: number,
+  event: object,
+  scheduler?: RealtimeScheduler,
+) {
+  deferBroadcast(scheduler, broadcastUserEvent(env, recipientId, event));
 }
 
 async function createFollowNotification(
@@ -167,6 +163,7 @@ async function createFollowNotification(
     entityId: number;
     content: string;
   },
+  scheduler?: RealtimeScheduler,
 ) {
   if (!await shouldDeliverNotification(db, opts.recipientId, opts.senderId)) return;
 
@@ -194,7 +191,7 @@ async function createFollowNotification(
     createdAt: notif.createdAt,
   };
 
-  await broadcastFollowNotification(env, db, opts.recipientId, payload);
+  await broadcastFollowNotification(env, db, opts.recipientId, payload, scheduler);
 }
 
 async function upsertActiveFollow(db: Db, followerId: number, followingId: number) {
@@ -265,6 +262,7 @@ export async function followUser(
   followerId: number,
   targetId: number,
   followerUsername: string,
+  scheduler?: RealtimeScheduler,
 ): Promise<{ ok: true; result: FollowActionResult } | { ok: false; error: string; code: number }> {
   if (followerId === targetId) {
     return { ok: false, error: 'Cannot follow yourself', code: 400 };
@@ -301,7 +299,7 @@ export async function followUser(
       type: 'follow_request',
       entityId: followerId,
       content: `@${followerUsername} requested to follow you.`,
-    });
+    }, scheduler);
     await broadcastFollowEvent(env, targetId, {
       type: 'follow_request_received',
       payload: {
@@ -312,7 +310,7 @@ export async function followUser(
           createdAt: new Date().toISOString(),
         },
       },
-    });
+    }, scheduler);
     return { ok: true, result: { status: 'requested' } };
   }
 
@@ -324,8 +322,8 @@ export async function followUser(
     type: 'follow',
     entityId: followerId,
     content: `@${followerUsername} started following you.`,
-  });
-  await processUserActionSafe(db, env, targetId, 'user_followed', { followerId }, target.username);
+  }, scheduler);
+  await processUserActionSafe(db, env, targetId, 'user_followed', { followerId }, target.username, { scheduler });
   return { ok: true, result: { status: 'following' } };
 }
 
@@ -410,6 +408,7 @@ export async function approveFollowRequest(
   targetId: number,
   requesterId: number,
   targetUsername: string,
+  scheduler?: RealtimeScheduler,
 ): Promise<{ ok: true } | { ok: false; error: string; code: number }> {
   const request = await db
     .select()
@@ -448,18 +447,26 @@ export async function approveFollowRequest(
       type: 'follow_accepted',
       entityId: targetId,
       content: `@${targetUsername} accepted your follow request.`,
-    });
+    }, scheduler);
     await broadcastFollowEvent(env, requesterId, {
       type: 'follow_approved',
       payload: {
         targetUserId: targetId,
         targetUsername,
       },
-    });
+    }, scheduler);
   }
 
   if (targetUser) {
-    await processUserActionSafe(db, env, targetId, 'user_followed', { followerId: requesterId }, targetUser.username);
+    await processUserActionSafe(
+      db,
+      env,
+      targetId,
+      'user_followed',
+      { followerId: requesterId },
+      targetUser.username,
+      { scheduler },
+    );
   }
 
   return { ok: true };

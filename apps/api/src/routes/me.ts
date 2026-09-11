@@ -41,6 +41,7 @@ me.get('/bootstrap', async (c) => {
       'session_active',
       { source: 'bootstrap' },
       authUser.username,
+      { scheduler: c.executionCtx },
     );
   }
 
@@ -204,6 +205,7 @@ me.post('/session-tick', async (c) => {
     'session_tick',
     minutes !== undefined ? { minutes } : {},
     authUser.username,
+    { scheduler: c.executionCtx },
   );
 
   const g = toGamificationBlock(gResult, await getGamificationVisibility(db));

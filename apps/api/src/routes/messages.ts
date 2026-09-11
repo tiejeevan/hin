@@ -7,43 +7,9 @@ import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
 import { isBlocked } from '../lib/blocks';
 import { countUnreadMessages, listMessageThreads, loadReplyToMap, markMessagesReadSet, toMessageDto } from '../lib/messages';
+import { broadcastMessageDelivered, broadcastReadStatus, deferBroadcast } from '../lib/realtime';
 
 const messages = new Hono<{ Bindings: Env }>();
-
-async function broadcastReadStatus(
-  env: Env,
-  senderId: number,
-  receiverId: number,
-  readAt: string,
-): Promise<void> {
-  try {
-    const doId = env.REALTIME_DO.idFromName('global');
-    const doStub = env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-read-status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ senderId, receiverId, readAt }),
-    }));
-  } catch (_e) {}
-}
-
-async function broadcastMessageDelivered(
-  env: Env,
-  recipientId: number,
-  messageIds: number[],
-  deliveredAt: string,
-): Promise<void> {
-  if (messageIds.length === 0) return;
-  try {
-    const doId = env.REALTIME_DO.idFromName('global');
-    const doStub = env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-message-delivered', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipientId, messageIds, deliveredAt }),
-    }));
-  } catch (_e) {}
-}
 
 // Unread message count for badge
 messages.get('/unread-count', async (c) => {
@@ -86,7 +52,7 @@ messages.post('/read/:otherUserId', async (c) => {
     )
     .run();
 
-  await broadcastReadStatus(c.env, otherUserId, authUser.id, readAt);
+  deferBroadcast(c.executionCtx, broadcastReadStatus(c.env, otherUserId, authUser.id, readAt));
 
   return c.json({ success: true });
 });
@@ -132,7 +98,7 @@ messages.get('/:otherUserId', async (c) => {
       )
       .run();
 
-    await broadcastReadStatus(c.env, otherUserId, authUser.id, readAt);
+    deferBroadcast(c.executionCtx, broadcastReadStatus(c.env, otherUserId, authUser.id, readAt));
   }
 
   const pairFilter = or(
@@ -197,11 +163,12 @@ messages.get('/:otherUserId', async (c) => {
       list.push(m.id);
       bySender.set(m.senderId, list);
     }
-    await Promise.all(
-      [...bySender.entries()].map(([senderId, messageIds]) =>
+    for (const [senderId, messageIds] of bySender.entries()) {
+      deferBroadcast(
+        c.executionCtx,
         broadcastMessageDelivered(c.env, senderId, messageIds, deliveredAt),
-      ),
-    );
+      );
+    }
   }
 
   const previewIds = [...new Set(chatMessages.map(m => m.linkPreviewId).filter((id): id is number => id !== null))];

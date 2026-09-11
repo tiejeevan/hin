@@ -29,6 +29,7 @@ import { toGamificationBlock } from '../lib/gamification/public';
 import { loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
 import { isOlabidEnabled } from '../lib/system-settings';
 import { sendWebPushForNotification } from '../lib/push';
+import { broadcastEvent, broadcastNotification, deferBroadcast } from '../lib/realtime';
 import type { Context } from 'hono';
 
 const olabid = new Hono<{ Bindings: Env }>();
@@ -640,29 +641,16 @@ olabid.post('/items/:id/comments', async (c) => {
           createdAt: notif.createdAt,
         };
 
-        try {
-          const doId = c.env.REALTIME_DO.idFromName('global');
-          const doStub = c.env.REALTIME_DO.get(doId);
-          await doStub.fetch(new Request('http://realtime/broadcast-notification', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ recipientId: parentComment.userId, notification: notifPayload }),
-          }));
-        } catch (e) {}
-        await sendWebPushForNotification(c.env, db, notifPayload);
+        deferBroadcast(c.executionCtx, broadcastNotification(c.env, parentComment.userId, notifPayload));
+        deferBroadcast(c.executionCtx, sendWebPushForNotification(c.env, db, notifPayload));
       }
     }
   }
 
-  try {
-    const doId = c.env.REALTIME_DO.idFromName('global');
-    const doStub = c.env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'item_comment_created', payload: { comment: commentResponse } }),
-    }));
-  } catch (e) {}
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, {
+    type: 'item_comment_created',
+    payload: { comment: commentResponse },
+  }));
 
   const gResult = await processUserActionSafe(
     db,
@@ -671,6 +659,7 @@ olabid.post('/items/:id/comments', async (c) => {
     'comment_created',
     { olabidItemId, commentId: inserted.id },
     authUser.username,
+    { scheduler: c.executionCtx },
   );
   const g = toGamificationBlock(gResult, await getGamificationVisibility(db));
 

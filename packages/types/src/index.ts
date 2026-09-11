@@ -765,6 +765,7 @@ export type ServerMessage =
   | { type: 'joined'; payload: { userId: number } }
   | { type: 'error'; payload: { message: string } }
   | { type: 'message'; payload: Message }
+  | { type: 'message_updated'; payload: Message }
   | { type: 'message_deleted'; payload: { messageId: number; conversationPeerId: number } }
   | { type: 'notification'; payload: Notification }
   | { type: 'post_created'; payload: { post: Post } }

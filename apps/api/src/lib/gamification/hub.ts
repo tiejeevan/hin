@@ -10,6 +10,7 @@ import { awardPointsForAction, getUserGamificationSummary } from './points';
 import { notifyBadgeAwards, notifyLevelUp, notifyEventWins, broadcastGamificationReward } from './notify';
 import { evaluateEventsForAction } from './events/evaluator';
 import { checkActionRateLimit } from './abuse';
+import { deferBroadcast, type RealtimeScheduler } from '../realtime';
 import './handlers';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -19,6 +20,18 @@ type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 export interface ProcessUserActionOptions {
   env?: Env;
   senderUsername?: string;
+  scheduler?: RealtimeScheduler;
+}
+
+async function dispatchSideEffect(
+  scheduler: RealtimeScheduler | undefined,
+  task: Promise<unknown>,
+): Promise<void> {
+  if (scheduler) {
+    deferBroadcast(scheduler, task);
+  } else {
+    await task;
+  }
 }
 
 async function runPipeline(
@@ -98,15 +111,25 @@ export async function processUserAction(
   if (options.env) {
     const username = options.senderUsername ?? 'Hin';
     const { showLevel, showPoints } = await getGamificationVisibility(db);
+    const scheduler = options.scheduler;
     if (result.badgesEarned.length > 0) {
-      await notifyBadgeAwards(db, options.env, userId, result.badgesEarned, username);
+      await dispatchSideEffect(
+        scheduler,
+        notifyBadgeAwards(db, options.env, userId, result.badgesEarned, username, scheduler),
+      );
     }
     // Level-up notifications only make sense when the level is visible.
     if (result.levelUp !== null && showLevel) {
-      await notifyLevelUp(db, options.env, userId, result.levelUp, username);
+      await dispatchSideEffect(
+        scheduler,
+        notifyLevelUp(db, options.env, userId, result.levelUp, username, scheduler),
+      );
     }
     if (result.eventWins && result.eventWins.length > 0) {
-      await notifyEventWins(db, options.env, userId, result.eventWins, username);
+      await dispatchSideEffect(
+        scheduler,
+        notifyEventWins(db, options.env, userId, result.eventWins, username, scheduler),
+      );
     }
     if (
       result.pointsEarned > 0
@@ -114,11 +137,14 @@ export async function processUserAction(
       || result.levelUp !== null
       || (result.eventWins && result.eventWins.length > 0)
     ) {
-      await broadcastGamificationReward(options.env, userId, {
-        ...(showPoints ? { pe: result.pointsEarned, pt: result.totalPoints } : {}),
-        ...(showLevel ? { lv: result.level, levelUp: result.levelUp } : {}),
-        be: result.badgesEarned.length > 0 ? result.badgesEarned : undefined,
-      });
+      await dispatchSideEffect(
+        scheduler,
+        broadcastGamificationReward(options.env, userId, {
+          ...(showPoints ? { pe: result.pointsEarned, pt: result.totalPoints } : {}),
+          ...(showLevel ? { lv: result.level, levelUp: result.levelUp } : {}),
+          be: result.badgesEarned.length > 0 ? result.badgesEarned : undefined,
+        }, scheduler),
+      );
     }
   }
 
@@ -135,9 +161,14 @@ export async function processUserActionSafe(
   action: GamificationActionType,
   metadata: Record<string, unknown> = {},
   senderUsername?: string,
+  extraOptions?: Pick<ProcessUserActionOptions, 'scheduler'>,
 ): Promise<GamificationActionResult> {
   try {
-    return await processUserAction(db, userId, action, metadata, { env, senderUsername });
+    return await processUserAction(db, userId, action, metadata, {
+      env,
+      senderUsername,
+      scheduler: extraOptions?.scheduler,
+    });
   } catch (err) {
     console.error('gamification pipeline failed', { userId, action, err });
     return {

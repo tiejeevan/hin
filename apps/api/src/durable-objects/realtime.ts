@@ -157,6 +157,81 @@ export class RealtimeDO implements DurableObject {
     }
   }
 
+  private async attachLinkPreviewToMessage(opts: {
+    messageId: number;
+    firstUrl: string;
+    senderId: number;
+    senderUsername: string;
+    receiverId: number;
+  }): Promise<void> {
+    const db = drizzle(this.env.DB, { schema });
+    const linkPreviewId = await getOrFetchLinkPreview(db, opts.firstUrl, {
+      olabidApiKey: this.env.OLABID_API_KEY,
+    });
+    if (linkPreviewId === null) return;
+
+    const row = await db
+      .select()
+      .from(schema.messages)
+      .where(and(eq(schema.messages.id, opts.messageId), isNull(schema.messages.deletedAt)))
+      .get();
+    if (!row) return;
+
+    await db
+      .update(schema.messages)
+      .set({ linkPreviewId })
+      .where(eq(schema.messages.id, opts.messageId))
+      .run();
+
+    const receiverUser = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, opts.receiverId))
+      .get();
+    const linkPreviewRow = await db
+      .select()
+      .from(schema.linkPreviews)
+      .where(eq(schema.linkPreviews.id, linkPreviewId))
+      .get();
+
+    let replyTo: MessageReplyTo | null = null;
+    if (row.replyToMessageId) {
+      const replyMap = await loadReplyToMap(db, [row.replyToMessageId]);
+      replyTo = replyMap.get(row.replyToMessageId) ?? null;
+    }
+
+    const messagePayload: Message = toMessageDto({
+      id: row.id,
+      senderId: opts.senderId,
+      senderUsername: opts.senderUsername,
+      receiverId: opts.receiverId,
+      receiverUsername: receiverUser?.username || 'Unknown',
+      content: row.content,
+      createdAt: row.createdAt,
+      read: row.read,
+      deliveredAt: row.deliveredAt,
+      readAt: row.readAt,
+      linkPreview: linkPreviewRow
+        ? {
+            url: linkPreviewRow.url,
+            title: linkPreviewRow.title,
+            description: linkPreviewRow.description,
+            imageUrl: linkPreviewRow.imageUrl,
+            siteName: linkPreviewRow.siteName,
+          }
+        : null,
+      mediaUrl: row.mediaUrl,
+      mediaType: row.mediaType,
+      clientMessageId: row.clientMessageId,
+      replyToMessageId: row.replyToMessageId,
+      replyTo,
+    });
+
+    const event = { type: 'message_updated' as const, payload: messagePayload };
+    this.broadcastToUser(opts.senderId, event);
+    this.broadcastToUser(opts.receiverId, event);
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
@@ -588,9 +663,6 @@ export class RealtimeDO implements DurableObject {
       }
 
       const firstUrl = !suppressLinkPreview && content ? parseFirstUrl(content) : null;
-      const linkPreviewId = firstUrl
-        ? await getOrFetchLinkPreview(db, firstUrl, { olabidApiKey: this.env.OLABID_API_KEY })
-        : null;
 
       const [inserted] = await db.insert(schema.messages).values({
         senderId: session.userId,
@@ -599,7 +671,7 @@ export class RealtimeDO implements DurableObject {
         read: readFlag,
         deliveredAt,
         readAt,
-        linkPreviewId,
+        linkPreviewId: null,
         mediaUrl,
         mediaType: resolvedMediaType,
         clientMessageId,
@@ -607,9 +679,6 @@ export class RealtimeDO implements DurableObject {
       }).returning();
 
       const receiverUser = await db.select().from(schema.users).where(eq(schema.users.id, receiverId)).get();
-      const linkPreviewRow = linkPreviewId
-        ? await db.select().from(schema.linkPreviews).where(eq(schema.linkPreviews.id, linkPreviewId)).get()
-        : null;
 
       const messagePayload: Message = toMessageDto({
         id: inserted.id,
@@ -622,15 +691,7 @@ export class RealtimeDO implements DurableObject {
         read: inserted.read,
         deliveredAt: inserted.deliveredAt ?? deliveredAt,
         readAt: inserted.readAt ?? readAt,
-        linkPreview: linkPreviewRow
-          ? {
-              url: linkPreviewRow.url,
-              title: linkPreviewRow.title,
-              description: linkPreviewRow.description,
-              imageUrl: linkPreviewRow.imageUrl,
-              siteName: linkPreviewRow.siteName,
-            }
-          : null,
+        linkPreview: null,
         mediaUrl: inserted.mediaUrl,
         mediaType: inserted.mediaType,
         clientMessageId: inserted.clientMessageId ?? clientMessageId,
@@ -640,6 +701,18 @@ export class RealtimeDO implements DurableObject {
 
       this.sendSafely(ws, { type: 'message', payload: messagePayload });
       this.broadcastToUser(receiverId, { type: 'message', payload: messagePayload });
+
+      if (firstUrl) {
+        this.state.waitUntil(
+          this.attachLinkPreviewToMessage({
+            messageId: inserted.id,
+            firstUrl,
+            senderId: session.userId,
+            senderUsername: session.username,
+            receiverId,
+          }),
+        );
+      }
     }
 
     else if (message.type === 'delete_message') {

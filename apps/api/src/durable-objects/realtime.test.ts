@@ -21,6 +21,8 @@ vi.mock('../lib/linkPreview', () => ({
   getOrFetchLinkPreview: vi.fn().mockResolvedValue(null),
 }));
 
+import { parseFirstUrl, getOrFetchLinkPreview } from '../lib/linkPreview';
+
 vi.mock('../lib/system-settings', () => ({
   isPresenceEnabled: vi.fn().mockResolvedValue(true),
   getSystemSettings: vi.fn(),
@@ -89,12 +91,18 @@ class TestRealtimeDO extends RealtimeDO {
 }
 
 function createMockState(socketsRef: { current: MockWebSocket[] }): DurableObjectState {
-  return {
+  const waitUntilTasks: Promise<unknown>[] = [];
+  const state = {
     acceptWebSocket: vi.fn((ws: WebSocket) => {
       socketsRef.current.push(ws as unknown as MockWebSocket);
     }),
     getWebSockets: vi.fn(() => socketsRef.current as unknown as WebSocket[]),
-  } as unknown as DurableObjectState;
+    waitUntil: vi.fn((promise: Promise<unknown>) => {
+      waitUntilTasks.push(promise);
+    }),
+    __waitUntilTasks: waitUntilTasks,
+  };
+  return state as unknown as DurableObjectState & { __waitUntilTasks: Promise<unknown>[] };
 }
 
 function createDbMock(options?: {
@@ -195,6 +203,8 @@ describe('RealtimeDO hibernation session routing', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    (parseFirstUrl as unknown as ReturnType<typeof vi.fn>).mockReturnValue(null);
+    (getOrFetchLinkPreview as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     (isPresenceEnabled as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(true);
     (getSystemSettings as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(DEFAULT_SYSTEM_SETTINGS);
     socketsRef = { current: [] };
@@ -1037,6 +1047,141 @@ describe('RealtimeDO websocket rate limits', () => {
     }
 
     expect(admin.eventsOfType('error').filter((e) => e.payload?.code === 'rate_limit')).toHaveLength(0);
+  });
+
+  it('delivers send_message immediately and attaches link preview via message_updated', async () => {
+    let resolvePreview: (value: number | null) => void = () => {};
+    const previewPromise = new Promise<number | null>((resolve) => {
+      resolvePreview = resolve;
+    });
+    (parseFirstUrl as unknown as ReturnType<typeof vi.fn>).mockReturnValue('https://example.com');
+    (getOrFetchLinkPreview as unknown as ReturnType<typeof vi.fn>).mockReturnValue(previewPromise);
+
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      createDbMock({
+        insertReturning: {
+          id: 99,
+          content: 'see https://example.com',
+          createdAt: 123,
+          read: 0,
+          mediaUrl: null,
+          mediaType: null,
+          deliveredAt: null,
+          readAt: null,
+          clientMessageId: null,
+          replyToMessageId: null,
+        },
+        receiverUser: { id: 2, username: 'bob' },
+        getQueue: [
+          { id: 2, username: 'bob' },
+          {
+            id: 99,
+            senderId: 1,
+            receiverId: 2,
+            content: 'see https://example.com',
+            createdAt: 123,
+            read: 0,
+            deliveredAt: null,
+            readAt: null,
+            deletedAt: null,
+            mediaUrl: null,
+            mediaType: null,
+            clientMessageId: null,
+            replyToMessageId: null,
+            linkPreviewId: 5,
+          },
+          { id: 2, username: 'bob' },
+          {
+            id: 5,
+            url: 'https://example.com',
+            title: 'Example',
+            description: 'desc',
+            imageUrl: null,
+            siteName: 'Example',
+          },
+        ],
+      }),
+    );
+
+    const alice = dob.addSocket();
+    const bob = dob.addSocket();
+    alice.serializeAttachment(readySession({ userId: 1, username: 'alice' }));
+    bob.serializeAttachment(readySession({ userId: 2, username: 'bob' }));
+
+    await dob.handleClientMessage(alice as unknown as WebSocket, {
+      type: 'send_message',
+      payload: { receiverId: 2, content: 'see https://example.com' },
+    });
+
+    expect(alice.eventsOfType('message')[0]?.payload).toMatchObject({
+      id: 99,
+      linkPreview: null,
+    });
+    expect(alice.eventsOfType('message_updated')).toHaveLength(0);
+
+    resolvePreview(5);
+    const tasks = (state as DurableObjectState & { __waitUntilTasks: Promise<unknown>[] }).__waitUntilTasks;
+    await Promise.all(tasks);
+
+    expect(alice.eventsOfType('message_updated')[0]?.payload).toMatchObject({
+      id: 99,
+      linkPreview: {
+        url: 'https://example.com',
+        title: 'Example',
+      },
+    });
+    expect(bob.eventsOfType('message_updated')).toHaveLength(1);
+  });
+
+  it('skips background link preview when suppressLinkPreview is true', async () => {
+    (parseFirstUrl as unknown as ReturnType<typeof vi.fn>).mockReturnValue('https://example.com');
+
+    const alice = dob.addSocket();
+    alice.serializeAttachment(readySession());
+
+    await dob.handleClientMessage(alice as unknown as WebSocket, {
+      type: 'send_message',
+      payload: { receiverId: 2, content: 'see https://example.com', suppressLinkPreview: true },
+    });
+
+    expect(getOrFetchLinkPreview).not.toHaveBeenCalled();
+    expect((state as DurableObjectState & { __waitUntilTasks: Promise<unknown>[] }).__waitUntilTasks).toHaveLength(0);
+  });
+
+  it('does not emit message_updated when message was deleted before preview attach', async () => {
+    (parseFirstUrl as unknown as ReturnType<typeof vi.fn>).mockReturnValue('https://example.com');
+    (getOrFetchLinkPreview as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(5);
+
+    (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      createDbMock({
+        insertReturning: {
+          id: 100,
+          content: 'see https://example.com',
+          createdAt: 123,
+          read: 0,
+          mediaUrl: null,
+          mediaType: null,
+        },
+        receiverUser: { id: 2, username: 'bob' },
+        getQueue: [
+          { id: 2, username: 'bob' },
+          null,
+        ],
+      }),
+    );
+
+    const alice = dob.addSocket();
+    alice.serializeAttachment(readySession());
+
+    await dob.handleClientMessage(alice as unknown as WebSocket, {
+      type: 'send_message',
+      payload: { receiverId: 2, content: 'see https://example.com' },
+    });
+
+    const tasks = (state as DurableObjectState & { __waitUntilTasks: Promise<unknown>[] }).__waitUntilTasks;
+    await Promise.all(tasks);
+
+    expect(alice.eventsOfType('message_updated')).toHaveLength(0);
   });
 
   it('drops typing events after the per-user limit', async () => {

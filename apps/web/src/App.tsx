@@ -1881,6 +1881,18 @@ export default function App() {
 
               break;
             }
+            case 'message_updated': {
+              const msg: Message = message.payload;
+              const partnerId = msg.senderId === currentUser!.id ? msg.receiverId : msg.senderId;
+              if (chatRecipientRef.current?.id === partnerId) {
+                setChatMessages(prev =>
+                  capMessageWindow(
+                    mergeAndSortMessagesExcludingDeleted(prev, [msg], pendingDeletedIdsRef.current),
+                  ),
+                );
+              }
+              break;
+            }
             case 'message_delivered': {
               const { messageIds, deliveredAt } = message.payload as {
                 messageIds: number[];

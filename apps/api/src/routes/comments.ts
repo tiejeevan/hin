@@ -11,6 +11,7 @@ import { processUserActionSafe } from '../lib/gamification/hub';
 import { isGamificationEnabled } from '../lib/gamification/settings';
 import { getEquippedBadgesForUser } from '../lib/gamification/equipped';
 import { sendWebPushForNotification } from '../lib/push';
+import { broadcastEvent, broadcastNotification, deferBroadcast } from '../lib/realtime';
 
 const comments = new Hono<{ Bindings: Env }>();
 
@@ -138,18 +139,8 @@ comments.post('/:id/like', async (c) => {
           createdAt: notif.createdAt,
         };
 
-        try {
-          const doId = c.env.REALTIME_DO.idFromName('global');
-          const doStub = c.env.REALTIME_DO.get(doId);
-          await doStub.fetch(
-            new Request('http://realtime/broadcast-notification', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ recipientId: comment.userId, notification: notifPayload }),
-            })
-          );
-        } catch (e) {}
-        await sendWebPushForNotification(c.env, db, notifPayload);
+        deferBroadcast(c.executionCtx, broadcastNotification(c.env, comment.userId, notifPayload));
+        deferBroadcast(c.executionCtx, sendWebPushForNotification(c.env, db, notifPayload));
       }
     }
   }
@@ -161,26 +152,16 @@ comments.post('/:id/like', async (c) => {
     .get();
   const likesCount = likesCountRes?.value || 0;
 
-  try {
-    const doId = c.env.REALTIME_DO.idFromName('global');
-    const doStub = c.env.REALTIME_DO.get(doId);
-    await doStub.fetch(
-      new Request('http://realtime/broadcast-event', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'comment_like_update',
-          payload: {
-            commentId,
-            postId: comment.postId,
-            likesCount,
-            userId: authUser.id,
-            liked,
-          },
-        }),
-      })
-    );
-  } catch (e) {}
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, {
+    type: 'comment_like_update',
+    payload: {
+      commentId,
+      postId: comment.postId,
+      likesCount,
+      userId: authUser.id,
+      liked,
+    },
+  }));
 
   return c.json({ liked, likesCount });
 });
@@ -236,18 +217,10 @@ comments.put('/:id', async (c) => {
     authorEquippedBadges,
   };
 
-  // Broadcast comment update
-  try {
-    const doId = c.env.REALTIME_DO.idFromName('global');
-    const doStub = c.env.REALTIME_DO.get(doId);
-    await doStub.fetch(
-      new Request('http://realtime/broadcast-event', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'comment_updated', payload: { comment: commentResponse } }),
-      })
-    );
-  } catch (e) {}
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, {
+    type: 'comment_updated',
+    payload: { comment: commentResponse },
+  }));
 
   return c.json(commentResponse);
 });
@@ -273,17 +246,10 @@ comments.delete('/:id', async (c) => {
     .where(eq(schema.comments.id, commentId))
     .run();
 
-  try {
-    const doId = c.env.REALTIME_DO.idFromName('global');
-    const doStub = c.env.REALTIME_DO.get(doId);
-    await doStub.fetch(
-      new Request('http://realtime/broadcast-event', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'comment_deleted', payload: { commentId, postId: comment.postId } }),
-      })
-    );
-  } catch (e) {}
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, {
+    type: 'comment_deleted',
+    payload: { commentId, postId: comment.postId },
+  }));
 
   await processUserActionSafe(
     db,
@@ -292,6 +258,7 @@ comments.delete('/:id', async (c) => {
     'comment_deleted',
     { postId: comment.postId, commentId },
     authUser.username,
+    { scheduler: c.executionCtx },
   );
 
   return c.json({ success: true });

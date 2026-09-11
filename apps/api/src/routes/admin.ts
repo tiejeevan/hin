@@ -24,7 +24,12 @@ import { listReports, reviewReport } from '../lib/reports';
 import { softDeleteUser, reinstateUser, computeAccountStatus } from '../lib/user-lifecycle';
 import { getSystemSettings, updateSystemSettings } from '../lib/system-settings';
 import { getRateLimitCatalog } from '../lib/rate-limit-catalog';
-import { broadcastToAll } from '../lib/realtime';
+import {
+  broadcastEvent,
+  broadcastNotificationsBatch,
+  broadcastSystemToast,
+  deferBroadcast,
+} from '../lib/realtime';
 import { writeAuditLog } from '../lib/audit';
 import { sendWebPushBatch } from '../lib/push';
 
@@ -311,34 +316,17 @@ admin.post('/broadcast', async (c) => {
       .where(eq(schema.systemBroadcasts.id, broadcast.id))
       .run();
 
-    try {
-      const doId = c.env.REALTIME_DO.idFromName('global');
-      const doStub = c.env.REALTIME_DO.get(doId);
-      await doStub.fetch(
-        new Request('http://realtime/broadcast-notifications-batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ notifications: createdNotifs }),
-        })
-      );
-    } catch (e) {}
+    deferBroadcast(
+      c.executionCtx,
+      broadcastNotificationsBatch(c.env, createdNotifs),
+    );
 
     // Chunked push fanout — do not block the HTTP response on large broadcasts.
     c.executionCtx.waitUntil(sendWebPushBatch(c.env, db, createdNotifs));
   }
 
   if (sendToast) {
-    try {
-      const doId = c.env.REALTIME_DO.idFromName('global');
-      const doStub = c.env.REALTIME_DO.get(doId);
-      await doStub.fetch(
-        new Request('http://realtime/broadcast-system-toast', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content }),
-        })
-      );
-    } catch (e) {}
+    deferBroadcast(c.executionCtx, broadcastSystemToast(c.env, content));
   }
 
   const auditRecord: SystemBroadcast = {
@@ -545,10 +533,10 @@ admin.patch('/settings', async (c) => {
     ? outboundFromWarnings(parsed.data.outboundFromEmail)
     : [];
 
-  await broadcastToAll(c.env, {
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, {
     type: 'system_settings_changed',
     payload: { settings: systemSettings },
-  });
+  }));
 
   return c.json({
     ...systemSettings,

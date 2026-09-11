@@ -49,7 +49,7 @@ follows.post('/requests/:userId/approve', async (c) => {
   if (isNaN(requesterId)) return c.json({ error: 'Invalid user id' }, 400);
 
   const db = drizzle(c.env.DB, { schema });
-  const result = await approveFollowRequest(db, c.env, authUser.id, requesterId, authUser.username);
+  const result = await approveFollowRequest(db, c.env, authUser.id, requesterId, authUser.username, c.executionCtx);
   if (!result.ok) return c.json({ error: result.error }, result.code as 404);
 
   const followStatus = await getFollowStatus(db, authUser.id, requesterId);
@@ -124,7 +124,7 @@ follows.post('/:userId', async (c) => {
   if (isNaN(targetId)) return c.json({ error: 'Invalid user id' }, 400);
 
   const db = drizzle(c.env.DB, { schema });
-  const result = await followUser(db, c.env, authUser.id, targetId, authUser.username);
+  const result = await followUser(db, c.env, authUser.id, targetId, authUser.username, c.executionCtx);
   if (!result.ok) return c.json({ error: result.error }, result.code as 400 | 404);
 
   const followStatus: FollowStatus =

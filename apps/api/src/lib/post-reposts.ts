@@ -6,6 +6,7 @@ import type { Env } from '../types';
 import { shouldDeliverNotification } from './blocks';
 import { getOrCreateUserSettings, isNotificationEnabled } from './user-settings';
 import { sendWebPushForNotification } from './push';
+import { broadcastNotification, deferBroadcast, type RealtimeScheduler } from './realtime';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -65,6 +66,7 @@ export async function notifyPostRedistribute(
     senderId: number;
     senderUsername: string;
   },
+  scheduler?: RealtimeScheduler,
 ): Promise<void> {
   if (opts.originalAuthorId === opts.senderId) return;
 
@@ -105,20 +107,8 @@ export async function notifyPostRedistribute(
     createdAt: notif.createdAt,
   };
 
-  try {
-    const doId = env.REALTIME_DO.idFromName('global');
-    const doStub = env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-notification', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recipientId: opts.originalAuthorId,
-        notification: notifPayload,
-      }),
-    }));
-  } catch (_e) {}
-
-  await sendWebPushForNotification(env, db, notifPayload);
+  deferBroadcast(scheduler, broadcastNotification(env, opts.originalAuthorId, notifPayload));
+  deferBroadcast(scheduler, sendWebPushForNotification(env, db, notifPayload));
 }
 
 export type { PostVisibility };

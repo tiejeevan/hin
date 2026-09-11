@@ -28,23 +28,12 @@ import { toGamificationBlock } from '../lib/gamification/public';
 import { getEquippedBadgesForUser, loadEquippedBadgesForUsers } from '../lib/gamification/equipped';
 import { sendWebPushForNotification } from '../lib/push';
 import { buildPostsResponseBatch, type PostHydrationRow } from '../lib/postBatchHydrator';
+import { broadcastEvent, broadcastNotification, deferBroadcast } from '../lib/realtime';
 
 const posts = new Hono<{ Bindings: Env }>();
 
 const DEFAULT_FEED_LIMIT = 10;
 const MAX_FEED_LIMIT = 50;
-
-async function broadcastEvent(env: Env, message: object) {
-  try {
-    const doId = env.REALTIME_DO.idFromName('global');
-    const doStub = env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(message),
-    }));
-  } catch (_e) {}
-}
 
 export async function buildPostResponse(
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -387,7 +376,7 @@ posts.post('/', async (c) => {
     senderUsername: authUser.username,
     entityId: inserted.id,
     context: 'post',
-  });
+  }, c.executionCtx);
 
   if (quotePostId) {
     const original = await db.select().from(schema.posts).where(eq(schema.posts.id, quotePostId)).get();
@@ -399,11 +388,11 @@ posts.post('/', async (c) => {
         entityId: inserted.id,
         senderId: authUser.id,
         senderUsername: authUser.username,
-      });
+      }, c.executionCtx);
     }
   }
 
-  await broadcastEvent(c.env, { type: 'post_created', payload: { post: responsePost } });
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, { type: 'post_created', payload: { post: responsePost } }));
 
   const gResult = await processUserActionSafe(
     db,
@@ -412,6 +401,7 @@ posts.post('/', async (c) => {
     'post_created',
     { postId: inserted.id, mediaCount: mediaUrls.length },
     authUser.username,
+    { scheduler: c.executionCtx },
   );
   const g = toGamificationBlock(gResult, await getGamificationVisibility(db));
 
@@ -495,7 +485,7 @@ posts.put('/:id', async (c) => {
     authorRole: author?.role,
   }, authUser.id);
 
-  await broadcastEvent(c.env, { type: 'post_updated', payload: { post: responsePost } });
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, { type: 'post_updated', payload: { post: responsePost } }));
 
   return c.json(responsePost);
 });
@@ -586,17 +576,8 @@ posts.post('/:id/like', async (c) => {
           createdAt: notif.createdAt,
         };
 
-        // Call Durable Object to send real-time update
-        try {
-          const doId = c.env.REALTIME_DO.idFromName('global');
-          const doStub = c.env.REALTIME_DO.get(doId);
-          await doStub.fetch(new Request('http://realtime/broadcast-notification', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ recipientId: post.userId, notification: notifPayload }),
-          }));
-        } catch (e) {}
-        await sendWebPushForNotification(c.env, db, notifPayload);
+        deferBroadcast(c.executionCtx, broadcastNotification(c.env, post.userId, notifPayload));
+        deferBroadcast(c.executionCtx, sendWebPushForNotification(c.env, db, notifPayload));
       }
     }
   }
@@ -605,19 +586,10 @@ posts.post('/:id/like', async (c) => {
   const likesCountRes = await db.select({ value: count() }).from(schema.likes).where(and(eq(schema.likes.postId, postId), isNull(schema.likes.deletedAt))).get();
   const likesCount = likesCountRes?.value || 0;
 
-  // Broadcast like update to ALL online users
-  try {
-    const doId = c.env.REALTIME_DO.idFromName('global');
-    const doStub = c.env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'like_update',
-        payload: { postId, likesCount, userId: authUser.id, liked }
-      }),
-    }));
-  } catch (e) {}
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, {
+    type: 'like_update',
+    payload: { postId, likesCount, userId: authUser.id, liked },
+  }));
 
   if (post.userId !== authUser.id) {
     const author = await db.select({ username: schema.users.username })
@@ -631,6 +603,7 @@ posts.post('/:id/like', async (c) => {
       liked ? 'post_liked' : 'post_unliked',
       { postId, likeCount: likesCount },
       author?.username ?? 'Hin',
+      { scheduler: c.executionCtx },
     );
   }
 
@@ -641,6 +614,7 @@ posts.post('/:id/like', async (c) => {
     liked ? 'like_given' : 'like_removed',
     { postId },
     authUser.username,
+    { scheduler: c.executionCtx },
   );
 
   return c.json({ liked, likesCount });
@@ -734,6 +708,7 @@ posts.post('/:id/share', async (c) => {
     'post_shared',
     { postId },
     authUser.username,
+    { scheduler: c.executionCtx },
   );
   const g = toGamificationBlock(gResult, await getGamificationVisibility(db));
 
@@ -992,13 +967,13 @@ posts.post('/:id/repost', async (c) => {
       entityId: rootId,
       senderId: authUser.id,
       senderUsername: authUser.username,
-    });
+    }, c.executionCtx);
 
-    await broadcastEvent(c.env, { type: 'post_created', payload: { post: responsePost } });
-    await broadcastEvent(c.env, {
+    deferBroadcast(c.executionCtx, broadcastEvent(c.env, { type: 'post_created', payload: { post: responsePost } }));
+    deferBroadcast(c.executionCtx, broadcastEvent(c.env, {
       type: 'repost_count_update',
       payload: { postId: rootId, repostsCount, userId: authUser.id, reposted: true },
-    });
+    }));
 
     const gResult = await processUserActionSafe(
       db,
@@ -1007,6 +982,7 @@ posts.post('/:id/repost', async (c) => {
       'post_reposted',
       { postId: rootId },
       authUser.username,
+      { scheduler: c.executionCtx },
     );
     const g = toGamificationBlock(gResult, await getGamificationVisibility(db));
     return c.json(g ? { ...responsePost, g, repostsCount } : { ...responsePost, repostsCount });
@@ -1046,11 +1022,11 @@ posts.delete('/:id/repost', async (c) => {
 
   const repostsCount = await countSilentReposts(db, rootId);
 
-  await broadcastEvent(c.env, { type: 'post_deleted', payload: { postId: existing.id } });
-  await broadcastEvent(c.env, {
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, { type: 'post_deleted', payload: { postId: existing.id } }));
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, {
     type: 'repost_count_update',
     payload: { postId: rootId, repostsCount, userId: authUser.id, reposted: false },
-  });
+  }));
 
   const gResult = await processUserActionSafe(
     db,
@@ -1059,6 +1035,7 @@ posts.delete('/:id/repost', async (c) => {
     'post_unreposted',
     { postId: rootId },
     authUser.username,
+    { scheduler: c.executionCtx },
   );
   const g = toGamificationBlock(gResult, await getGamificationVisibility(db));
 
@@ -1193,16 +1170,8 @@ posts.post('/:id/comments', async (c) => {
         createdAt: notif.createdAt,
       };
 
-      try {
-        const doId = c.env.REALTIME_DO.idFromName('global');
-        const doStub = c.env.REALTIME_DO.get(doId);
-        await doStub.fetch(new Request('http://realtime/broadcast-notification', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ recipientId, notification: notifPayload }),
-        }));
-      } catch (e) {}
-      await sendWebPushForNotification(c.env, db, notifPayload);
+      deferBroadcast(c.executionCtx, broadcastNotification(c.env, recipientId, notifPayload));
+      deferBroadcast(c.executionCtx, sendWebPushForNotification(c.env, db, notifPayload));
     }
   }
 
@@ -1213,21 +1182,12 @@ posts.post('/:id/comments', async (c) => {
     entityId: postId,
     commentId: inserted.id,
     context: 'comment',
-  });
+  }, c.executionCtx);
 
-  // Broadcast comment creation
-  try {
-    const doId = c.env.REALTIME_DO.idFromName('global');
-    const doStub = c.env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'comment_created',
-        payload: { comment: commentResponse }
-      }),
-    }));
-  } catch (e) {}
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, {
+    type: 'comment_created',
+    payload: { comment: commentResponse },
+  }));
 
   const gResult = await processUserActionSafe(
     db,
@@ -1236,6 +1196,7 @@ posts.post('/:id/comments', async (c) => {
     'comment_created',
     { postId, commentId: inserted.id },
     authUser.username,
+    { scheduler: c.executionCtx },
   );
   const g = toGamificationBlock(gResult, await getGamificationVisibility(db));
 
@@ -1265,10 +1226,10 @@ posts.post('/:id/poll/vote', async (c) => {
   const result = await castVote(db, postId, authUser.id, parsed.data.optionIds);
   if (result.error) return c.json({ error: result.error }, result.status ?? 400);
 
-  await broadcastEvent(c.env, {
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, {
     type: 'poll_vote_update',
     payload: { postId, poll: result.poll },
-  });
+  }));
 
   return c.json({ poll: result.poll });
 });
@@ -1290,10 +1251,10 @@ posts.delete('/:id/poll/vote', async (c) => {
   const result = await retractVote(db, postId, authUser.id);
   if (result.error) return c.json({ error: result.error }, result.status ?? 400);
 
-  await broadcastEvent(c.env, {
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, {
     type: 'poll_vote_update',
     payload: { postId, poll: result.poll },
-  });
+  }));
 
   return c.json({ poll: result.poll });
 });
@@ -1318,10 +1279,10 @@ posts.post('/:id/poll/close', async (c) => {
   const result = await closePoll(db, postId);
   if (result.error) return c.json({ error: result.error }, result.status ?? 400);
 
-  await broadcastEvent(c.env, {
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, {
     type: 'poll_closed',
     payload: { postId, poll: result.poll },
-  });
+  }));
 
   return c.json({ poll: result.poll });
 });
@@ -1348,19 +1309,11 @@ posts.delete('/:id', async (c) => {
     .where(eq(schema.posts.id, postId))
     .run();
 
-  try {
-    const doId = c.env.REALTIME_DO.idFromName('global');
-    const doStub = c.env.REALTIME_DO.get(doId);
-    await doStub.fetch(new Request('http://realtime/broadcast-event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'post_deleted', payload: { postId } }),
-    }));
-  } catch (e) {}
+  deferBroadcast(c.executionCtx, broadcastEvent(c.env, { type: 'post_deleted', payload: { postId } }));
 
   if (post.repostOfPostId != null && (post.isQuote ?? 0) === 0) {
     const repostsCount = await countSilentReposts(db, post.repostOfPostId);
-    await broadcastEvent(c.env, {
+    deferBroadcast(c.executionCtx, broadcastEvent(c.env, {
       type: 'repost_count_update',
       payload: {
         postId: post.repostOfPostId,
@@ -1368,7 +1321,7 @@ posts.delete('/:id', async (c) => {
         userId: authUser.id,
         reposted: false,
       },
-    });
+    }));
     await processUserActionSafe(
       db,
       c.env,
@@ -1376,6 +1329,7 @@ posts.delete('/:id', async (c) => {
       'post_unreposted',
       { postId: post.repostOfPostId },
       authUser.username,
+      { scheduler: c.executionCtx },
     );
   }
 
@@ -1391,6 +1345,7 @@ posts.delete('/:id', async (c) => {
     'post_deleted',
     { postId, mediaCount },
     owner?.username ?? 'Hin',
+    { scheduler: c.executionCtx },
   );
 
   return c.json({ success: true });
