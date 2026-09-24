@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import {
   BroadcastDelivery,
   ContentReport,
@@ -109,6 +109,9 @@ import {
 } from './components/walkthrough/IntroWalkthrough';
 import { CoachTooltip, PROFILE_TOUR_STEPS } from './components/walkthrough/CoachTooltip';
 import { SearchOverlay } from './components/feed/SearchOverlay';
+const WelcomePage = lazy(() =>
+  import('./components/welcome/WelcomePage').then(m => ({ default: m.WelcomePage })),
+);
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('hin_token'));
@@ -571,6 +574,26 @@ export default function App() {
   const ensureMessagesClosed = (after?: () => void) => {
     closeMessagesPanelUi();
     chatHistoryRef.current.dismiss({ onSettled: after });
+  };
+
+  const openWelcome = (opts?: { skipUrlSync?: boolean; replace?: boolean }) => {
+    const apply = () => {
+      setActiveTab('welcome');
+      setIsSearchOpen(false);
+      setShowGuestAuth(false);
+      setShowNotifications(false);
+      showMessagesDropdownRef.current = false;
+      setShowMessagesDropdown(false);
+      setMessagesPanelExpanded(false);
+      if (!opts?.skipUrlSync) {
+        syncUrl({ view: 'welcome' }, opts?.replace ?? false);
+      }
+    };
+    if (showMessagesDropdownRef.current || chatHistoryRef.current.getDepth() > 0) {
+      ensureMessagesClosed(apply);
+    } else {
+      apply();
+    }
   };
 
   const goHome = (opts?: { skipUrlSync?: boolean }) => {
@@ -4259,6 +4282,8 @@ export default function App() {
       } else {
         syncUrl({ view: 'home' }, true);
       }
+    } else if (route.view === 'welcome') {
+      openWelcome({ replace: true, skipUrlSync: true });
     }
 
     const onPopState = (event: PopStateEvent) => {
@@ -4301,6 +4326,8 @@ export default function App() {
         else openOlabid({ skipUrlSync: true });
       } else if (r.view === 'admin' && currentUser?.role === 'admin') {
         openAdmin(r.section, { skipUrlSync: true });
+      } else if (r.view === 'welcome') {
+        openWelcome({ skipUrlSync: true });
       } else {
         setIsSearchOpen(false);
         goHome({ skipUrlSync: true });
@@ -4521,7 +4548,9 @@ export default function App() {
     updatedAt: new Date(0).toISOString(),
   };
   const showChatIcon =
-    !!currentUser && shouldShowChatIcon(effectiveSettings, activeTab);
+    !!currentUser &&
+    activeTab !== 'welcome' &&
+    shouldShowChatIcon(effectiveSettings, activeTab as Exclude<ActiveTab, 'welcome'>);
   const postLimits = systemSettings ?? DEFAULT_SYSTEM_SETTINGS;
 
   const handleWalkthroughStepChange = useCallback(() => {
@@ -4570,6 +4599,26 @@ export default function App() {
       handleWalkthroughStepChange();
     }
   }, [walkthrough.isActive, profileTour.isActive, handleWalkthroughStepChange]);
+
+  if (activeTab === 'welcome') {
+    return (
+      <>
+        <Suspense fallback={null}>
+          <WelcomePage
+            isAuthenticated={!!currentUser}
+            token={token}
+            onStepInside={() => handleGuestSignIn()}
+            onGoToApp={() => goHome()}
+          />
+        </Suspense>
+        <ToastContainer
+          toasts={toasts}
+          onToastClick={handleToastClick}
+          onDismiss={id => setToasts(prev => prev.filter(t => t.id !== id))}
+        />
+      </>
+    );
+  }
 
   return (
     <AppShell

@@ -16,14 +16,10 @@ function feedModeLabel(mode: FeedMode): string {
 interface FeedModeSelectorProps {
   feedMode: FeedMode;
   onFeedModeChange: (mode: FeedMode) => void;
-  /** When true, only public feed modes are shown (guest browsing). */
-  guestMode?: boolean;
 }
 
-export function FeedModeSelector({ feedMode, onFeedModeChange, guestMode = false }: FeedModeSelectorProps) {
-  const modes = guestMode
-    ? FEED_MODES.filter(m => m.value === 'all' || m.value === 'explore')
-    : FEED_MODES;
+export function FeedModeSelector({ feedMode, onFeedModeChange }: FeedModeSelectorProps) {
+  const modes = FEED_MODES;
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 

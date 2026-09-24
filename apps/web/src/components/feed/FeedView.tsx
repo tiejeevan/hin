@@ -179,11 +179,9 @@ export function FeedView({
   return (
     <div ref={scrollRef} className="flex-grow overflow-y-auto p-4 md:p-6 relative">
       <div className="max-w-2xl mx-auto w-full space-y-4 pb-20 md:pb-4">
-      <FeedModeSelector
-        feedMode={feedMode}
-        onFeedModeChange={onFeedModeChange}
-        guestMode={readOnly}
-      />
+      {!readOnly && (
+        <FeedModeSelector feedMode={feedMode} onFeedModeChange={onFeedModeChange} />
+      )}
 
       {gamificationEnabled && token && (
         <ActiveEventsBanner token={token} onGamificationRefresh={onGamificationRefresh} />
