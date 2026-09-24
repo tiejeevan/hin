@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   BroadcastDelivery,
   ContentReport,
@@ -109,9 +109,7 @@ import {
 } from './components/walkthrough/IntroWalkthrough';
 import { CoachTooltip, PROFILE_TOUR_STEPS } from './components/walkthrough/CoachTooltip';
 import { SearchOverlay } from './components/feed/SearchOverlay';
-const WelcomePage = lazy(() =>
-  import('./components/welcome/WelcomePage').then(m => ({ default: m.WelcomePage })),
-);
+import { WelcomePage } from './components/welcome/WelcomePage';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('hin_token'));
@@ -4603,15 +4601,13 @@ export default function App() {
   if (activeTab === 'welcome') {
     return (
       <>
-        <Suspense fallback={null}>
-          <WelcomePage
-            isAuthenticated={!!currentUser}
-            token={token}
-            onStepInside={() => handleGuestSignIn()}
-            onGoToApp={() => goHome()}
-            onBack={() => goHome()}
-          />
-        </Suspense>
+        <WelcomePage
+          isAuthenticated={!!currentUser}
+          token={token}
+          onStepInside={() => handleGuestSignIn()}
+          onGoToApp={() => goHome()}
+          onBack={() => goHome()}
+        />
         <ToastContainer
           toasts={toasts}
           onToastClick={handleToastClick}
