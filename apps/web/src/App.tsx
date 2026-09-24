@@ -38,6 +38,7 @@ import { getPostEngagementId } from './components/feed/PostCard';
 import { mergePollFromBroadcast } from './utils/pollVisibility';
 import { computeOptimisticPoll } from './utils/optimisticPoll';
 import { parseLocation, syncUrl, postPermalinkUrl, profilePermalinkUrl, type AdminSection } from './lib/appRoutes';
+import { parseAuthIntent, stripAuthQueryFromLocation } from './lib/welcomeAuthLinks';
 import { randomId, uploadCompressedImage } from './lib/compressImage';
 import {
   loadChatState,
@@ -1471,6 +1472,24 @@ export default function App() {
     }
     sessionStorage.setItem('hin_return_url', window.location.pathname + window.location.hash);
   };
+
+  useEffect(() => {
+    const intent = parseAuthIntent(window.location.search);
+    if (!intent) return;
+    if (token) {
+      stripAuthQueryFromLocation();
+      return;
+    }
+    setShowGuestAuth(true);
+    setIsRegisterMode(intent === 'register');
+    if (activeTab !== 'feed') {
+      setActiveTab('feed');
+      syncUrl({ view: 'home' }, true);
+    }
+    sessionStorage.setItem('hin_return_url', '/');
+    stripAuthQueryFromLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- welcome deep-link: run once on load
+  }, []);
 
   const fetchNotifications = async () => {
     if (!currentUser || !token) return;

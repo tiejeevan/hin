@@ -102,6 +102,14 @@ export default defineConfig(({ command, mode }) => {
 
   return {
     plugins,
+    build: {
+      rollupOptions: {
+        input: {
+          main: path.resolve('index.html'),
+          welcome: path.resolve('welcome.html'),
+        },
+      },
+    },
     server: {
       host: true,
       port: 5173,
