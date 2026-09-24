@@ -157,6 +157,30 @@ function buildCrawlerHtml(preview, googleVerification) {
 </html>`;
 }
 
+const STATIC_ASSET_PREFIX = /^\/assets\//;
+const STATIC_FILE_EXT = /\.(css|js|mjs|map|woff2?|ttf|eot|svg|png|jpe?g|gif|webp|ico|wasm|webmanifest)$/i;
+
+/** Pages SPA fallback serves index.html for missing files — browsers then ignore it as CSS/JS. */
+async function fetchStaticAsset(request, env) {
+  const res = await env.ASSETS.fetch(request);
+  const pathname = new URL(request.url).pathname;
+  if (!STATIC_ASSET_PREFIX.test(pathname) && !STATIC_FILE_EXT.test(pathname)) {
+    return res;
+  }
+  const contentType = res.headers.get('content-type') || '';
+  if (res.ok && contentType.includes('text/html')) {
+    return new Response('Not Found', {
+      status: 404,
+      statusText: 'Not Found',
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    });
+  }
+  return res;
+}
+
 async function fetchSharePreview(apiBase, type, key) {
   const url = `${apiBase}/api/seo/share-preview/${encodeURIComponent(type)}/${encodeURIComponent(key)}`;
   const res = await fetch(url, {
@@ -184,7 +208,7 @@ export default {
     }
 
     if (isAiTrainingBot(ua)) {
-      return env.ASSETS.fetch(request);
+      return fetchStaticAsset(request, env);
     }
 
     if (isCrawler(ua)) {
@@ -224,6 +248,6 @@ export default {
       }
     }
 
-    return env.ASSETS.fetch(request);
+    return fetchStaticAsset(request, env);
   },
 };

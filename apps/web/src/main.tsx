@@ -13,7 +13,7 @@ installSeoHeadSync();
 // Register PWA service worker (push handlers live in public/sw.js)
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {
+    navigator.serviceWorker.register('/sw.js?v=2').catch(() => {
       /* ignore registration failures in unsupported contexts */
     });
   });

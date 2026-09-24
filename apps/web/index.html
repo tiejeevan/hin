@@ -96,6 +96,72 @@
         "description": "Social media and real-time messaging."
       }
     </script>
+    <script>
+      (function () {
+        var RELOAD_KEY = 'hin-css-recovery';
+        var RELOAD_MAX = 2;
+
+        function isLocal() {
+          var h = window.location.hostname;
+          return h === 'localhost' || h === '127.0.0.1' || h.indexOf('192.168.') === 0;
+        }
+
+        function styled() {
+          var bg = window.getComputedStyle(document.body).backgroundColor;
+          return bg === 'rgb(2, 6, 23)';
+        }
+
+        function recover() {
+          if (isLocal()) return;
+          var n = parseInt(sessionStorage.getItem(RELOAD_KEY) || '0', 10);
+          if (n >= RELOAD_MAX) return;
+          sessionStorage.setItem(RELOAD_KEY, String(n + 1));
+          Promise.resolve()
+            .then(function () {
+              if (!('serviceWorker' in navigator)) return;
+              return navigator.serviceWorker.getRegistrations().then(function (regs) {
+                return Promise.all(regs.map(function (r) { return r.unregister(); }));
+              });
+            })
+            .then(function () {
+              if (!('caches' in window)) return;
+              return caches.keys().then(function (keys) {
+                return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+              });
+            })
+            .finally(function () {
+              var u = new URL(window.location.href);
+              u.searchParams.set('_hin', String(Date.now()));
+              window.location.replace(u.toString());
+            });
+        }
+
+        function watchLink(link) {
+          if (!link || link.rel !== 'stylesheet') return;
+          link.addEventListener('error', recover);
+        }
+
+        function watchAll() {
+          document.querySelectorAll('link[rel="stylesheet"]').forEach(watchLink);
+        }
+
+        watchAll();
+        new MutationObserver(function (mutations) {
+          mutations.forEach(function (m) {
+            m.addedNodes.forEach(function (node) {
+              if (node.nodeType === 1 && node.tagName === 'LINK') watchLink(node);
+            });
+          });
+        }).observe(document.documentElement, { childList: true, subtree: true });
+
+        window.addEventListener('load', function () {
+          setTimeout(function () {
+            if (styled()) sessionStorage.removeItem(RELOAD_KEY);
+            else recover();
+          }, 1200);
+        });
+      })();
+    </script>
   </head>
   <body class="bg-slate-950 text-slate-100 antialiased min-h-screen">
     <style>

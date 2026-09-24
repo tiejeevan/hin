@@ -25,7 +25,7 @@ async function getVapidPublicKey(): Promise<string | null> {
 
 export async function ensureServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (!('serviceWorker' in navigator)) return null;
-  return navigator.serviceWorker.register('/sw.js');
+  return navigator.serviceWorker.register('/sw.js?v=2');
 }
 
 export async function registerPushSubscription(
