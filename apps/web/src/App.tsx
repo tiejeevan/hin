@@ -4609,6 +4609,7 @@ export default function App() {
             token={token}
             onStepInside={() => handleGuestSignIn()}
             onGoToApp={() => goHome()}
+            onBack={() => goHome()}
           />
         </Suspense>
         <ToastContainer
@@ -5076,6 +5077,7 @@ export default function App() {
             currentUser={currentUser}
             readOnly={!currentUser}
             onSignInRequired={() => handleGuestSignIn()}
+            onOpenWelcome={() => openWelcome()}
             showNewPostForm={showNewPostForm}
             newPostContent={newPostContent}
             postSeedPreview={postSeedPreview}

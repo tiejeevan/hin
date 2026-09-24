@@ -9,12 +9,14 @@ import { FeedModeSelector } from './FeedModeSelector';
 import { ExploreHashtags } from './ExploreHashtags';
 import { ActiveEventsBanner } from '../gamification/ActiveEventsBanner';
 import { PostCardSkeleton } from '../ui/LoadingSkeleton';
+import { WelcomeFeedBanner } from './WelcomeFeedBanner';
 
 interface FeedViewProps {
   posts: Post[];
   currentUser: UserType | null;
   readOnly?: boolean;
   onSignInRequired?: () => void;
+  onOpenWelcome?: () => void;
   showNewPostForm: boolean;
   newPostContent: string;
   postSeedPreview?: LinkPreview | null;
@@ -82,6 +84,7 @@ export function FeedView({
   currentUser,
   readOnly = false,
   onSignInRequired,
+  onOpenWelcome,
   showNewPostForm,
   newPostContent,
   postSeedPreview = null,
@@ -182,6 +185,8 @@ export function FeedView({
       {!readOnly && (
         <FeedModeSelector feedMode={feedMode} onFeedModeChange={onFeedModeChange} />
       )}
+
+      {readOnly && onOpenWelcome && <WelcomeFeedBanner onOpenWelcome={onOpenWelcome} />}
 
       {gamificationEnabled && token && (
         <ActiveEventsBanner token={token} onGamificationRefresh={onGamificationRefresh} />

@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import './welcomePage.css';
+import { WelcomePhoneFeed } from './WelcomePhoneFeed';
 
 type FeedMood = 'curious' | 'honest' | 'useful' | 'playful';
 
@@ -104,16 +106,21 @@ function HeartIcon() {
   );
 }
 
-import { WelcomePhoneFeed } from './WelcomePhoneFeed';
-
 export interface WelcomePageProps {
   isAuthenticated?: boolean;
   token?: string | null;
   onStepInside?: () => void;
   onGoToApp?: () => void;
+  onBack?: () => void;
 }
 
-export function WelcomePage({ isAuthenticated, token = null, onStepInside, onGoToApp }: WelcomePageProps) {
+export function WelcomePage({
+  isAuthenticated,
+  token = null,
+  onStepInside,
+  onGoToApp,
+  onBack,
+}: WelcomePageProps) {
   const [mood, setMood] = useState<FeedMood>('curious');
   const [fadeSwitch, setFadeSwitch] = useState(false);
 
@@ -132,19 +139,35 @@ export function WelcomePage({ isAuthenticated, token = null, onStepInside, onGoT
   return (
     <div className="welcome-page">
       <div className="page-shell">
-        <nav className="nav" aria-label="Welcome page sections">
-          <a href="#why">Why Hin</a>
-          <a href="#preview">The feed</a>
-          {isAuthenticated ? (
-            <button type="button" className="button primary nav-sign-in" onClick={() => onGoToApp?.()}>
-              Open Hin
-            </button>
-          ) : (
-            <button type="button" className="button primary nav-sign-in" onClick={() => onStepInside?.()}>
-              Sign in
-            </button>
-          )}
-        </nav>
+        <header className="welcome-header">
+          <div className="welcome-header-top">
+            <div className="welcome-brand" aria-label="Hin">
+              <img src="/icons/hin-logo.png" alt="" aria-hidden="true" />
+              <span>Hin</span>
+            </div>
+            {isAuthenticated ? (
+              <button type="button" className="button primary welcome-sign-in" onClick={() => onGoToApp?.()}>
+                Open Hin
+              </button>
+            ) : (
+              <button type="button" className="button primary welcome-sign-in" onClick={() => onStepInside?.()}>
+                Sign in
+              </button>
+            )}
+          </div>
+          <div className="welcome-header-sub">
+            {onBack && (
+              <button type="button" className="welcome-back" onClick={onBack}>
+                <ArrowLeft aria-hidden="true" />
+                Back
+              </button>
+            )}
+            <nav className="welcome-section-nav" aria-label="Welcome page sections">
+              <a href="#why">Why Hin</a>
+              <a href="#preview">The feed</a>
+            </nav>
+          </div>
+        </header>
 
         <main>
           <section className="hero" aria-labelledby="hero-title">
