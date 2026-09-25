@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useId, useState, type MouseEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import './welcomeFeedBanner.css';
 
 const SLIDES = [
@@ -20,6 +28,8 @@ const SLIDES = [
 ] as const;
 
 const SLIDE_INTERVAL_MS = 4800;
+const AXIS_LOCK_PX = 10;
+const SWIPE_THRESHOLD_PX = 48;
 
 interface WelcomeFeedBannerProps {
   onOpenWelcome: () => void;
@@ -32,8 +42,22 @@ export function WelcomeFeedBanner({ onOpenWelcome }: WelcomeFeedBannerProps) {
 
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
+  const bannerRef = useRef<HTMLDivElement>(null);
+  const pointerIdRef = useRef<number | null>(null);
+  const startRef = useRef({ x: 0, y: 0 });
+  const axisRef = useRef<'h' | 'v' | null>(null);
 
   const slide = SLIDES[index];
+
+  const resetGesture = useCallback(() => {
+    pointerIdRef.current = null;
+    axisRef.current = null;
+  }, []);
+
+  const isInteractiveTarget = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) return false;
+    return Boolean(target.closest('button, a'));
+  };
 
   const showSlide = useCallback((next: number) => {
     setIndex(next);
@@ -55,9 +79,72 @@ export function WelcomeFeedBanner({ onOpenWelcome }: WelcomeFeedBannerProps) {
     e.stopPropagation();
   };
 
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (isInteractiveTarget(e.target)) return;
+    pointerIdRef.current = e.pointerId;
+    startRef.current = { x: e.clientX, y: e.clientY };
+    axisRef.current = null;
+  };
+
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (pointerIdRef.current !== e.pointerId) return;
+
+    const dx = e.clientX - startRef.current.x;
+    const dy = e.clientY - startRef.current.y;
+
+    if (!axisRef.current) {
+      if (Math.abs(dx) < AXIS_LOCK_PX && Math.abs(dy) < AXIS_LOCK_PX) return;
+      axisRef.current = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
+      if (axisRef.current === 'v') {
+        resetGesture();
+        return;
+      }
+      try {
+        bannerRef.current?.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (axisRef.current === 'h') {
+      e.preventDefault();
+    }
+  };
+
+  const onPointerEnd = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (pointerIdRef.current !== e.pointerId) return;
+
+    const dx = e.clientX - startRef.current.x;
+    const axis = axisRef.current;
+
+    try {
+      if (bannerRef.current?.hasPointerCapture(e.pointerId)) {
+        bannerRef.current.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      /* ignore */
+    }
+
+    resetGesture();
+
+    if (axis === 'h' && Math.abs(dx) >= SWIPE_THRESHOLD_PX) {
+      setIndex(prev =>
+        dx < 0 ? (prev + 1) % SLIDES.length : (prev - 1 + SLIDES.length) % SLIDES.length
+      );
+    }
+  };
+
   return (
     <div className="welcome-feed-banner-wrap">
-      <div className="welcome-banner" aria-label="Welcome to Hin">
+      <div
+        ref={bannerRef}
+        className="welcome-banner"
+        aria-label="Welcome to Hin"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerEnd}
+        onPointerCancel={onPointerEnd}
+      >
         <span className="banner-grid" aria-hidden="true" />
         <div className="banner-copy">
           <div className="mini-label">

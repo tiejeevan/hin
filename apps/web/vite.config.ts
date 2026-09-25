@@ -3,7 +3,6 @@ import path from 'node:path';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import obfuscator from 'vite-plugin-javascript-obfuscator';
 import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 
@@ -71,32 +70,9 @@ function seoBuildPlugin(env: Record<string, string>): Plugin {
   };
 }
 
-export default defineConfig(({ command, mode }) => {
+export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const plugins = [wasm(), topLevelAwait(), react(), tailwindcss(), seoBuildPlugin(env)];
-
-  if (command === 'build') {
-    plugins.push(
-      obfuscator({
-        options: {
-          compact: true,
-          controlFlowFlattening: false,
-          deadCodeInjection: false,
-          debugProtection: false,
-          disableConsoleOutput: false,
-          identifierNamesGenerator: 'hexadecimal',
-          log: false,
-          renameGlobals: false,
-          rotateStringArray: true,
-          selfDefending: false,
-          stringArray: true,
-          stringArrayEncoding: ['base64'],
-          stringArrayThreshold: 0.75,
-        },
-        exclude: [/wasm\/chat/, /hin_chat_wasm/],
-      })
-    );
-  }
 
   const apiProxyTarget = (process.env.VITE_API_URL || 'http://localhost:8787').replace(/\/$/, '');
 

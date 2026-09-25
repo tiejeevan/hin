@@ -102,3 +102,47 @@ export function buildOtpEmailHtml(content: OtpEmailContent): string {
 </body>
 </html>`;
 }
+
+export interface ContactInquiryEmailParams {
+  name: string;
+  email: string;
+  topicLabel: string;
+  message: string;
+}
+
+export function buildContactInquirySubject(name: string, topicLabel: string): string {
+  return `[Hin Contact] ${topicLabel} — ${name}`;
+}
+
+export function buildContactInquiryText(params: ContactInquiryEmailParams): string {
+  return [
+    'New contact form submission',
+    '—'.repeat(32),
+    `Topic: ${params.topicLabel}`,
+    `From: ${params.name} <${params.email}>`,
+    '',
+    params.message,
+    '',
+    '—'.repeat(32),
+    'Reply directly to this email to respond to the sender.',
+  ].join('\n');
+}
+
+export function buildContactInquiryHtml(params: ContactInquiryEmailParams): string {
+  const name = escapeHtml(params.name);
+  const email = escapeHtml(params.email);
+  const topic = escapeHtml(params.topicLabel);
+  const message = escapeHtml(params.message).replace(/\n/g, '<br>');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Contact inquiry</title></head>
+<body style="margin:0;padding:24px;font-family:system-ui,sans-serif;color:#18181b;">
+  <h1 style="font-size:20px;margin:0 0 16px;">New contact form submission</h1>
+  <p style="margin:0 0 8px;"><strong>Topic:</strong> ${topic}</p>
+  <p style="margin:0 0 16px;"><strong>From:</strong> ${name} &lt;${email}&gt;</p>
+  <div style="padding:16px;background:#f4f4f5;border-radius:8px;line-height:1.6;">${message}</div>
+  <p style="margin:24px 0 0;font-size:13px;color:#71717a;">Reply to this email to reach the sender.</p>
+</body>
+</html>`;
+}

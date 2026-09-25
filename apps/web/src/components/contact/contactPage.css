@@ -1,0 +1,166 @@
+.contact-page .contact-main {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 24px 0 48px;
+}
+
+.contact-hero {
+  max-width: 640px;
+  margin-bottom: 40px;
+}
+
+.contact-eyebrow {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--indigo);
+}
+
+.contact-page h1 {
+  margin: 0 0 16px;
+  font-family: "Newsreader", serif;
+  font-size: clamp(40px, 6vw, 56px);
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+.contact-lede {
+  margin: 0 0 20px;
+  font-size: 18px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.contact-direct {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.contact-direct a {
+  color: var(--indigo);
+  text-decoration: none;
+}
+
+.contact-direct a:hover {
+  text-decoration: underline;
+}
+
+.contact-form-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: clamp(24px, 4vw, 36px);
+  box-shadow: var(--shadow-soft);
+  max-width: 560px;
+}
+
+.contact-form-card h2 {
+  margin: 0 0 24px;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.contact-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.contact-field label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.contact-field input,
+.contact-field select,
+.contact-field textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.4;
+}
+
+.contact-field input:focus,
+.contact-field select:focus,
+.contact-field textarea:focus {
+  outline: 2px solid var(--indigo-soft);
+  border-color: var(--indigo);
+}
+
+.contact-field textarea {
+  resize: vertical;
+  min-height: 140px;
+}
+
+.contact-field-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.contact-honeypot {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.contact-error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--orange-soft);
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.contact-submit {
+  align-self: flex-start;
+  min-height: 44px;
+}
+
+.contact-success {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.contact-success p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.contact-footer {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 26px 0 calc(32px + env(safe-area-inset-bottom));
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 560px) {
+  .contact-page .contact-main,
+  .contact-footer {
+    width: min(100% - 28px, 1180px);
+  }
+
+  .contact-submit {
+    width: 100%;
+    align-self: stretch;
+  }
+}

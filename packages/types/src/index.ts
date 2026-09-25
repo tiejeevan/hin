@@ -647,6 +647,34 @@ export const LoginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+export const CONTACT_INQUIRY_TOPICS = ['general', 'account'] as const;
+export type ContactInquiryTopic = (typeof CONTACT_INQUIRY_TOPICS)[number];
+
+export const CONTACT_TOPIC_RECIPIENTS: Record<ContactInquiryTopic, string> = {
+  general: 'support@hingot.com',
+  account: 'admin@hingot.com',
+};
+
+export const CONTACT_TOPIC_LABELS: Record<ContactInquiryTopic, string> = {
+  general: 'General support',
+  account: 'Account & admin',
+};
+
+export const ContactInquirySchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(120, 'Name is too long'),
+  email: z.string().trim().email('Enter a valid email address').max(254),
+  topic: z.enum(CONTACT_INQUIRY_TOPICS),
+  message: z.string().trim().min(10, 'Message is too short').max(5000, 'Message is too long'),
+  turnstileToken: z.string().optional(),
+  company: z.string().optional(),
+});
+
+export type ContactInquiryInput = z.infer<typeof ContactInquirySchema>;
+
+export function contactInquiryRecipient(topic: ContactInquiryTopic): string {
+  return CONTACT_TOPIC_RECIPIENTS[topic];
+}
+
 export const UpdateProfileSchema = z.object({
   bio: z.string().max(500, 'Bio is too long').nullable().optional(),
   avatarUrl: z.string().url().nullable().optional(),

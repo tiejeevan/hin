@@ -18,6 +18,9 @@ export const SEARCH_USER: RateLimitPolicy = { limit: 60, windowSec: 60 };
 export const WS_SEND_MESSAGE: RateLimitPolicy = { limit: 60, windowSec: 60 };
 export const WS_TYPING: RateLimitPolicy = { limit: 30, windowSec: 60 };
 
+export const CONTACT_INQUIRY_IP_HOUR: RateLimitPolicy = { limit: 3, windowSec: 3600 };
+export const CONTACT_INQUIRY_IP_DAY: RateLimitPolicy = { limit: 10, windowSec: 86400 };
+
 export type AuthRateLimitAction = 'login' | 'register' | 'google';
 
 const AUTH_POLICIES: Record<AuthRateLimitAction, RateLimitPolicy> = {
@@ -66,6 +69,9 @@ export function isWriteRateLimitExemptPath(pathname: string): boolean {
     return true;
   }
   if (pathname === '/api/users/me/email' || pathname.startsWith('/api/users/me/email/')) {
+    return true;
+  }
+  if (pathname === '/api/contact' || pathname.startsWith('/api/contact/')) {
     return true;
   }
   return false;

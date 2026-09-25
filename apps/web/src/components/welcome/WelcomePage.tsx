@@ -19,9 +19,9 @@ type SamplePost = {
 const SAMPLES: Record<FeedMood, SamplePost> = {
   curious: {
     context: 'A question worth sitting with',
-    initial: 'N',
-    name: 'Noor',
-    handle: '@noorthinks · just now',
+    initial: 'M',
+    name: 'Max',
+    handle: '@maxthinks · just now',
     text: 'What’s something you believed five years ago that you see completely differently now?',
     replies: '31 replies',
     likes: '64 likes',
@@ -112,6 +112,7 @@ export interface WelcomePageProps {
   onStepInside?: () => void;
   onGoToApp?: () => void;
   onBack?: () => void;
+  onContact?: () => void;
 }
 
 export function WelcomePage({
@@ -120,7 +121,9 @@ export function WelcomePage({
   onStepInside,
   onGoToApp,
   onBack,
+  onContact,
 }: WelcomePageProps) {
+  const copyrightYear = new Date().getFullYear();
   const [mood, setMood] = useState<FeedMood>('curious');
   const [fadeSwitch, setFadeSwitch] = useState(false);
 
@@ -264,7 +267,6 @@ export function WelcomePage({
               </div>
               <div className="feed-window">
                 <div className="sample-label">
-                  <span>Sample post</span>
                   <span>{sample.context}</span>
                 </div>
                 <article
@@ -316,9 +318,11 @@ export function WelcomePage({
           </section>
         </main>
 
-        <footer>
-          <span>Thoughts become conversations.</span>
-          <span>Made for the people between the posts.</span>
+        <footer className="welcome-footer">
+          <span>© {copyrightYear} Hingot</span>
+          <button type="button" className="welcome-footer-link" onClick={() => onContact?.()}>
+            Contact us
+          </button>
         </footer>
       </div>
     </div>

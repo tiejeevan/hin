@@ -7,6 +7,7 @@ export interface SendEmailParams {
   subject: string;
   text: string;
   html?: string;
+  replyTo?: string;
 }
 
 export interface SendEmailResult {
@@ -129,6 +130,7 @@ class SmtpSession {
     subject: string;
     text: string;
     html?: string;
+    replyTo?: string;
     heloName: string;
     username: string;
     password: string;
@@ -157,6 +159,7 @@ class SmtpSession {
     const headers = [
       `From: ${params.from}`,
       `To: ${params.to}`,
+      ...(params.replyTo ? [`Reply-To: ${sanitizeHeader(params.replyTo)}`] : []),
       `Subject: ${sanitizeHeader(params.subject)}`,
       `Date: ${new Date().toUTCString()}`,
       `Message-ID: <${crypto.randomUUID()}@hingot.com>`,
@@ -215,6 +218,7 @@ export async function sendSmtpEmail(env: Env, params: SendEmailParams): Promise<
       subject: params.subject,
       text: params.text,
       html: params.html,
+      replyTo: params.replyTo?.trim().toLowerCase(),
       heloName: 'hingot.com',
       username: env.OCI_SMTP_USERNAME!,
       password: env.OCI_SMTP_PASSWORD!,

@@ -38,6 +38,7 @@ import itemCommentsRoutes from './routes/item-comments';
 import linkPreviewRoutes from './routes/link-preview';
 import seoRoutes, { sitemapHandler } from './routes/seo';
 import emailRoutes from './routes/email';
+import contactRoutes from './routes/contact';
 import pushRoutes from './routes/push';
 import callsRoutes from './routes/calls';
 import adminVideoCallsRoutes from './routes/admin-video-calls';
@@ -142,6 +143,7 @@ app.use('/api/*', async (c, next) => {
 });
 
 app.route('/api/auth', authRoutes);
+app.route('/api/contact', contactRoutes);
 app.route('/api/users/me/email', emailRoutes);
 app.route('/api/push', pushRoutes);
 app.route('/api/users', usersRoutes);

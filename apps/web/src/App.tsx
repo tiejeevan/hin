@@ -110,6 +110,7 @@ import {
 import { CoachTooltip, PROFILE_TOUR_STEPS } from './components/walkthrough/CoachTooltip';
 import { SearchOverlay } from './components/feed/SearchOverlay';
 import { WelcomePage } from './components/welcome/WelcomePage';
+import { ContactPage } from './components/contact/ContactPage';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('hin_token'));
@@ -585,6 +586,26 @@ export default function App() {
       setMessagesPanelExpanded(false);
       if (!opts?.skipUrlSync) {
         syncUrl({ view: 'welcome' }, opts?.replace ?? false);
+      }
+    };
+    if (showMessagesDropdownRef.current || chatHistoryRef.current.getDepth() > 0) {
+      ensureMessagesClosed(apply);
+    } else {
+      apply();
+    }
+  };
+
+  const openContact = (opts?: { skipUrlSync?: boolean; replace?: boolean }) => {
+    const apply = () => {
+      setActiveTab('contact');
+      setIsSearchOpen(false);
+      setShowGuestAuth(false);
+      setShowNotifications(false);
+      showMessagesDropdownRef.current = false;
+      setShowMessagesDropdown(false);
+      setMessagesPanelExpanded(false);
+      if (!opts?.skipUrlSync) {
+        syncUrl({ view: 'contact' }, opts?.replace ?? false);
       }
     };
     if (showMessagesDropdownRef.current || chatHistoryRef.current.getDepth() > 0) {
@@ -4282,6 +4303,8 @@ export default function App() {
       }
     } else if (route.view === 'welcome') {
       openWelcome({ replace: true, skipUrlSync: true });
+    } else if (route.view === 'contact') {
+      openContact({ replace: true, skipUrlSync: true });
     }
 
     const onPopState = (event: PopStateEvent) => {
@@ -4326,6 +4349,8 @@ export default function App() {
         openAdmin(r.section, { skipUrlSync: true });
       } else if (r.view === 'welcome') {
         openWelcome({ skipUrlSync: true });
+      } else if (r.view === 'contact') {
+        openContact({ skipUrlSync: true });
       } else {
         setIsSearchOpen(false);
         goHome({ skipUrlSync: true });
@@ -4548,7 +4573,8 @@ export default function App() {
   const showChatIcon =
     !!currentUser &&
     activeTab !== 'welcome' &&
-    shouldShowChatIcon(effectiveSettings, activeTab as Exclude<ActiveTab, 'welcome'>);
+    activeTab !== 'contact' &&
+    shouldShowChatIcon(effectiveSettings, activeTab as Exclude<ActiveTab, 'welcome' | 'contact'>);
   const postLimits = systemSettings ?? DEFAULT_SYSTEM_SETTINGS;
 
   const handleWalkthroughStepChange = useCallback(() => {
@@ -4607,6 +4633,25 @@ export default function App() {
           onStepInside={() => handleGuestSignIn()}
           onGoToApp={() => goHome()}
           onBack={() => goHome()}
+          onContact={() => openContact()}
+        />
+        <ToastContainer
+          toasts={toasts}
+          onToastClick={handleToastClick}
+          onDismiss={id => setToasts(prev => prev.filter(t => t.id !== id))}
+        />
+      </>
+    );
+  }
+
+  if (activeTab === 'contact') {
+    return (
+      <>
+        <ContactPage
+          isAuthenticated={!!currentUser}
+          onStepInside={() => handleGuestSignIn()}
+          onGoToApp={() => goHome()}
+          onBack={() => openWelcome()}
         />
         <ToastContainer
           toasts={toasts}

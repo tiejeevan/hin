@@ -16,6 +16,9 @@ export function titleForRoute(pathname: string, hash: string): string {
   if (route.view === 'welcome') {
     return 'Welcome to Hin';
   }
+  if (route.view === 'contact') {
+    return 'Contact — Hin';
+  }
   if (route.view === 'olabid') {
     return route.itemId ? `Olabid item — Hin` : 'Olabid — Hin';
   }

@@ -12,5 +12,6 @@ describe('titleForRoute', () => {
 
   it('returns home title', () => {
     expect(titleForRoute('/', '')).toBe('Hin — Social Media Platform');
+    expect(titleForRoute('/contact', '')).toBe('Contact — Hin');
   });
 });

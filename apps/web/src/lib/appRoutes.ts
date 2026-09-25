@@ -3,6 +3,7 @@ export type AdminSection = 'dashboard' | 'platform-reviver';
 export type AppRoute =
   | { view: 'home' }
   | { view: 'welcome' }
+  | { view: 'contact' }
   | { view: 'search' }
   | { view: 'post'; postId: number; commentId?: number }
   | { view: 'profile'; username: string }
@@ -18,6 +19,10 @@ export function isValidUsername(username: string): boolean {
 export function parseLocation(pathname: string, hash: string): AppRoute {
   if (/^\/welcome\/?$/.test(pathname)) {
     return { view: 'welcome' };
+  }
+
+  if (/^\/contact\/?$/.test(pathname)) {
+    return { view: 'contact' };
   }
 
   if (/^\/search\/?$/.test(pathname)) {
@@ -82,6 +87,9 @@ export function olabidPath(itemId?: number): string {
 export function routeToPath(route: AppRoute): string {
   if (route.view === 'welcome') {
     return '/welcome';
+  }
+  if (route.view === 'contact') {
+    return '/contact';
   }
   if (route.view === 'search') {
     return '/search';

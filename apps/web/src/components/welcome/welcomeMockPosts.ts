@@ -41,11 +41,11 @@ export const WELCOME_MOCK_POSTS: WelcomeMockPost[] = [
     mediaHint: 'Photo',
   },
   {
-    id: 'mock-noor',
-    displayName: 'Noor',
-    username: 'noorthinks',
+    id: 'mock-max',
+    displayName: 'Max',
+    username: 'maxthinks',
     timeLabel: '34m',
-    initial: 'N',
+    initial: 'M',
     avatarTone: '',
     content:
       'What’s something you believed five years ago that you see completely differently now?',
