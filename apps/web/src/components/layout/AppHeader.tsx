@@ -16,9 +16,11 @@ interface AppHeaderProps {
   notificationsLoading?: boolean;
   onlineCount?: number;
   isAdminTab?: boolean;
+  isModeratorTab?: boolean;
   isOlabidTab?: boolean;
   onGoHome: () => void;
   onOpenAdmin?: () => void;
+  onOpenModerator?: () => void;
   onOpenOlabid?: () => void;
   onToggleNotifications: () => void;
   onCloseNotifications: () => void;
@@ -40,9 +42,11 @@ export function AppHeader({
   notificationsLoading = false,
   onlineCount = 0,
   isAdminTab,
+  isModeratorTab,
   isOlabidTab,
   onGoHome,
   onOpenAdmin,
+  onOpenModerator,
   onOpenOlabid,
   onToggleNotifications,
   onCloseNotifications,
@@ -93,6 +97,21 @@ export function AppHeader({
               }`}
               title="Admin"
               aria-label="Admin"
+            >
+              <Shield className="h-5 w-5" />
+            </button>
+          )}
+          {currentUser.role === 'moderator' && onOpenModerator && (
+            <button
+              type="button"
+              onClick={onOpenModerator}
+              className={`h-10 w-10 flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+                isModeratorTab
+                  ? 'text-indigo-400 bg-indigo-500/10'
+                  : 'text-indigo-400/70 hover:text-indigo-300 hover:bg-bg-tertiary'
+              }`}
+              title="Moderator"
+              aria-label="Moderator"
             >
               <Shield className="h-5 w-5" />
             </button>

@@ -36,7 +36,8 @@ export async function listReportsViaApi(adminToken: string, status = 'pending') 
 export async function reviewReportViaApi(
   adminToken: string,
   reportId: number,
-  action: 'dismiss' | 'delete_content' | 'delete_user',
+  action: 'dismiss' | 'delete_content' | 'delete_user' | 'resolve' | 'escalate' | 'review',
+  reason?: string,
 ) {
   const res = await fetch(`${API_URL}/api/admin/reports/${reportId}`, {
     method: 'PATCH',
@@ -44,7 +45,7 @@ export async function reviewReportViaApi(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${adminToken}`,
     },
-    body: JSON.stringify({ action }),
+    body: JSON.stringify({ action, ...(reason ? { reason } : {}) }),
   });
   return { status: res.status, data: await res.json().catch(() => ({})) };
 }

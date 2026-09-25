@@ -33,7 +33,7 @@ export interface ItemCommentNode extends ItemComment {
 
 export type FeedMode = 'all' | 'following' | 'bookmarks' | 'explore' | 'search';
 
-export type ActiveTab = 'feed' | 'admin' | 'profile' | 'post' | 'olabid' | 'welcome' | 'contact';
+export type ActiveTab = 'feed' | 'admin' | 'moderator' | 'profile' | 'post' | 'olabid' | 'welcome' | 'contact';
 
 export interface ChatRecipient {
   id: number;

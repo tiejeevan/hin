@@ -74,6 +74,10 @@ interface FeedViewProps {
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
   onRetryPendingPost?: (postId: number) => void;
+  onModerationHidePost?: (postId: number) => void;
+  onModerationRemovePost?: (postId: number) => void;
+  onModerationHideComment?: (commentId: number) => void;
+  onModerationRemoveComment?: (commentId: number) => void;
   postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
   gamificationEnabled?: boolean;
   onGamificationRefresh?: () => void;
@@ -142,6 +146,10 @@ export function FeedView({
   onPinPost,
   onUnpinPost,
   onRetryPendingPost,
+  onModerationHidePost,
+  onModerationRemovePost,
+  onModerationHideComment,
+  onModerationRemoveComment,
   postLimits,
   gamificationEnabled = false,
   onGamificationRefresh,
@@ -283,6 +291,10 @@ export function FeedView({
                 onPinPost={onPinPost}
                 onUnpinPost={onUnpinPost}
                 onRetryPendingPost={onRetryPendingPost}
+                onModerationHidePost={onModerationHidePost}
+                onModerationRemovePost={onModerationRemovePost}
+                onModerationHideComment={onModerationHideComment}
+                onModerationRemoveComment={onModerationRemoveComment}
                 maxPostLength={postLimits?.maxPostLength}
               />
             );

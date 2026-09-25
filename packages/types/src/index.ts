@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export * from './permissions';
+
 export type FollowStatus = 'none' | 'following' | 'requested' | 'follows_you';
 
 export type BlockStatus = 'none' | 'you_blocked' | 'blocked_you';
@@ -10,7 +12,7 @@ export type AccountStatus = 'active' | 'self_deleted' | 'admin_deleted';
 export interface User {
   id: number;
   username: string;
-  role: 'user' | 'admin';
+  role: 'user' | 'moderator' | 'admin';
   bio?: string | null;
   avatarUrl?: string | null;
   coverUrl?: string | null;
@@ -44,6 +46,12 @@ export interface User {
   needsEmailVerification?: boolean;
   /** Self-only — admin allowlist grants permission to start video calls. */
   canInitiateVideoCalls?: boolean;
+  /** Self-only — moderator account status. */
+  moderatorStatus?: import('./permissions').ModeratorStatus | null;
+  /** Self-only — account moderation enforcement status. */
+  accountModerationStatus?: import('./permissions').AccountModerationStatus;
+  accountModerationReason?: string | null;
+  accountModerationUntil?: string | null;
 }
 
 export const USERNAME_MIN_LENGTH = 4;
@@ -118,8 +126,8 @@ export interface MuteListPage {
 
 export type ReportTargetType = 'user' | 'post' | 'comment';
 export type ReportReason = 'spam' | 'harassment' | 'hate' | 'misinformation' | 'nudity' | 'other';
-export type ReportStatus = 'pending' | 'dismissed' | 'action_taken';
-export type ReviewReportAction = 'dismiss' | 'delete_content' | 'delete_user';
+export type ReportStatus = 'pending' | 'in_review' | 'resolved' | 'dismissed' | 'action_taken' | 'escalated';
+export type ReviewReportAction = 'dismiss' | 'delete_content' | 'delete_user' | 'review' | 'resolve' | 'escalate';
 
 export interface ContentReport {
   id: number;
@@ -237,6 +245,9 @@ export interface Post {
   isError?: boolean;
   /** Client-only: stable key to reconcile temp posts with server/WS payloads. */
   clientPostKey?: string;
+  /** Set when the author views their own moderated post. */
+  moderationNotice?: import('./permissions').ModerationNotice;
+  commentsLocked?: boolean;
 }
 
 export interface TrendingHashtag {
@@ -339,6 +350,8 @@ export interface MeBootstrap {
   needsEmailVerification?: boolean;
   /** True when admin allowlist grants video call initiation. */
   canInitiateVideoCalls?: boolean;
+  /** Permission keys for moderators; 'all' for admin; omitted/empty for regular users. */
+  permissions?: import('./permissions').PermissionKey[] | 'all';
 }
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -395,6 +408,7 @@ export interface Comment {
   authorEquippedBadges?: EquippedBadgePublic[];
   /** Gamification delta from this action (comment create). */
   g?: GamificationActionBlock;
+  moderationNotice?: import('./permissions').ModerationNotice;
 }
 
 /** Server derives sent|delivered|read from DB timestamps; client may use sending|failed. */
@@ -487,7 +501,7 @@ export interface Notification {
   userId: number;
   senderId: number;
   senderUsername: string;
-  type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted' | 'badge_award' | 'level_up' | 'event_win' | 'repost' | 'quote';
+  type: 'like' | 'comment' | 'message' | 'mention' | 'system' | 'follow' | 'follow_request' | 'follow_accepted' | 'badge_award' | 'level_up' | 'event_win' | 'repost' | 'quote' | 'moderation';
   /** What entityId points at. Optional for older rows written before migration. */
   entityType?: 'post' | 'message' | 'system' | 'user' | 'badge' | 'event' | 'olabid_item' | null;
   entityId: number; // postId for likes/comments/mentions, messageId for messages, olabidItemId for item comments, system_broadcasts.id for system
@@ -769,9 +783,9 @@ export function shouldShowNotificationToast(
 
 export function shouldShowChatIcon(
   settings: UserSettings,
-  activeTab: ChatIconPage | 'admin' | 'olabid',
+  activeTab: ChatIconPage | 'admin' | 'moderator' | 'olabid',
 ): boolean {
-  if (activeTab === 'admin') return false;
+  if (activeTab === 'admin' || activeTab === 'moderator') return false;
   if (settings.chatIconMode === 'global') return true;
   return settings.chatIconPages.includes(activeTab);
 }
@@ -915,7 +929,8 @@ export const CreateReportSchema = z.object({
 });
 
 export const ReviewReportSchema = z.object({
-  action: z.enum(['dismiss', 'delete_content', 'delete_user']),
+  action: z.enum(['dismiss', 'delete_content', 'delete_user', 'review', 'resolve', 'escalate']),
+  reason: z.string().trim().max(500).optional(),
 });
 
 export const DeleteAccountSchema = z.object({

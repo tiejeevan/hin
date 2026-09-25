@@ -5,6 +5,8 @@ import * as schema from '@hin/db';
 import { Comment, Notification } from '@hin/types';
 import type { Env } from '../types';
 import { getAuthUser } from '../lib/auth';
+import { getUserPermissions, hasPermissionInSet } from '../lib/permissions';
+import { canActOnTarget } from '../lib/moderation-guard';
 import { getOrCreateUserSettings, isNotificationEnabled } from '../lib/user-settings';
 import { shouldDeliverNotification } from '../lib/blocks';
 import { processUserActionSafe } from '../lib/gamification/hub';
@@ -236,13 +238,33 @@ comments.delete('/:id', async (c) => {
   const comment = await db.select().from(schema.comments).where(eq(schema.comments.id, commentId)).get();
   if (!comment) return c.json({ error: 'Comment not found' }, 404);
 
-  if (authUser.role !== 'admin' && authUser.id !== comment.userId) {
+  const owner = await db
+    .select({ role: schema.users.role })
+    .from(schema.users)
+    .where(eq(schema.users.id, comment.userId))
+    .get();
+  const perms = await getUserPermissions(db, authUser);
+  const modRemove = hasPermissionInSet(perms, 'comment.remove')
+    && owner
+    && canActOnTarget(authUser.role, owner.role, authUser.id, comment.userId);
+
+  if (authUser.role !== 'admin' && authUser.id !== comment.userId && !modRemove) {
     return c.json({ error: 'Forbidden' }, 403);
   }
 
   await db
     .update(schema.comments)
-    .set({ deletedAt: sql`CURRENT_TIMESTAMP` })
+    .set({
+      deletedAt: sql`CURRENT_TIMESTAMP`,
+      ...(modRemove && authUser.id !== comment.userId
+        ? {
+            moderationAction: 'removed',
+            moderationReason: 'Removed by moderator',
+            moderatedBy: authUser.id,
+            moderatedAt: new Date().toISOString(),
+          }
+        : {}),
+    })
     .where(eq(schema.comments.id, commentId))
     .run();
 

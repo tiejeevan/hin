@@ -31,6 +31,9 @@ import { buildPostsResponseBatch, type PostHydrationRow } from '../lib/postBatch
 import { broadcastEvent, broadcastNotification, deferBroadcast } from '../lib/realtime';
 import { refreshPostSharePreviewSafe } from '../lib/sharePreviewHooks';
 import { resolveSiteUrls } from '../lib/siteUrl';
+import { isAccountRestricted } from '../lib/moderation-guard';
+import { getUserPermissions, hasPermissionInSet } from '../lib/permissions';
+import { canActOnTarget } from '../lib/moderation-guard';
 
 const posts = new Hono<{ Bindings: Env }>();
 
@@ -99,6 +102,12 @@ posts.get('/', async (c) => {
     }
 
     postConditions.push(eq(schema.posts.userId, uid));
+    if (currentUserId === uid) {
+      postConditions[0] = sql`(
+        ${schema.posts.deletedAt} IS NULL
+        OR (${schema.posts.moderationAction} IS NOT NULL AND ${schema.posts.userId} = ${uid})
+      )`;
+    }
     const visibilityCond = buildVisibilitySqlConditions(currentUserId, 'profile', uid);
     if (visibilityCond) postConditions.push(visibilityCond);
   } else if (followingFeed && authUser) {
@@ -264,6 +273,9 @@ posts.get('/bookmarks', async (c) => {
 posts.post('/', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+  if (isAccountRestricted(authUser)) {
+    return c.json({ error: 'Your account is restricted from posting', code: 'account_restricted' }, 403);
+  }
 
   const db = drizzle(c.env.DB, { schema });
   const body = await c.req.json();
@@ -1104,6 +1116,24 @@ posts.get('/:id', async (c) => {
   if (!row) return c.json({ error: 'Post not found' }, 404);
 
   const post = await buildPostResponse(db, row, currentUserId);
+  const modRow = await db
+    .select({
+      moderationAction: schema.posts.moderationAction,
+      moderationReason: schema.posts.moderationReason,
+      moderatedAt: schema.posts.moderatedAt,
+      commentsLocked: schema.posts.commentsLocked,
+    })
+    .from(schema.posts)
+    .where(eq(schema.posts.id, postId))
+    .get();
+  if (modRow?.moderationAction && currentUserId === row.userId) {
+    post.moderationNotice = {
+      action: modRow.moderationAction as 'hidden' | 'removed',
+      reason: modRow.moderationReason,
+      moderatedAt: modRow.moderatedAt,
+    };
+  }
+  if (modRow) post.commentsLocked = !!modRow.commentsLocked;
   return c.json(post);
 });
 
@@ -1111,6 +1141,9 @@ posts.get('/:id', async (c) => {
 posts.post('/:id/comments', async (c) => {
   const authUser = await getAuthUser(c);
   if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+  if (isAccountRestricted(authUser)) {
+    return c.json({ error: 'Your account is restricted from commenting', code: 'account_restricted' }, 403);
+  }
 
   const db = drizzle(c.env.DB, { schema });
   const postId = parseInt(c.req.param('id'));
@@ -1118,6 +1151,9 @@ posts.post('/:id/comments', async (c) => {
   const access = await assertCanViewPost(db, authUser.id, postId);
   if (!access.ok) return c.json({ error: access.error }, access.status);
   const post = access.post;
+  if (post.commentsLocked) {
+    return c.json({ error: 'Comments are locked on this post' }, 403);
+  }
 
   const { content, parentId } = await c.req.json<{ content: string; parentId?: number | null }>();
   if (!content || content.trim() === '') {
@@ -1321,14 +1357,35 @@ posts.delete('/:id', async (c) => {
   const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
   if (!post || post.deletedAt) return c.json({ error: 'Post not found' }, 404);
 
-  if (authUser.role !== 'admin' && authUser.id !== post.userId) {
+  const owner = await db
+    .select({ role: schema.users.role, username: schema.users.username })
+    .from(schema.users)
+    .where(eq(schema.users.id, post.userId))
+    .get();
+
+  const perms = await getUserPermissions(db, authUser);
+  const modRemove = hasPermissionInSet(perms, 'post.remove')
+    && owner
+    && canActOnTarget(authUser.role, owner.role, authUser.id, post.userId);
+
+  if (authUser.role !== 'admin' && authUser.id !== post.userId && !modRemove) {
     return c.json({ error: 'Forbidden' }, 403);
   }
 
   const mediaCount = parseMediaUrls(post.mediaUrls).length;
 
   await db.update(schema.posts)
-    .set({ deletedAt: sql`CURRENT_TIMESTAMP` })
+    .set({
+      deletedAt: sql`CURRENT_TIMESTAMP`,
+      ...(modRemove && authUser.id !== post.userId
+        ? {
+            moderationAction: 'removed',
+            moderationReason: 'Removed by moderator',
+            moderatedBy: authUser.id,
+            moderatedAt: new Date().toISOString(),
+          }
+        : {}),
+    })
     .where(eq(schema.posts.id, postId))
     .run();
 
@@ -1355,11 +1412,6 @@ posts.delete('/:id', async (c) => {
       { scheduler: c.executionCtx },
     );
   }
-
-  const owner = await db.select({ username: schema.users.username })
-    .from(schema.users)
-    .where(eq(schema.users.id, post.userId))
-    .get();
 
   await processUserActionSafe(
     db,

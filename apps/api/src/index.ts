@@ -8,7 +8,13 @@ import {
   getAccountBlockMessage,
   getAccountBlockReason,
   isIncompleteAccountPathAllowed,
+  isModerationBlockPathAllowed,
 } from './lib/account-guard';
+import {
+  getAccountModerationBlockMessage,
+  getAccountModerationBlockReason,
+} from './lib/moderation-guard';
+import { maybeClearExpiredSuspension } from './lib/moderation';
 import { getSystemSettings } from './lib/system-settings';
 import {
   createGlobalRateLimitMiddleware,
@@ -42,6 +48,9 @@ import contactRoutes from './routes/contact';
 import pushRoutes from './routes/push';
 import callsRoutes from './routes/calls';
 import adminVideoCallsRoutes from './routes/admin-video-calls';
+import adminModeratorsRoutes from './routes/admin-moderators';
+import permissionsRoutes from './routes/permissions';
+import moderationRoutes from './routes/moderation';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -121,17 +130,30 @@ app.get('/sitemap.xml', (c) => sitemapHandler(c));
 app.use('/api/*', createGlobalRateLimitMiddleware());
 app.use('/api/*', createWriteRateLimitMiddleware());
 
-/** Block incomplete accounts from most API routes until username/email setup finishes. */
+/** Suspended/banned block (before incomplete-account bypass paths), then incomplete-account gate. */
 app.use('/api/*', async (c, next) => {
   const pathname = new URL(c.req.url).pathname;
-  if (isIncompleteAccountPathAllowed(pathname)) {
-    return next();
-  }
   const authUser = await getAuthUser(c);
   if (!authUser) {
     return next();
   }
   const db = drizzle(c.env.DB, { schema });
+
+  c.executionCtx.waitUntil(maybeClearExpiredSuspension(db, authUser.id));
+  const modBlock = getAccountModerationBlockReason(authUser);
+  if (modBlock && !isModerationBlockPathAllowed(pathname)) {
+    return c.json({
+      error: getAccountModerationBlockMessage(modBlock),
+      code: modBlock === 'banned' ? 'account_banned' : 'account_suspended',
+      reason: authUser.accountModerationReason ?? null,
+      until: authUser.accountModerationUntil ?? null,
+    }, 403);
+  }
+
+  if (isIncompleteAccountPathAllowed(pathname)) {
+    return next();
+  }
+
   const systemSettings = await getSystemSettings(db);
   const blockReason = getAccountBlockReason(authUser, {
     emailVerificationRequired: systemSettings.emailVerificationRequired,
@@ -162,6 +184,9 @@ app.route('/api/me', meRoutes);
 app.route('/api/hashtags', hashtagsRoutes);
 app.route('/api/search', searchRoutes);
 app.route('/api/admin', adminRoutes);
+app.route('/api/admin/moderators', adminModeratorsRoutes);
+app.route('/api/admin/permissions', permissionsRoutes);
+app.route('/api/moderation', moderationRoutes);
 app.route('/api/admin/video-calls', adminVideoCallsRoutes);
 app.route('/api/admin/gamification', adminGamificationRoutes);
 app.route('/api/events', eventsRoutes);

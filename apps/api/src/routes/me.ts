@@ -23,6 +23,7 @@ import {
 } from '../lib/intro-walkthrough';
 import { toPublicUser, toSelfUser } from '../lib/users';
 import { canUserInitiateVideoCalls } from '../lib/video-calls';
+import { getUserPermissions, permissionsToArray } from '../lib/permissions';
 
 const me = new Hono<{ Bindings: Env }>();
 
@@ -58,6 +59,7 @@ me.get('/bootstrap', async (c) => {
     introWalkthroughCompleted,
     gamification,
     canInitiateVideoCalls,
+    userPermissions,
   ] = await Promise.all([
     getFollowedUserIds(db, authUser.id),
     getBlockedUserIds(db, authUser.id),
@@ -73,6 +75,7 @@ me.get('/bootstrap', async (c) => {
       ? toGamificationPublic(db, authUser.id, { includeGoals: true })
       : Promise.resolve(null),
     canUserInitiateVideoCalls(db, authUser.id),
+    getUserPermissions(db, authUser),
   ]);
 
   const self = toSelfUser(authUser);
@@ -92,6 +95,7 @@ me.get('/bootstrap', async (c) => {
     needsUsernameSetup: self.needsUsernameSetup,
     needsEmailVerification: self.needsEmailVerification,
     canInitiateVideoCalls,
+    permissions: permissionsToArray(userPermissions),
     ...(gamificationEnabled && gamification ? { g: gamification } : {}),
   };
 

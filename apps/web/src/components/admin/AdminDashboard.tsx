@@ -15,6 +15,7 @@ import { AuditLogsPanel } from './AuditLogsPanel';
 import { ResetDataPanel } from './ResetDataPanel';
 import { AdminRateLimitsPanel } from './AdminRateLimitsPanel';
 import { AdminVideoCalls } from './AdminVideoCalls';
+import { AdminModerators } from './AdminModerators';
 
 interface AdminDashboardProps {
   section: AdminSection;
@@ -177,9 +178,26 @@ export function AdminDashboard({
           <Award className="h-4 w-4" />
           Platform Reviver
         </button>
+        <button
+          type="button"
+          onClick={() => onNavigateSection('moderators')}
+          aria-current={section === 'moderators'}
+          className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors cursor-pointer ${
+            section === 'moderators'
+              ? 'border-indigo-500 text-text-primary'
+              : 'border-transparent text-text-muted hover:text-text-secondary'
+          }`}
+        >
+          <Shield className="h-4 w-4" />
+          Moderators
+        </button>
       </div>
 
-      {section === 'platform-reviver' ? (
+      {section === 'moderators' ? (
+        <div className="rounded-2xl border border-border-custom bg-bg-secondary/40 p-3">
+          <AdminModerators token={token} />
+        </div>
+      ) : section === 'platform-reviver' ? (
         <div className="space-y-2">
           <div className="bg-bg-secondary border border-border-custom rounded-2xl overflow-hidden shadow-sm">
             <AdminGamification token={token} />
@@ -240,6 +258,7 @@ export function AdminDashboard({
           onReviewReport={onReviewReport}
           onOpenProfile={onOpenProfile}
           onOpenPost={onOpenPost}
+          enableModeratorActions
         />
       </AdminCollapsibleSection>
 
@@ -319,6 +338,7 @@ export function AdminDashboard({
             onUpdateUserRole={onUpdateUserRole}
             onDeleteUser={onDeleteUser}
             onReinstateUser={onReinstateUser}
+            onOpenModeratorsAdmin={() => onNavigateSection('moderators')}
           />
         ) : (
           <div className="p-3 text-center text-xs text-text-muted">Unable to load accounts.</div>

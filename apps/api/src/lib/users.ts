@@ -91,6 +91,10 @@ export function toSelfUser(
     passwordHash?: string | null;
     googleId?: string | null;
     needsUsernameSetup?: number | boolean | null;
+    moderatorStatus?: string | null;
+    accountModerationStatus?: string | null;
+    accountModerationReason?: string | null;
+    accountModerationUntil?: string | null;
   },
   extras?: Parameters<typeof toPublicUser>[1],
 ): User {
@@ -104,6 +108,10 @@ export function toSelfUser(
     hasPassword,
     needsUsernameSetup,
     needsEmailVerification,
+    moderatorStatus: (user.moderatorStatus as User['moderatorStatus']) ?? null,
+    accountModerationStatus: (user.accountModerationStatus as User['accountModerationStatus']) ?? 'active',
+    accountModerationReason: user.accountModerationReason ?? null,
+    accountModerationUntil: user.accountModerationUntil ?? null,
   };
 }
 

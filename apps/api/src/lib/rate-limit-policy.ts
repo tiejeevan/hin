@@ -5,8 +5,11 @@ export type RateLimitPolicy = {
 
 export type RateLimitSubjectKind = 'ip' | 'user';
 
-/** Global IP baseline for all /api/* traffic. */
-export const GLOBAL_API_IP: RateLimitPolicy = { limit: 300, windowSec: 300 };
+/** Global baseline for unauthenticated /api/* traffic (by IP). */
+export const GLOBAL_API_IP: RateLimitPolicy = { limit: 600, windowSec: 300 };
+
+/** Higher ceiling for signed-in users (by account id, not shared IP bucket). */
+export const GLOBAL_API_USER: RateLimitPolicy = { limit: 3000, windowSec: 300 };
 
 export const AUTH_LOGIN_IP: RateLimitPolicy = { limit: 10, windowSec: 900 };
 export const AUTH_REGISTER_IP: RateLimitPolicy = { limit: 5, windowSec: 900 };
@@ -57,8 +60,14 @@ export function isGlobalRateLimitExemptPath(pathname: string, method: string): b
   if (method === 'GET' && (pathname === '/api/media' || pathname.startsWith('/api/media/'))) {
     return true;
   }
+  // Allow human-verification unlock while the global IP bucket is exhausted.
+  if (pathname === '/api/auth/turnstile-config' || pathname === '/api/auth/rate-limit-unlock') {
+    return true;
+  }
   return false;
 }
+
+export const RATE_LIMIT_UNLOCK_IP: RateLimitPolicy = { limit: 5, windowSec: 3600 };
 
 /** Mutating routes with dedicated OTP/auth rate limits — skip generic write tier. */
 export function isWriteRateLimitExemptPath(pathname: string): boolean {

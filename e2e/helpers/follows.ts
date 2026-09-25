@@ -54,12 +54,20 @@ function uniqueRegisterEmail(prefix = 'e2e') {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}@example.com`;
 }
 
+/** Distinct synthetic IP per call so register rate limits do not block e2e bursts. */
+function e2eSyntheticIp(): string {
+  const a = Math.floor(Math.random() * 200) + 1;
+  const b = Math.floor(Math.random() * 200) + 1;
+  return `10.254.${a}.${b}`;
+}
+
 export async function verifyRegistrationViaApi(token: string, code: string): Promise<void> {
   const res = await fetch(`${API_URL}/api/auth/verify-registration`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
+      'X-Forwarded-For': e2eSyntheticIp(),
     },
     body: JSON.stringify({ code }),
   });
@@ -73,7 +81,10 @@ export async function registerViaApi(
 ): Promise<{ token: string; userId: number }> {
   const res = await fetch(`${API_URL}/api/auth/register`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': e2eSyntheticIp(),
+    },
     body: JSON.stringify({
       username,
       email: email ?? uniqueRegisterEmail(),

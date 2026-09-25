@@ -69,6 +69,10 @@ interface PostViewProps {
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
   onRetryPendingPost?: (postId: number) => void;
+  onModerationHidePost?: (postId: number) => void;
+  onModerationRemovePost?: (postId: number) => void;
+  onModerationHideComment?: (commentId: number) => void;
+  onModerationRemoveComment?: (commentId: number) => void;
   postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
 }
 
@@ -137,6 +141,10 @@ export function PostView({
   onPinPost,
   onUnpinPost,
   onRetryPendingPost,
+  onModerationHidePost,
+  onModerationRemovePost,
+  onModerationHideComment,
+  onModerationRemoveComment,
   postLimits,
 }: PostViewProps) {
   if (isLoading) {
@@ -279,6 +287,10 @@ export function PostView({
         onPinPost={onPinPost}
         onUnpinPost={onUnpinPost}
         onRetryPendingPost={onRetryPendingPost}
+        onModerationHidePost={onModerationHidePost}
+        onModerationRemovePost={onModerationRemovePost}
+        onModerationHideComment={onModerationHideComment}
+        onModerationRemoveComment={onModerationRemoveComment}
         maxPostLength={postLimits?.maxPostLength}
       />
     </div>

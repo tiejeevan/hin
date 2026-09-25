@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '@hin/db';
-import { resolveClientIp } from './rate-limit-policy';
+import { buildBucketKey, resolveClientIp } from './rate-limit-policy';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -99,4 +99,30 @@ export async function refundRateLimit(
 export function clientIpFromRequest(req: Request): string | null {
   const ip = resolveClientIp(req);
   return ip === 'unknown' ? null : ip;
+}
+
+/** Clears API/auth rate-limit buckets for a client after human verification. */
+export async function resetClientRateLimits(
+  db: Db,
+  ip: string,
+  userId?: number | null,
+): Promise<void> {
+  const keys = [
+    buildBucketKey('api:global', 'ip', ip),
+    buildBucketKey('auth:login', 'ip', ip),
+    buildBucketKey('auth:register', 'ip', ip),
+    buildBucketKey('auth:google', 'ip', ip),
+  ];
+  if (userId != null) {
+    keys.push(buildBucketKey('api:global', 'user', userId));
+    keys.push(buildBucketKey('api:write', 'user', userId));
+    keys.push(buildBucketKey('api:search', 'user', userId));
+  }
+  for (const bucketKey of keys) {
+    try {
+      await db.delete(schema.rateLimitBuckets).where(eq(schema.rateLimitBuckets.bucketKey, bucketKey)).run();
+    } catch (e) {
+      console.error('Rate limit reset failed for bucket (ignored):', bucketKey, e);
+    }
+  }
 }

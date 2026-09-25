@@ -49,6 +49,10 @@ interface ProfilePostsProps {
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
   onRetryPendingPost?: (postId: number) => void;
+  onModerationHidePost?: (postId: number) => void;
+  onModerationRemovePost?: (postId: number) => void;
+  onModerationHideComment?: (commentId: number) => void;
+  onModerationRemoveComment?: (commentId: number) => void;
   postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
 }
 
@@ -99,6 +103,10 @@ export function ProfilePosts({
   onPinPost,
   onUnpinPost,
   onRetryPendingPost,
+  onModerationHidePost,
+  onModerationRemovePost,
+  onModerationHideComment,
+  onModerationRemoveComment,
   postLimits,
 }: ProfilePostsProps) {
   const pinnedPosts = posts.filter(p => p.pinnedAt);
@@ -158,6 +166,10 @@ export function ProfilePosts({
       onPinPost={onPinPost}
       onUnpinPost={onUnpinPost}
       onRetryPendingPost={onRetryPendingPost}
+      onModerationHidePost={onModerationHidePost}
+      onModerationRemovePost={onModerationRemovePost}
+      onModerationHideComment={onModerationHideComment}
+      onModerationRemoveComment={onModerationRemoveComment}
       maxPostLength={postLimits?.maxPostLength}
     />
     );

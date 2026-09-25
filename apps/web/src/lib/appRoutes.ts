@@ -1,4 +1,6 @@
-export type AdminSection = 'dashboard' | 'platform-reviver';
+import type { ActiveTab } from '../types/ui';
+
+export type AdminSection = 'dashboard' | 'platform-reviver' | 'moderators';
 
 export type AppRoute =
   | { view: 'home' }
@@ -8,6 +10,7 @@ export type AppRoute =
   | { view: 'post'; postId: number; commentId?: number }
   | { view: 'profile'; username: string }
   | { view: 'admin'; section: AdminSection }
+  | { view: 'moderator' }
   | { view: 'olabid'; itemId?: number };
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,30}$/;
@@ -60,15 +63,58 @@ export function parseLocation(pathname: string, hash: string): AppRoute {
   if (/^\/admin\/platform-reviver\/?$/.test(pathname)) {
     return { view: 'admin', section: 'platform-reviver' };
   }
+  if (/^\/admin\/moderators\/?$/.test(pathname)) {
+    return { view: 'admin', section: 'moderators' };
+  }
   if (/^\/admin\/?$/.test(pathname)) {
     return { view: 'admin', section: 'dashboard' };
+  }
+
+  if (/^\/moderator\/?$/.test(pathname)) {
+    return { view: 'moderator' };
   }
 
   return { view: 'home' };
 }
 
+/** First paint tab from URL so admin/moderator deep links do not briefly act as feed. */
+export function initialActiveTabFromLocation(): ActiveTab {
+  if (typeof window === 'undefined') return 'feed';
+  const route = parseLocation(window.location.pathname, window.location.hash);
+  switch (route.view) {
+    case 'admin':
+      return 'admin';
+    case 'moderator':
+      return 'moderator';
+    case 'olabid':
+      return 'olabid';
+    case 'welcome':
+      return 'welcome';
+    case 'contact':
+      return 'contact';
+    case 'profile':
+      return 'profile';
+    case 'post':
+      return 'post';
+    default:
+      return 'feed';
+  }
+}
+
+export function initialAdminSectionFromLocation(): AdminSection {
+  if (typeof window === 'undefined') return 'dashboard';
+  const route = parseLocation(window.location.pathname, window.location.hash);
+  return route.view === 'admin' ? route.section : 'dashboard';
+}
+
 export function adminPath(section: AdminSection): string {
-  return section === 'platform-reviver' ? '/admin/platform-reviver' : '/admin';
+  if (section === 'platform-reviver') return '/admin/platform-reviver';
+  if (section === 'moderators') return '/admin/moderators';
+  return '/admin';
+}
+
+export function moderatorPath(): string {
+  return '/moderator';
 }
 
 export function postPath(postId: number, commentId?: number): string {
@@ -105,6 +151,9 @@ export function routeToPath(route: AppRoute): string {
   }
   if (route.view === 'admin') {
     return adminPath(route.section);
+  }
+  if (route.view === 'moderator') {
+    return moderatorPath();
   }
   return '/';
 }

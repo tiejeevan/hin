@@ -80,8 +80,14 @@ export async function assertCanViewPost(
   | { ok: false; status: 404 | 403; error: string }
 > {
   const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
-  if (!post || post.deletedAt) {
+  if (!post) {
     return { ok: false, status: 404, error: 'Post not found' };
+  }
+  if (post.deletedAt) {
+    const authorView = viewerId != null && viewerId === post.userId && post.moderationAction;
+    if (!authorView) {
+      return { ok: false, status: 404, error: 'Post not found' };
+    }
   }
   if (await isAuthorHiddenFromViewer(db, viewerId, post.userId)) {
     return { ok: false, status: 404, error: 'Post not found' };

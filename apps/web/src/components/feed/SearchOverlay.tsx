@@ -57,6 +57,10 @@ interface SearchOverlayProps {
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
   onRetryPendingPost?: (postId: number) => void;
+  onModerationHidePost?: (postId: number) => void;
+  onModerationRemovePost?: (postId: number) => void;
+  onModerationHideComment?: (commentId: number) => void;
+  onModerationRemoveComment?: (commentId: number) => void;
   maxPostLength?: number;
 }
 
@@ -118,6 +122,10 @@ export function SearchOverlay({
   onPinPost,
   onUnpinPost,
   onRetryPendingPost,
+  onModerationHidePost,
+  onModerationRemovePost,
+  onModerationHideComment,
+  onModerationRemoveComment,
   maxPostLength,
 }: SearchOverlayProps) {
   const [query, setQuery] = useState('');
@@ -274,6 +282,10 @@ export function SearchOverlay({
       onPinPost={onPinPost}
       onUnpinPost={onUnpinPost}
       onRetryPendingPost={onRetryPendingPost}
+      onModerationHidePost={onModerationHidePost}
+      onModerationRemovePost={onModerationRemovePost}
+      onModerationHideComment={onModerationHideComment}
+      onModerationRemoveComment={onModerationRemoveComment}
       maxPostLength={maxPostLength}
     />
     );

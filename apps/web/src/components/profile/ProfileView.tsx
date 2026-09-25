@@ -107,6 +107,10 @@ interface ProfileViewProps {
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
   onRetryPendingPost?: (postId: number) => void;
+  onModerationHidePost?: (postId: number) => void;
+  onModerationRemovePost?: (postId: number) => void;
+  onModerationHideComment?: (commentId: number) => void;
+  onModerationRemoveComment?: (commentId: number) => void;
   postLimits?: Pick<SystemSettings, 'maxPostLength' | 'maxMediaPerPost'>;
   onDeleteAccount?: (password: string) => Promise<{ success: boolean; error?: string }>;
   onSimulateSessionExpired?: () => void;
@@ -214,6 +218,10 @@ export function ProfileView({
   onPinPost,
   onUnpinPost,
   onRetryPendingPost,
+  onModerationHidePost,
+  onModerationRemovePost,
+  onModerationHideComment,
+  onModerationRemoveComment,
   postLimits,
   onDeleteAccount,
   onSimulateSessionExpired,
@@ -400,6 +408,10 @@ export function ProfileView({
                 onPinPost={onPinPost}
                 onUnpinPost={onUnpinPost}
                 onRetryPendingPost={onRetryPendingPost}
+                onModerationHidePost={onModerationHidePost}
+                onModerationRemovePost={onModerationRemovePost}
+                onModerationHideComment={onModerationHideComment}
+                onModerationRemoveComment={onModerationRemoveComment}
                 postLimits={postLimits}
               />
             </>

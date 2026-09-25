@@ -16,6 +16,7 @@ import { useMentionAutocomplete } from '../../hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '../ui/MentionSuggestions';
 import { ReshareSheet } from './ReshareSheet';
 import { QuoteComposer } from './QuoteComposer';
+import { usePermissions } from '../../lib/permissions';
 
 /** Post id used for likes, comments, bookmarks, and reshare on this card. */
 export function getPostEngagementId(post: Post): number {
@@ -80,6 +81,10 @@ interface PostCardProps {
   onPinPost?: (postId: number) => void;
   onUnpinPost?: (postId: number) => void;
   onRetryPendingPost?: (postId: number) => void;
+  onModerationHidePost?: (postId: number) => void;
+  onModerationRemovePost?: (postId: number) => void;
+  onModerationHideComment?: (commentId: number) => void;
+  onModerationRemoveComment?: (commentId: number) => void;
   maxPostLength?: number;
 }
 
@@ -136,8 +141,13 @@ export function PostCard({
   onPinPost,
   onUnpinPost,
   onRetryPendingPost,
+  onModerationHidePost,
+  onModerationRemovePost,
+  onModerationHideComment,
+  onModerationRemoveComment,
   maxPostLength = DEFAULT_SYSTEM_SETTINGS.maxPostLength,
 }: PostCardProps) {
+  const { can } = usePermissions();
   const token = localStorage.getItem('hin_token');
 
   const isSilentRepost = !!post.repostOfPostId && !post.isQuote;
@@ -178,10 +188,24 @@ export function PostCard({
     currentUser &&
     (currentUser.role === 'admin' || currentUser.id === post.userId);
   const canReportPost = !readOnly && !post.isPending && currentUser && currentUser.id !== post.userId && onReport;
+  const canModHide =
+    !readOnly &&
+    !post.isPending &&
+    currentUser &&
+    currentUser.id !== headerPost.userId &&
+    can('post.hide') &&
+    !!onModerationHidePost;
+  const canModRemove =
+    !readOnly &&
+    !post.isPending &&
+    currentUser &&
+    currentUser.id !== headerPost.userId &&
+    can('post.remove') &&
+    !!onModerationRemovePost;
   const isRootPost = !post.parentPostId;
   const canPinPost = canManagePost && isRootPost && onPinPost && onUnpinPost;
   const canReshare = !!onRepost && !post.isPending;
-  const showPostMenu = canManagePost || canReportPost || canReshare;
+  const showPostMenu = canManagePost || canReportPost || canReshare || canModHide || canModRemove;
 
   const requireAuth = (action: () => void) => {
     if (readOnly || !currentUser) {
@@ -512,6 +536,32 @@ export function PostCard({
                   </button>
                 </>
               )}
+              {canModHide && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onModerationHidePost!(headerPost.id);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer min-h-[44px]"
+                >
+                  <Shield className="h-3.5 w-3.5" />
+                  Hide post
+                </button>
+              )}
+              {canModRemove && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onModerationRemovePost!(headerPost.id);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer min-h-[44px]"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Remove post
+                </button>
+              )}
               {canReportPost && (
                 <button
                   role="menuitem"
@@ -731,6 +781,8 @@ export function PostCard({
                     onViewHashtag={onViewHashtag}
                     onSignInRequired={onSignInRequired}
                     onReport={onReportComment}
+                    onModerationHideComment={onModerationHideComment}
+                    onModerationRemoveComment={onModerationRemoveComment}
                   />
                 ))}
                 {nestedComments.length > visibleCommentCount && (

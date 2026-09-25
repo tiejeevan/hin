@@ -107,8 +107,20 @@ export const INCOMPLETE_ACCOUNT_ALLOWLIST: string[] = [
   '/api/me',
 ];
 
+/** Paths reachable while account is suspended or banned (structured 403 elsewhere). */
+export const MODERATION_BLOCK_ALLOWLIST: string[] = [
+  '/api/auth/logout',
+  '/api/moderation/me/status',
+];
+
 export function isIncompleteAccountPathAllowed(pathname: string): boolean {
   return INCOMPLETE_ACCOUNT_ALLOWLIST.some((prefix) =>
+    pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+export function isModerationBlockPathAllowed(pathname: string): boolean {
+  return MODERATION_BLOCK_ALLOWLIST.some((prefix) =>
     pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
 }

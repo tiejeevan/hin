@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Heart, MoreVertical, Pencil, Trash2, Flag } from 'lucide-react';
+import { Heart, MoreVertical, Pencil, Trash2, Flag, Shield } from 'lucide-react';
 import { User as UserType } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { PostContentText } from './PostContentText';
@@ -7,6 +7,7 @@ import { useMentionAutocomplete } from '../../hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '../ui/MentionSuggestions';
 import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
 import { UserAvatar } from '../profile/UserAvatar';
+import { usePermissions } from '../../lib/permissions';
 
 interface CommentItemProps {
   comment: CommentNode;
@@ -28,6 +29,8 @@ interface CommentItemProps {
   onViewHashtag?: (tag: string) => void;
   onSignInRequired?: () => void;
   onReport?: (commentId: number) => void;
+  onModerationHideComment?: (commentId: number) => void;
+  onModerationRemoveComment?: (commentId: number) => void;
 }
 
 export function CommentItem({
@@ -50,7 +53,10 @@ export function CommentItem({
   onViewHashtag,
   onSignInRequired,
   onReport,
+  onModerationHideComment,
+  onModerationRemoveComment,
 }: CommentItemProps) {
+  const { can } = usePermissions();
   const token = localStorage.getItem('hin_token');
   const commentEditAutocomplete = useMentionAutocomplete({
     value: editingCommentContent,
@@ -61,7 +67,11 @@ export function CommentItem({
   const isEditing = editingCommentId === comment.id;
   const canManage = !readOnly && !isDeleted && currentUser && (currentUser.role === 'admin' || currentUser.id === comment.userId);
   const canReport = !readOnly && !isDeleted && currentUser && currentUser.id !== comment.userId && onReport;
-  const showMenu = canManage || canReport;
+  const canModHide =
+    !readOnly && !isDeleted && currentUser && currentUser.id !== comment.userId && can('comment.hide') && !!onModerationHideComment;
+  const canModRemove =
+    !readOnly && !isDeleted && currentUser && currentUser.id !== comment.userId && can('comment.remove') && !!onModerationRemoveComment;
+  const showMenu = canManage || canReport || canModHide || canModRemove;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -227,6 +237,34 @@ export function CommentItem({
                         </button>
                       </>
                     )}
+                    {canModHide && (
+                      <button
+                        role="menuitem"
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onModerationHideComment!(comment.id);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer min-h-[40px]"
+                      >
+                        <Shield className="h-3.5 w-3.5" />
+                        Hide
+                      </button>
+                    )}
+                    {canModRemove && (
+                      <button
+                        role="menuitem"
+                        type="button"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onModerationRemoveComment!(comment.id);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer min-h-[40px]"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Remove
+                      </button>
+                    )}
                     {canReport && (
                       <button
                         role="menuitem"
@@ -298,6 +336,9 @@ export function CommentItem({
           onViewProfile={onViewProfile}
           onViewHashtag={onViewHashtag}
           onSignInRequired={onSignInRequired}
+          onReport={onReport}
+          onModerationHideComment={onModerationHideComment}
+          onModerationRemoveComment={onModerationRemoveComment}
         />
       ))}
     </div>

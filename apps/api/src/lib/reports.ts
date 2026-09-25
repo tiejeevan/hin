@@ -306,9 +306,10 @@ export async function listReports(
 
 export async function reviewReport(
   db: Db,
-  adminId: number,
+  reviewerId: number,
   reportId: number,
   action: ReviewReportAction,
+  resolutionReason?: string | null,
 ): Promise<{ ok: true; report: ContentReport } | { ok: false; error: string; code: number }> {
   const report = await db
     .select()
@@ -317,16 +318,55 @@ export async function reviewReport(
     .get();
 
   if (!report) return { ok: false, error: 'Report not found', code: 404 };
-  if (report.status !== 'pending') {
+  const terminal = new Set(['dismissed', 'resolved', 'action_taken']);
+  if (terminal.has(report.status)) {
     return { ok: false, error: 'Report already reviewed', code: 400 };
+  }
+  if (report.status === 'in_review' && action === 'review') {
+    return { ok: false, error: 'Report is already in review', code: 400 };
+  }
+  if (report.status === 'pending' && !['review', 'dismiss', 'resolve', 'escalate', 'delete_content', 'delete_user'].includes(action)) {
+    return { ok: false, error: 'Invalid action for pending report', code: 400 };
   }
 
   const reviewedAt = new Date().toISOString();
 
-  if (action === 'dismiss') {
+  if (report.status === 'escalated' && action !== 'dismiss' && action !== 'delete_content' && action !== 'delete_user') {
+    const reviewer = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, reviewerId)).get();
+    if (reviewer?.role !== 'admin') {
+      return { ok: false, error: 'Escalated reports require admin review', code: 403 };
+    }
+  }
+
+  if (action === 'review') {
     await db
       .update(schema.contentReports)
-      .set({ status: 'dismissed', reviewedBy: adminId, reviewedAt })
+      .set({ status: 'in_review', reviewedBy: reviewerId, reviewedAt, resolutionReason: resolutionReason ?? null })
+      .where(eq(schema.contentReports.id, reportId))
+      .run();
+  } else if (action === 'resolve') {
+    await db
+      .update(schema.contentReports)
+      .set({ status: 'resolved', reviewedBy: reviewerId, reviewedAt, resolutionReason: resolutionReason ?? null })
+      .where(eq(schema.contentReports.id, reportId))
+      .run();
+  } else if (action === 'escalate') {
+    await db
+      .update(schema.contentReports)
+      .set({
+        status: 'escalated',
+        reviewedBy: reviewerId,
+        reviewedAt,
+        resolutionReason: resolutionReason ?? null,
+        escalatedAt: reviewedAt,
+        escalatedBy: reviewerId,
+      })
+      .where(eq(schema.contentReports.id, reportId))
+      .run();
+  } else if (action === 'dismiss') {
+    await db
+      .update(schema.contentReports)
+      .set({ status: 'dismissed', reviewedBy: reviewerId, reviewedAt, resolutionReason: resolutionReason ?? null })
       .where(eq(schema.contentReports.id, reportId))
       .run();
   } else if (action === 'delete_content') {
@@ -348,15 +388,15 @@ export async function reviewReport(
     }
     await db
       .update(schema.contentReports)
-      .set({ status: 'action_taken', reviewedBy: adminId, reviewedAt })
+      .set({ status: 'action_taken', reviewedBy: reviewerId, reviewedAt, resolutionReason: resolutionReason ?? null })
       .where(eq(schema.contentReports.id, reportId))
       .run();
   } else if (action === 'delete_user') {
     if (report.targetType !== 'user') {
       return { ok: false, error: 'delete_user only applies to user reports', code: 400 };
     }
-    if (report.targetId === adminId) {
-      return { ok: false, error: 'Cannot delete your own admin account', code: 400 };
+    if (report.targetId === reviewerId) {
+      return { ok: false, error: 'Cannot delete your own account', code: 400 };
     }
     const user = await db
       .select({ id: schema.users.id, deletedAt: schema.users.deletedAt })
@@ -372,7 +412,7 @@ export async function reviewReport(
     }
     await db
       .update(schema.contentReports)
-      .set({ status: 'action_taken', reviewedBy: adminId, reviewedAt })
+      .set({ status: 'action_taken', reviewedBy: reviewerId, reviewedAt, resolutionReason: resolutionReason ?? null })
       .where(eq(schema.contentReports.id, reportId))
       .run();
   }
@@ -406,7 +446,7 @@ export async function reviewReport(
       reason: report.reason as ReportReason,
       details: report.details,
       status: (updated?.status ?? 'action_taken') as ReportStatus,
-      reviewedBy: adminId,
+      reviewedBy: reviewerId,
       reviewedAt,
       createdAt: report.createdAt,
       ...preview,

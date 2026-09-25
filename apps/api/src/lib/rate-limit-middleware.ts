@@ -7,6 +7,7 @@ import {
   authRateLimitPolicy,
   buildBucketKey,
   GLOBAL_API_IP,
+  GLOBAL_API_USER,
   isGlobalRateLimitExemptPath,
   isSearchPath,
   isWriteMethod,
@@ -21,10 +22,13 @@ import { consumeRateLimit, type RateLimitResult } from './rate-limit';
 
 type ApiContext = Context<{ Bindings: Env }>;
 
+export const RATE_LIMIT_USER_MESSAGE =
+  'Too many requests. Please wait a moment and try again.';
+
 export function rateLimitExceeded(
   c: ApiContext,
   result: Extract<RateLimitResult, { ok: false }>,
-  errorMessage = 'Too many requests',
+  errorMessage = RATE_LIMIT_USER_MESSAGE,
 ): Response {
   c.header('Retry-After', String(result.retryAfterSeconds));
   return c.json(
@@ -70,9 +74,13 @@ export function createGlobalRateLimitMiddleware(): MiddlewareHandler<{ Bindings:
       return next();
     }
 
+    const claims = await getJwtClaims(c);
     const ip = resolveClientIp(c.req.raw);
-    const bucketKey = buildBucketKey('api:global', 'ip', ip);
-    const blocked = await enforceRateLimit(c, bucketKey, GLOBAL_API_IP);
+    const bucketKey = claims
+      ? buildBucketKey('api:global', 'user', claims.id)
+      : buildBucketKey('api:global', 'ip', ip);
+    const policy = claims ? GLOBAL_API_USER : GLOBAL_API_IP;
+    const blocked = await enforceRateLimit(c, bucketKey, policy);
     if (blocked) return blocked;
 
     return next();

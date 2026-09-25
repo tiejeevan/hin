@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { User as UserType, AccountStatus } from '@hin/types';
 import { AdminData } from '../../types/ui';
+import { matchesSearch } from '../../lib/userSearch';
 import { AdminRateLimitsPanel } from './AdminRateLimitsPanel';
 
 interface RegisteredAccountsProps {
@@ -25,11 +26,12 @@ interface RegisteredAccountsProps {
   onUpdateUserRole: (userId: number, currentRole: 'user' | 'admin') => void;
   onDeleteUser: (userId: number, username: string) => void;
   onReinstateUser: (userId: number, username: string) => void;
+  onOpenModeratorsAdmin?: () => void;
 }
 
 const PAGE_SIZE = 10;
 
-type RoleFilter = 'all' | 'admin' | 'user';
+type RoleFilter = 'all' | 'admin' | 'moderator' | 'user';
 type StatusFilter = 'all' | 'active' | 'self_deleted' | 'admin_deleted';
 type PostsFilter = 'all' | 'none' | '1-9' | '10+';
 type SortOption = 'newest' | 'oldest' | 'username' | 'most_posts' | 'fewest_posts';
@@ -77,42 +79,6 @@ function formatJoined(dateStr: string): string {
     month: 'short',
     day: 'numeric',
   });
-}
-
-/**
- * Subsequence fuzzy match: every query char must appear in order in the target.
- * Returns a score (higher = better) or null if there's no match.
- * Consecutive matches and matches at the start score higher.
- */
-function fuzzyScore(query: string, target: string): number | null {
-  const q = query.toLowerCase();
-  const t = target.toLowerCase();
-  if (q.length === 0) return 0;
-
-  // Exact substring matches always win over scattered subsequences.
-  const substringIdx = t.indexOf(q);
-  if (substringIdx !== -1) return 1000 - substringIdx;
-
-  let score = 0;
-  let tIdx = 0;
-  let prevMatchIdx = -2;
-  for (let qIdx = 0; qIdx < q.length; qIdx++) {
-    const found = t.indexOf(q[qIdx], tIdx);
-    if (found === -1) return null;
-    score += found === prevMatchIdx + 1 ? 5 : 1;
-    prevMatchIdx = found;
-    tIdx = found + 1;
-  }
-  return score;
-}
-
-function matchesSearch(query: string, user: UserType): number | null {
-  const trimmed = query.trim().replace(/^[@#]/, '');
-  if (!trimmed) return 0;
-  const usernameScore = fuzzyScore(trimmed, user.username);
-  const idScore = String(user.id) === trimmed ? 2000 : null;
-  if (usernameScore === null && idScore === null) return null;
-  return Math.max(usernameScore ?? -Infinity, idScore ?? -Infinity);
 }
 
 const selectClass =
@@ -170,14 +136,16 @@ function UserActions({
         <VenetianMask className="h-3.5 w-3.5" />
         Act As
       </button>
-      <button
-        onClick={() => onUpdateUserRole(user.id, user.role)}
-        title={user.role === 'admin' ? 'Demote to user' : 'Promote to admin'}
-        className={`${actionButtonBase} ${grow} bg-bg-tertiary hover:bg-bg-primary text-text-secondary border border-border-custom`}
-      >
-        <Shield className="h-3.5 w-3.5" />
-        {user.role === 'admin' ? 'Demote' : 'Promote'}
-      </button>
+      {(user.role === 'user' || user.role === 'admin') && (
+        <button
+          onClick={() => onUpdateUserRole(user.id, user.role === 'admin' ? 'admin' : 'user')}
+          title={user.role === 'admin' ? 'Demote to user' : 'Promote to admin'}
+          className={`${actionButtonBase} ${grow} bg-bg-tertiary hover:bg-bg-primary text-text-secondary border border-border-custom`}
+        >
+          <Shield className="h-3.5 w-3.5" />
+          {user.role === 'admin' ? 'Demote' : 'Promote'}
+        </button>
+      )}
       <button
         onClick={() => onDeleteUser(user.id, user.username)}
         title={`Delete @${user.username}`}
@@ -215,6 +183,7 @@ export function RegisteredAccounts({
   onUpdateUserRole,
   onDeleteUser,
   onReinstateUser,
+  onOpenModeratorsAdmin,
 }: RegisteredAccountsProps) {
   const [usersOpen, setUsersOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -345,6 +314,17 @@ export function RegisteredAccounts({
         </div>
       </div>
 
+      {onOpenModeratorsAdmin && (
+        <button
+          type="button"
+          onClick={onOpenModeratorsAdmin}
+          className="flex items-center gap-2 text-xs font-semibold text-indigo-400 hover:text-indigo-300 cursor-pointer"
+        >
+          <Shield className="h-3.5 w-3.5" />
+          Manage moderators &amp; permissions
+        </button>
+      )}
+
       <div className="bg-bg-primary/20 border border-border-custom rounded-xl p-3 space-y-2">
         <p className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">API rate limits</p>
         <AdminRateLimitsPanel token={token} />
@@ -403,6 +383,7 @@ export function RegisteredAccounts({
                 >
                   <option value="all">All</option>
                   <option value="admin">Admin</option>
+                  <option value="moderator">Moderator</option>
                   <option value="user">User</option>
                 </select>
               </label>
@@ -525,6 +506,11 @@ export function RegisteredAccounts({
                             admin
                           </span>
                         )}
+                        {u.role === 'moderator' && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                            moderator
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -586,7 +572,9 @@ export function RegisteredAccounts({
                             className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
                               u.role === 'admin'
                                 ? 'bg-amber-500/20 text-amber-500 border border-amber-500/30'
-                                : 'bg-bg-tertiary text-text-muted'
+                                : u.role === 'moderator'
+                                  ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
+                                  : 'bg-bg-tertiary text-text-muted'
                             }`}
                           >
                             {u.role}

@@ -19,6 +19,8 @@ import { isValidEmail, normalizeEmail } from '../lib/otp';
 import { sign } from 'hono/jwt';
 import type { Env } from '../types';
 import { getAuthUser, getJwtSecret } from '../lib/auth';
+import { permissionForReportAction } from '../lib/moderation';
+import { hasPermissionInSet, getUserPermissions } from '../lib/permissions';
 import { listReports, reviewReport } from '../lib/reports';
 import { softDeleteUser, reinstateUser, computeAccountStatus } from '../lib/user-lifecycle';
 import { getSystemSettings, updateSystemSettings } from '../lib/system-settings';
@@ -31,8 +33,25 @@ import {
 } from '../lib/realtime';
 import { writeAuditLog } from '../lib/audit';
 import { sendWebPushBatch } from '../lib/push';
+import {
+  normalizeAdminUserSearchQuery,
+  searchPromoteCandidateUsers,
+} from '../lib/admin-user-search';
 
 const admin = new Hono<{ Bindings: Env }>();
+
+/** Server-side search for promote-moderator (role=user only). Does not load the full user table. */
+admin.get('/users/search', async (c) => {
+  const authUser = await getAuthUser(c);
+  if (!authUser || authUser.role !== 'admin') {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const normalized = normalizeAdminUserSearchQuery(c.req.query('q') ?? '');
+  const db = drizzle(c.env.DB, { schema });
+  const users = await searchPromoteCandidateUsers(db, normalized);
+  return c.json({ users });
+});
 
 // Admin stats & user list (filtering out deleted users)
 admin.get('/stats', async (c) => {
@@ -117,9 +136,9 @@ admin.post('/impersonate', async (c) => {
   }
 
   // Generate delegation token for target user
-  const token = await sign({ 
-    id: targetUser.id, 
-    username: targetUser.username, 
+  const token = await sign({
+    id: targetUser.id,
+    username: targetUser.username,
     role: targetUser.role,
     exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 // 24 hours
   }, getJwtSecret(c.env), 'HS256');
@@ -155,7 +174,10 @@ admin.put('/users/:id/role', async (c) => {
     return c.json({ error: 'Cannot change your own role' }, 400);
   }
 
-  const { role } = await c.req.json<{ role: 'user' | 'admin' }>();
+  const { role } = await c.req.json<{ role: 'user' | 'admin' | 'moderator' }>();
+  if (role === 'moderator') {
+    return c.json({ error: 'Use Admin → Moderators to assign the moderator role' }, 400);
+  }
   if (role !== 'user' && role !== 'admin') {
     return c.json({ error: 'Invalid role' }, 400);
   }
@@ -538,12 +560,16 @@ admin.patch('/settings', async (c) => {
 // List content reports for admin review
 admin.get('/reports', async (c) => {
   const authUser = await getAuthUser(c);
-  if (!authUser || authUser.role !== 'admin') {
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+  const db = drizzle(c.env.DB, { schema });
+  const perms = await getUserPermissions(db, authUser);
+  if (!hasPermissionInSet(perms, 'report.view')) {
     return c.json({ error: 'Forbidden' }, 403);
   }
 
   const statusParam = c.req.query('status') || 'pending';
-  if (statusParam !== 'pending' && statusParam !== 'dismissed' && statusParam !== 'action_taken') {
+  const validStatuses = ['pending', 'in_review', 'resolved', 'dismissed', 'action_taken', 'escalated'];
+  if (!validStatuses.includes(statusParam)) {
     return c.json({ error: 'Invalid status' }, 400);
   }
 
@@ -555,7 +581,6 @@ admin.get('/reports', async (c) => {
     cursor = parsed;
   }
 
-  const db = drizzle(c.env.DB, { schema });
   const page = await listReports(db, statusParam as ReportStatus, cursor);
   return c.json(page);
 });
@@ -563,9 +588,9 @@ admin.get('/reports', async (c) => {
 // Review a content report
 admin.patch('/reports/:id', async (c) => {
   const authUser = await getAuthUser(c);
-  if (!authUser || authUser.role !== 'admin') {
-    return c.json({ error: 'Forbidden' }, 403);
-  }
+  if (!authUser) return c.json({ error: 'Unauthorized' }, 401);
+  const db = drizzle(c.env.DB, { schema });
+  const perms = await getUserPermissions(db, authUser);
 
   const reportId = parseInt(c.req.param('id'));
   if (isNaN(reportId)) return c.json({ error: 'Invalid report id' }, 400);
@@ -576,8 +601,12 @@ admin.patch('/reports/:id', async (c) => {
     return c.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, 400);
   }
 
-  const db = drizzle(c.env.DB, { schema });
-  const result = await reviewReport(db, authUser.id, reportId, parsed.data.action);
+  const permKey = permissionForReportAction(parsed.data.action);
+  if (permKey && !hasPermissionInSet(perms, permKey)) {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const result = await reviewReport(db, authUser.id, reportId, parsed.data.action, parsed.data.reason);
   if (!result.ok) {
     return c.json({ error: result.error }, result.code as 400 | 404);
   }

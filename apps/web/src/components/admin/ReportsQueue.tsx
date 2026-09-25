@@ -5,9 +5,14 @@ import type { ContentReport, ReviewReportAction } from '@hin/types';
 interface ReportsQueueProps {
   reports: ContentReport[];
   loading: boolean;
-  onReviewReport: (reportId: number, action: ReviewReportAction) => Promise<{ success: boolean; error?: string }>;
+  onReviewReport: (
+    reportId: number,
+    action: ReviewReportAction,
+    reason?: string,
+  ) => Promise<{ success: boolean; error?: string }>;
   onOpenProfile?: (username: string) => void;
   onOpenPost?: (postId: number) => void;
+  enableModeratorActions?: boolean;
 }
 
 function targetLabel(report: ContentReport): string {
@@ -22,24 +27,42 @@ export function ReportsQueue({
   onReviewReport,
   onOpenProfile,
   onOpenPost,
+  enableModeratorActions = false,
 }: ReportsQueueProps) {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [resolveReasonFor, setResolveReasonFor] = useState<number | null>(null);
+  const [resolveReason, setResolveReason] = useState('');
 
-  const handleAction = async (reportId: number, action: ReviewReportAction) => {
+  const handleAction = async (reportId: number, action: ReviewReportAction, reason?: string) => {
     const confirmMsg =
       action === 'dismiss'
         ? 'Dismiss this report?'
-        : action === 'delete_content'
-          ? 'Delete the reported content?'
-          : 'Delete the reported user account?';
+        : action === 'resolve'
+          ? 'Mark this report resolved?'
+          : action === 'escalate'
+            ? 'Escalate this report to admins?'
+            : action === 'delete_content'
+              ? 'Delete the reported content?'
+              : 'Delete the reported user account?';
     if (!confirm(confirmMsg)) return;
 
     setBusyId(reportId);
     setError(null);
-    const result = await onReviewReport(reportId, action);
+    const result = await onReviewReport(reportId, action, reason);
     if (!result.success) setError(result.error || 'Action failed');
     setBusyId(null);
+    setResolveReasonFor(null);
+    setResolveReason('');
+  };
+
+  const submitResolve = async (reportId: number) => {
+    const trimmed = resolveReason.trim();
+    if (!trimmed) {
+      setError('Resolution reason is required');
+      return;
+    }
+    await handleAction(reportId, 'resolve', trimmed);
   };
 
   if (loading) {
@@ -128,7 +151,55 @@ export function ReportsQueue({
                 Delete user
               </button>
             )}
+            {enableModeratorActions && (
+              <>
+                <button
+                  type="button"
+                  disabled={busyId === report.id}
+                  onClick={() => setResolveReasonFor(report.id)}
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-medium border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Resolve
+                </button>
+                <button
+                  type="button"
+                  disabled={busyId === report.id}
+                  onClick={() => handleAction(report.id, 'escalate')}
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-medium border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Escalate
+                </button>
+              </>
+            )}
           </div>
+          {resolveReasonFor === report.id && (
+            <div className="pt-2 space-y-2 border-t border-border-custom/60">
+              <textarea
+                value={resolveReason}
+                onChange={(e) => setResolveReason(e.target.value)}
+                rows={2}
+                placeholder="Resolution summary…"
+                className="w-full rounded-lg border border-border-custom bg-bg-primary/40 px-2 py-1.5 text-xs"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setResolveReasonFor(null); setResolveReason(''); }}
+                  className="px-2 py-1 text-[11px] rounded border border-border-custom cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={busyId === report.id}
+                  onClick={() => void submitResolve(report.id)}
+                  className="px-2 py-1 text-[11px] rounded bg-emerald-600 text-white font-semibold cursor-pointer disabled:opacity-50"
+                >
+                  Confirm resolve
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ))}
     </div>

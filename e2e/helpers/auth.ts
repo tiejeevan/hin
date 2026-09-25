@@ -79,7 +79,7 @@ export async function loginUser(
 ) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await page.getByPlaceholder('username or you@example.com').fill(identifier);
+  await page.getByRole('textbox', { name: 'Email or username' }).fill(identifier);
   await page.getByPlaceholder('••••••••').fill(password);
   await page.getByRole('button', { name: 'Sign In', exact: true }).click();
   await expectLoggedIn(page);

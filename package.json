@@ -13,6 +13,7 @@
     "test:wasm": "cargo test -p hin-chat-core && cargo test -p hin-chat-wasm",
     "test:e2e:messages": "playwright test e2e/messages.spec.ts",
     "test:smoke:chat": "playwright test e2e/chat-smoke.spec.ts",
+    "test:smoke:moderator-rbac": "playwright test e2e/moderator-rbac.spec.ts",
     "db:generate": "npm run db:generate --workspace=packages/db",
     "db:migrate:local": "npm run db:migrate:local --workspace=packages/db",
     "db:migrate:prod": "npm run db:migrate:prod --workspace=packages/db",

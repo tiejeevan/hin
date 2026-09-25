@@ -43,6 +43,15 @@ export const users = sqliteTable('users', {
   originalUsername: text('original_username'),
   /** Saved on soft delete so reinstate can restore the email when still free. */
   originalEmail: text('original_email'),
+  /** 'active' | 'suspended' — moderator role only; suspended mods lose permission resolution. */
+  moderatorStatus: text('moderator_status'),
+  /** 'active' | 'restricted' | 'suspended' | 'banned' */
+  accountModerationStatus: text('account_moderation_status').default('active').notNull(),
+  accountModerationReason: text('account_moderation_reason'),
+  accountModerationUntil: text('account_moderation_until'),
+  /** FK to users.id — declared in migration SQL to avoid self-referential schema inference issues. */
+  accountModerationSetBy: integer('account_moderation_set_by'),
+  accountModerationSetAt: text('account_moderation_set_at'),
 }, (table) => ({
   deletedAtIdx: index('users_deleted_at_idx').on(table.deletedAt),
   isPrivateIdx: index('users_is_private_idx').on(table.isPrivate),
@@ -131,6 +140,13 @@ export const posts = sqliteTable('posts', {
   isQuote: integer('is_quote').default(0).notNull(),
   /** First URL's cached Open Graph preview, if any (only one preview per post). */
   linkPreviewId: integer('link_preview_id').references(() => linkPreviews.id, { onDelete: 'set null' }),
+  /** 'hidden' | 'removed' when moderated (uses deleted_at for visibility). */
+  moderationAction: text('moderation_action'),
+  moderationReason: text('moderation_reason'),
+  moderatedBy: integer('moderated_by').references(() => users.id, { onDelete: 'set null' }),
+  moderatedAt: text('moderated_at'),
+  /** 1 = comment thread locked on this post */
+  commentsLocked: integer('comments_locked').default(0).notNull(),
 }, (table) => ({
   userIdIdx: index('posts_user_id_idx').on(table.userId),
   createdAtIdx: index('posts_created_at_idx').on(table.createdAt),
@@ -141,6 +157,7 @@ export const posts = sqliteTable('posts', {
   threadRootIdx: index('posts_thread_root_id_idx').on(table.threadRootId),
   parentPostIdx: index('posts_parent_post_id_idx').on(table.parentPostId),
   repostOfPostIdx: index('posts_repost_of_post_id_idx').on(table.repostOfPostId),
+  moderationActionIdx: index('posts_moderation_action_idx').on(table.moderationAction),
   uniqueSilentRepostIdx: uniqueIndex('posts_unique_silent_repost_idx')
     .on(table.userId, table.repostOfPostId)
     .where(sql`is_quote = 0 AND deleted_at IS NULL`),
@@ -248,11 +265,62 @@ export const comments = sqliteTable('comments', {
   content: text('content').notNull(),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
   deletedAt: text('deleted_at'), // Soft delete
+  moderationAction: text('moderation_action'),
+  moderationReason: text('moderation_reason'),
+  moderatedBy: integer('moderated_by').references(() => users.id, { onDelete: 'set null' }),
+  moderatedAt: text('moderated_at'),
 }, (table) => ({
   postIdIdx: index('comments_post_id_idx').on(table.postId),
   parentIdIdx: index('comments_parent_id_idx').on(table.parentId),
   userIdIdx: index('comments_user_id_idx').on(table.userId),
   deletedAtIdx: index('comments_deleted_at_idx').on(table.deletedAt),
+  moderationActionIdx: index('comments_moderation_action_idx').on(table.moderationAction),
+}));
+
+/** Stable permission keys for RBAC (seeded via migration). */
+export const permissions = sqliteTable('permissions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  key: text('key').notNull().unique(),
+  name: text('name').notNull(),
+  description: text('description').default('').notNull(),
+  category: text('category').notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  categoryIdx: index('permissions_category_idx').on(table.category),
+}));
+
+/** Moderator ↔ permission grants (explicit set; presets are not stored). */
+export const moderatorPermissions = sqliteTable('moderator_permissions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  permissionId: integer('permission_id').notNull().references(() => permissions.id, { onDelete: 'cascade' }),
+  grantedBy: integer('granted_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  userPermissionUnique: uniqueIndex('moderator_permissions_user_permission_unique').on(table.userId, table.permissionId),
+  userIdIdx: index('moderator_permissions_user_id_idx').on(table.userId),
+}));
+
+/** Moderation action audit (separate from security audit_logs). */
+export const moderationAuditLogs = sqliteTable('moderation_audit_logs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  actorId: integer('actor_id').references(() => users.id, { onDelete: 'set null' }),
+  actorRole: text('actor_role').notNull(),
+  action: text('action').notNull(),
+  targetType: text('target_type').notNull(),
+  targetId: integer('target_id'),
+  reason: text('reason'),
+  metadata: text('metadata'),
+  beforeState: text('before_state'),
+  afterState: text('after_state'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => ({
+  actorIdIdx: index('moderation_audit_logs_actor_id_idx').on(table.actorId),
+  actionIdx: index('moderation_audit_logs_action_idx').on(table.action),
+  targetIdx: index('moderation_audit_logs_target_idx').on(table.targetType, table.targetId),
+  createdAtIdx: index('moderation_audit_logs_created_at_idx').on(table.createdAt),
 }));
 
 /**
@@ -470,6 +538,9 @@ export const contentReports = sqliteTable('content_reports', {
   status: text('status').default('pending').notNull(),
   reviewedBy: integer('reviewed_by').references(() => users.id, { onDelete: 'set null' }),
   reviewedAt: text('reviewed_at'),
+  resolutionReason: text('resolution_reason'),
+  escalatedAt: text('escalated_at'),
+  escalatedBy: integer('escalated_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
 }, (table) => ({
   statusIdx: index('content_reports_status_idx').on(table.status),

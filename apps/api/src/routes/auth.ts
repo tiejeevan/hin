@@ -11,12 +11,11 @@ import {
   VerifyRegistrationSchema,
 } from '@hin/types';
 import type { Env } from '../types';
-import { getAuthUser } from '../lib/auth';
-import { getJwtSecret, JWT_SECRET_DEV_FALLBACK } from '../lib/auth';
+import { getAuthUser, getJwtClaims, getJwtSecret, JWT_SECRET_DEV_FALLBACK } from '../lib/auth';
 import { toPublicUser, toSelfUser, seedAdminUser } from '../lib/users';
 import { writeAuditLog } from '../lib/audit';
 import { verifyGoogleIdToken } from '../lib/google-auth';
-import { requireTurnstile } from '../lib/turnstile';
+import { requireTurnstile, verifyTurnstileToken } from '../lib/turnstile';
 import { getSystemSettings } from '../lib/system-settings';
 import { sendPasswordResetOtpEmail } from '../lib/email/resend';
 import { getOutboundFromEmail } from '../lib/email/outbound-from';
@@ -39,6 +38,7 @@ import {
   validateUsernameFormat,
 } from '../lib/auth-validation';
 import { getAccountBlockReason } from '../lib/account-guard';
+import { moderationBlockJson } from '../lib/auth-moderation-block';
 import {
   OTP_MAX_ATTEMPTS,
   OTP_PURPOSE_EMAIL_VERIFY,
@@ -61,9 +61,10 @@ import {
   normalizeEmail,
   otpExpiresAt,
 } from '../lib/otp';
-import { clientIpFromRequest, consumeRateLimit, refundRateLimit } from '../lib/rate-limit';
+import { clientIpFromRequest, consumeRateLimit, refundRateLimit, resetClientRateLimits } from '../lib/rate-limit';
 import {
   buildBucketKey,
+  RATE_LIMIT_UNLOCK_IP,
   resolveClientIp,
 } from '../lib/rate-limit-policy';
 import {
@@ -88,6 +89,42 @@ auth.get('/turnstile-config', async (c) => {
   return c.json({
     turnstileEnabled,
     strictPasswordRequirements: settings.strictPasswordRequirements,
+  });
+});
+
+/** Reset rate-limit buckets after Turnstile (or dev unlock when Turnstile is off). */
+auth.post('/rate-limit-unlock', async (c) => {
+  const db = drizzle(c.env.DB, { schema });
+  const ip = resolveClientIp(c.req.raw);
+  const unlockKey = buildBucketKey('rate_limit_unlock', 'ip', ip);
+  const unlockBlocked = await enforceRateLimit(
+    c,
+    unlockKey,
+    RATE_LIMIT_UNLOCK_IP,
+    'Too many unlock attempts. Try again later.',
+  );
+  if (unlockBlocked) return unlockBlocked;
+
+  const settings = await getSystemSettings(db);
+  const secret = c.env.TURNSTILE_SECRET_KEY;
+  const turnstileRequired = settings.turnstileEnabled && !!secret;
+  const body = await c.req.json().catch(() => ({})) as { turnstileToken?: string };
+
+  if (turnstileRequired) {
+    if (!body.turnstileToken) {
+      return c.json({ error: 'Complete the verification challenge to continue.', code: 'turnstile_required' }, 400);
+    }
+    const ok = await verifyTurnstileToken(body.turnstileToken, secret, ip === 'unknown' ? null : ip);
+    if (!ok) {
+      return c.json({ error: 'Verification failed. Please try again.', code: 'turnstile_failed' }, 403);
+    }
+  }
+
+  const claims = await getJwtClaims(c);
+  await resetClientRateLimits(db, ip, claims?.id ?? null);
+  return c.json({
+    success: true,
+    message: 'Rate limit cleared. You can continue using the app.',
   });
 });
 
@@ -514,6 +551,9 @@ auth.post('/login', createAuthRouteRateLimit('login'), async (c) => {
     return c.json({ error: 'Invalid username or password' }, 401);
   }
 
+  const modBlock = moderationBlockJson(user);
+  if (modBlock) return c.json(modBlock, 403);
+
   const token = await issueAuthToken(user, getJwtSecret(c.env));
 
   await writeAuditLog(c, {
@@ -655,6 +695,9 @@ auth.post('/google', createAuthRouteRateLimit('google'), async (c) => {
       user = updated;
     }
   }
+
+  const modBlockGoogle = moderationBlockJson(user);
+  if (modBlockGoogle) return c.json(modBlockGoogle, 403);
 
   const token = await issueAuthToken(user, getJwtSecret(c.env));
 

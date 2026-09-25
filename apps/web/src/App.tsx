@@ -30,6 +30,8 @@ import {
   type GamificationRewardPayload,
   type GamificationSettings,
   isUnavailableRepostedPost,
+  type PermissionKey,
+  type ReviewReportAction,
 } from '@hin/types';
 import { API_URL, WS_URL } from './config';
 import { Toast, AdminData, ActiveTab, ChatRecipient, CommentNode, FeedMode } from './types/ui';
@@ -37,7 +39,15 @@ import type { CreatePostSubmitPayload } from './components/feed/CreatePostForm';
 import { getPostEngagementId } from './components/feed/PostCard';
 import { mergePollFromBroadcast } from './utils/pollVisibility';
 import { computeOptimisticPoll } from './utils/optimisticPoll';
-import { parseLocation, syncUrl, postPermalinkUrl, profilePermalinkUrl, type AdminSection } from './lib/appRoutes';
+import {
+  parseLocation,
+  syncUrl,
+  postPermalinkUrl,
+  profilePermalinkUrl,
+  initialActiveTabFromLocation,
+  initialAdminSectionFromLocation,
+  type AdminSection,
+} from './lib/appRoutes';
 import { randomId, uploadCompressedImage } from './lib/compressImage';
 import {
   loadChatState,
@@ -111,6 +121,26 @@ import { CoachTooltip, PROFILE_TOUR_STEPS } from './components/walkthrough/Coach
 import { SearchOverlay } from './components/feed/SearchOverlay';
 import { WelcomePage } from './components/welcome/WelcomePage';
 import { ContactPage } from './components/contact/ContactPage';
+import { PermissionsProvider } from './lib/permissions';
+import { ModeratorDashboard } from './components/moderator/ModeratorDashboard';
+import { ReasonPromptModal } from './components/moderation/ReasonPromptModal';
+import { AccountModerationBlockModal } from './components/moderation/AccountModerationBlockModal';
+import {
+  accountModerationBlockFromBody,
+  type AccountModerationBlockState,
+} from './lib/accountModerationBlock';
+import { installApiRateLimitObserver } from './lib/installApiRateLimitObserver';
+import {
+  rateLimitBlockFromBody,
+  type RateLimitBlockState,
+} from './lib/rateLimitResponse';
+import { RateLimitModal } from './components/system/RateLimitModal';
+
+type PendingModAction =
+  | { kind: 'post_hide'; postId: number }
+  | { kind: 'post_remove'; postId: number }
+  | { kind: 'comment_hide'; commentId: number }
+  | { kind: 'comment_remove'; commentId: number };
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('hin_token'));
@@ -146,8 +176,14 @@ export default function App() {
   const mutedUserIdsRef = useRef<Set<number>>(new Set());
   // Removed usersRef
   const feedLoadingRef = useRef(false);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('feed');
-  const [adminSection, setAdminSection] = useState<AdminSection>('dashboard');
+  const [activeTab, setActiveTab] = useState<ActiveTab>(initialActiveTabFromLocation);
+  const [adminSection, setAdminSection] = useState<AdminSection>(initialAdminSectionFromLocation);
+  const activeTabRef = useRef(activeTab);
+  const [bootstrapPermissions, setBootstrapPermissions] = useState<PermissionKey[] | 'all' | null>(null);
+  const [accountModBlock, setAccountModBlock] = useState<AccountModerationBlockState | null>(null);
+  const [rateLimitBlock, setRateLimitBlock] = useState<RateLimitBlockState | null>(null);
+  const [pendingModAction, setPendingModAction] = useState<PendingModAction | null>(null);
+  const [modActionBusy, setModActionBusy] = useState(false);
   const [olabidItemId, setOlabidItemId] = useState<number | null>(null);
 
   const FEED_PAGE_SIZE = 10;
@@ -254,6 +290,7 @@ export default function App() {
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [adminData, setAdminData] = useState<AdminData | null>(null);
+  const adminStatsInflightRef = useRef<Promise<void> | null>(null);
   const [broadcastHistory, setBroadcastHistory] = useState<SystemBroadcast[] | null>(null);
   const [adminReports, setAdminReports] = useState<ContentReport[] | null>(null);
 
@@ -288,6 +325,8 @@ export default function App() {
   useEffect(() => {
     userSettingsRef.current = userSettings;
   }, [userSettings]);
+
+  useEffect(() => installApiRateLimitObserver(API_URL, setRateLimitBlock), []);
 
   const [postViewId, setPostViewId] = useState<number | null>(null);
   const [postViewPost, setPostViewPost] = useState<import('@hin/types').Post | null>(null);
@@ -884,8 +923,13 @@ export default function App() {
         handleSessionExpiredRef.current();
         return;
       }
+      if (res.status === 403) {
+        const data = await res.json().catch(() => null);
+        if (await applyAccountBlockFromResponse(res, data)) return;
+      }
       if (res.ok) {
         const data: MeBootstrap = await res.json();
+        setBootstrapPermissions(data.permissions ?? null);
         setFollowedUserIds(new Set(data.followingIds));
         setBlockedUserIds(new Set(data.blockedIds));
         setMutedUserIds(new Set(data.mutedIds));
@@ -1186,6 +1230,84 @@ export default function App() {
     }
   };
 
+  const openModerator = (opts?: { skipUrlSync?: boolean; replace?: boolean }) => {
+    if (currentUser?.role !== 'moderator') return;
+    setIsSearchOpen(false);
+    setActiveTab('moderator');
+    setProfileUserId(null);
+    setIsProfileEditing(false);
+    setShowNotifications(false);
+    if (!opts?.skipUrlSync) {
+      syncUrl({ view: 'moderator' }, opts?.replace);
+    }
+  };
+
+  const canViewReports = () =>
+    currentUser?.role === 'admin' ||
+    bootstrapPermissions === 'all' ||
+    (Array.isArray(bootstrapPermissions) && bootstrapPermissions.includes('report.view'));
+
+  const applyAccountBlockFromResponse = async (res: Response, data?: unknown) => {
+    const body = data ?? (await res.json().catch(() => null));
+    const block = accountModerationBlockFromBody(body);
+    if (block) setAccountModBlock(block);
+    return block;
+  };
+
+  const removePostFromLocalState = (postId: number) => {
+    setPosts(prev => prev.filter(p => p.id !== postId && getPostEngagementId(p) !== postId));
+    setPostViewPost(prev => (prev && (prev.id === postId || getPostEngagementId(prev) === postId) ? null : prev));
+  };
+
+  const requestModPostHide = (postId: number) => setPendingModAction({ kind: 'post_hide', postId });
+  const requestModPostRemove = (postId: number) => setPendingModAction({ kind: 'post_remove', postId });
+  const requestModCommentHide = (commentId: number) => setPendingModAction({ kind: 'comment_hide', commentId });
+  const requestModCommentRemove = (commentId: number) => setPendingModAction({ kind: 'comment_remove', commentId });
+
+  const executePendingModAction = async (reason: string) => {
+    if (!pendingModAction || !token) return;
+    setModActionBusy(true);
+    try {
+      let url = '';
+      if (pendingModAction.kind === 'post_hide') {
+        url = `${API_URL}/api/moderation/posts/${pendingModAction.postId}/hide`;
+      } else if (pendingModAction.kind === 'post_remove') {
+        url = `${API_URL}/api/moderation/posts/${pendingModAction.postId}/remove`;
+      } else if (pendingModAction.kind === 'comment_hide') {
+        url = `${API_URL}/api/moderation/comments/${pendingModAction.commentId}/hide`;
+      } else {
+        url = `${API_URL}/api/moderation/comments/${pendingModAction.commentId}/remove`;
+      }
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ reason }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (await applyAccountBlockFromResponse(res, data)) return;
+      if (res.ok) {
+        if (pendingModAction.kind === 'post_hide' || pendingModAction.kind === 'post_remove') {
+          removePostFromLocalState(pendingModAction.postId);
+        }
+        addToast('Moderation action applied', 'system', undefined, { skipPrefCheck: true });
+        setPendingModAction(null);
+      } else {
+        addToast(data.error || 'Moderation action failed', 'system', undefined, { skipPrefCheck: true });
+      }
+    } catch {
+      addToast('Moderation action failed', 'system', undefined, { skipPrefCheck: true });
+    } finally {
+      setModActionBusy(false);
+    }
+  };
+
+  const moderationHandlers = {
+    onModerationHidePost: requestModPostHide,
+    onModerationRemovePost: requestModPostRemove,
+    onModerationHideComment: requestModCommentHide,
+    onModerationRemoveComment: requestModCommentRemove,
+  };
+
   // Removed fetchUsers
 
   const fetchPosts = async (opts?: { cursor?: number | string | null; append?: boolean; mode?: FeedMode; hashtag?: string | null }) => {
@@ -1454,9 +1576,13 @@ export default function App() {
   };
 
   const fetchAdminReports = async () => {
-    if (!currentUser || currentUser.role !== 'admin' || !token) return;
+    if (!currentUser || !token || !canViewReports()) return;
     try {
       const res = await fetch(`${API_URL}/api/admin/reports?status=pending`, { headers: getHeaders() });
+      if (res.status === 403) {
+        const data = await res.json().catch(() => null);
+        if (await applyAccountBlockFromResponse(res, data)) return;
+      }
       if (res.ok) {
         const data: ReportListPage = await res.json();
         setAdminReports(data.reports);
@@ -1466,17 +1592,20 @@ export default function App() {
     }
   };
 
-  const handleReviewReport = async (reportId: number, action: 'dismiss' | 'delete_content' | 'delete_user') => {
-    if (!currentUser || currentUser.role !== 'admin' || !token) {
+  const handleReviewReport = async (reportId: number, action: ReviewReportAction, reason?: string) => {
+    if (!currentUser || !token || !canViewReports()) {
       return { success: false, error: 'Unauthorized' };
     }
     try {
       const res = await fetch(`${API_URL}/api/admin/reports/${reportId}`, {
         method: 'PATCH',
         headers: getHeaders(),
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, ...(reason ? { reason } : {}) }),
       });
       const data = await res.json();
+      if (await applyAccountBlockFromResponse(res, data)) {
+        return { success: false, error: data.error || 'Account restricted' };
+      }
       if (res.ok) {
         setAdminReports(prev => prev?.filter(r => r.id !== reportId) ?? null);
         if (adminData) fetchAdminStats();
@@ -1602,15 +1731,28 @@ export default function App() {
     }
   };
 
-  const fetchAdminStats = async () => {
+  const fetchAdminStats = useCallback(async () => {
     if (!currentUser || currentUser.role !== 'admin' || !token) return;
-    try {
-      const res = await fetch(`${API_URL}/api/admin/stats`, { headers: getHeaders() });
-      if (res.ok) setAdminData(await res.json());
-    } catch (e) {
-      console.error('Error fetching admin stats:', e);
-    }
-  };
+    if (adminStatsInflightRef.current) return adminStatsInflightRef.current;
+
+    adminStatsInflightRef.current = (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/admin/stats`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (res.ok) setAdminData(await res.json());
+      } catch (e) {
+        console.error('Error fetching admin stats:', e);
+      } finally {
+        adminStatsInflightRef.current = null;
+      }
+    })();
+
+    return adminStatsInflightRef.current;
+  }, [currentUser, token]);
 
   const fetchBroadcastHistory = async () => {
     if (!currentUser || currentUser.role !== 'admin' || !token) return;
@@ -1687,8 +1829,11 @@ export default function App() {
   }, [olabidFlagKnown, olabidEnabled]);
 
   useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
     if (token) {
-      fetchPosts();
       fetchBootstrap();
     } else {
       setPosts([]);
@@ -1716,9 +1861,9 @@ export default function App() {
   }, [token]);
 
   useEffect(() => {
-    if (token || activeTab !== 'feed' || showGuestAuth) return;
+    if (activeTab !== 'feed' || showGuestAuth) return;
     fetchPosts({ mode: feedMode, hashtag: activeHashtag });
-  }, [token, activeTab, showGuestAuth]);
+  }, [token, activeTab, showGuestAuth, feedMode, activeHashtag]);
 
   const sendActiveChat = () => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN || !wsReadyRef.current) return;
@@ -1762,7 +1907,10 @@ export default function App() {
     };
 
     const syncAfterReconnect = () => {
-      void fetchThreads();
+      const tab = activeTabRef.current;
+      if (tab !== 'admin' && tab !== 'moderator') {
+        void fetchThreads();
+      }
       const recipient = chatRecipientRef.current;
       if (!recipient || !showMessagesDropdownRef.current) return;
       const maxId = chatMessagesRef.current.reduce(
@@ -2516,7 +2664,11 @@ export default function App() {
       if (res.ok) {
         completeAuthSuccess(data);
       } else {
-        setAuthError(data.error || 'Authentication failed');
+        const rateBlock = rateLimitBlockFromBody(data);
+        if (res.status === 429 && rateBlock) {
+          setRateLimitBlock(rateBlock);
+        }
+        setAuthError(rateBlock ? rateBlock.error : (data.error || 'Authentication failed'));
       }
     } catch {
       setAuthError('Error connecting to authentication service');
@@ -2544,7 +2696,11 @@ export default function App() {
       if (res.ok) {
         completeAuthSuccess(data);
       } else {
-        setAuthError(data.error || 'Google sign-in failed');
+        const rateBlock = rateLimitBlockFromBody(data);
+        if (res.status === 429 && rateBlock) {
+          setRateLimitBlock(rateBlock);
+        }
+        setAuthError(rateBlock ? rateBlock.error : (data.error || 'Google sign-in failed'));
       }
     } catch {
       setAuthError('Error connecting to authentication service');
@@ -2577,6 +2733,9 @@ export default function App() {
     sessionStorage.removeItem('hin_session_id');
     setToken(null);
     setCurrentUser(null);
+    setBootstrapPermissions(null);
+    setAccountModBlock(null);
+    setPendingModAction(null);
     localStorage.removeItem('hin_token');
     localStorage.removeItem('hin_user');
     localStorage.removeItem('hin_admin_token');
@@ -4301,6 +4460,12 @@ export default function App() {
       } else {
         syncUrl({ view: 'home' }, true);
       }
+    } else if (route.view === 'moderator') {
+      if (currentUser?.role === 'moderator') {
+        openModerator({ replace: true, skipUrlSync: true });
+      } else {
+        syncUrl({ view: 'home' }, true);
+      }
     } else if (route.view === 'welcome') {
       openWelcome({ replace: true, skipUrlSync: true });
     } else if (route.view === 'contact') {
@@ -4347,6 +4512,8 @@ export default function App() {
         else openOlabid({ skipUrlSync: true });
       } else if (r.view === 'admin' && currentUser?.role === 'admin') {
         openAdmin(r.section, { skipUrlSync: true });
+      } else if (r.view === 'moderator' && currentUser?.role === 'moderator') {
+        openModerator({ skipUrlSync: true });
       } else if (r.view === 'welcome') {
         openWelcome({ skipUrlSync: true });
       } else if (r.view === 'contact') {
@@ -4662,7 +4829,22 @@ export default function App() {
     );
   }
 
+  const modActionTitle =
+    pendingModAction?.kind === 'post_hide'
+      ? 'Hide post'
+      : pendingModAction?.kind === 'post_remove'
+        ? 'Remove post'
+        : pendingModAction?.kind === 'comment_hide'
+          ? 'Hide comment'
+          : pendingModAction?.kind === 'comment_remove'
+            ? 'Remove comment'
+            : '';
+
   return (
+    <PermissionsProvider
+      permissions={bootstrapPermissions}
+      role={currentUser?.role ?? null}
+    >
     <AppShell
       overlay={
         currentUser?.needsUsernameSetup && token ? (
@@ -4767,6 +4949,7 @@ export default function App() {
             onPinPost={handlePinPost}
             onUnpinPost={handleUnpinPost}
             onRetryPendingPost={handleRetryPendingPost}
+            {...moderationHandlers}
           />
         ) : undefined
       }
@@ -4796,9 +4979,11 @@ export default function App() {
             notificationsLoading={notificationsLoading}
             onlineCount={presenceEnabled ? onlineUserIds.size : undefined}
             isAdminTab={activeTab === 'admin'}
+            isModeratorTab={activeTab === 'moderator'}
             isOlabidTab={activeTab === 'olabid'}
             onGoHome={goHome}
             onOpenAdmin={currentUser?.role === 'admin' ? () => openAdmin('dashboard') : undefined}
+            onOpenModerator={currentUser?.role === 'moderator' ? () => openModerator() : undefined}
             onOpenOlabid={olabidEnabled ? openOlabid : undefined}
             onToggleNotifications={() => {
               setShowNotifications(prev => {
@@ -4941,6 +5126,7 @@ export default function App() {
             onPinPost={handlePinPost}
             onUnpinPost={handleUnpinPost}
             onRetryPendingPost={handleRetryPendingPost}
+            {...moderationHandlers}
             postLimits={postLimits}
           />
         ) : activeTab === 'profile' ? (
@@ -5104,6 +5290,7 @@ export default function App() {
             onPinPost={handlePinPost}
             onUnpinPost={handleUnpinPost}
             onRetryPendingPost={handleRetryPendingPost}
+            {...moderationHandlers}
             onDeleteAccount={handleDeleteAccount}
             onSimulateSessionExpired={() => handleSessionExpired({ force: true })}
             postLimits={postLimits}
@@ -5185,6 +5372,7 @@ export default function App() {
             onPinPost={handlePinPost}
             onUnpinPost={handleUnpinPost}
             onRetryPendingPost={handleRetryPendingPost}
+            {...moderationHandlers}
             postLimits={postLimits}
             gamificationEnabled={gamificationEnabled}
             onGamificationRefresh={() => { void fetchMyGamification(); }}
@@ -5238,6 +5426,15 @@ export default function App() {
               onSignInRequired={handleGuestSignIn}
             />
           )
+        ) : currentUser && activeTab === 'moderator' ? (
+          <ModeratorDashboard
+            token={token!}
+            reports={adminReports}
+            onLoadReports={fetchAdminReports}
+            onReviewReport={handleReviewReport}
+            onOpenProfile={openProfileByUsername}
+            onOpenPost={openPost}
+          />
         ) : currentUser && activeTab === 'admin' ? (
           <AdminDashboard
             section={adminSection}
@@ -5262,7 +5459,7 @@ export default function App() {
           />
         ) : null}
 
-        {currentUser && activeTab !== 'admin' && (
+        {currentUser && activeTab !== 'admin' && activeTab !== 'moderator' && (
           <FloatingActionStack
             showNewPostForm={showNewPostForm}
             showCreatePost={activeTab === 'feed'}
@@ -5376,7 +5573,40 @@ export default function App() {
             onSubmit={handleSubmitReport}
           />
         )}
+
+        {pendingModAction && (
+          <ReasonPromptModal
+            title={modActionTitle}
+            confirmLabel="Apply"
+            busy={modActionBusy}
+            onCancel={() => setPendingModAction(null)}
+            onConfirm={executePendingModAction}
+          />
+        )}
+
+        {accountModBlock && (
+          <AccountModerationBlockModal
+            code={accountModBlock.code}
+            error={accountModBlock.error}
+            reason={accountModBlock.reason}
+            until={accountModBlock.until}
+            onLogout={handleLogout}
+          />
+        )}
+
+        {rateLimitBlock && (
+          <RateLimitModal
+            state={rateLimitBlock}
+            token={token}
+            onDismiss={() => setRateLimitBlock(null)}
+            onUnlocked={() => {
+              setRateLimitBlock(null);
+              addToast('You can continue using the app.', 'system', undefined, { skipPrefCheck: true });
+            }}
+          />
+        )}
       </section>
     </AppShell>
+    </PermissionsProvider>
   );
 }
