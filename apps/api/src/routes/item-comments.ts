@@ -201,7 +201,11 @@ itemComments.put('/:id', async (c) => {
     .returning();
 
   const author = await db
-    .select({ username: schema.users.username })
+    .select({
+      username: schema.users.username,
+      role: schema.users.role,
+      moderatorStatus: schema.users.moderatorStatus,
+    })
     .from(schema.users)
     .where(eq(schema.users.id, updated.userId))
     .get();
@@ -222,6 +226,9 @@ itemComments.put('/:id', async (c) => {
     deletedAt: updated.deletedAt,
     likesCount,
     hasLiked,
+    authorRole: author?.role,
+    authorModeratorStatus:
+      author?.role === 'moderator' ? (author.moderatorStatus ?? 'active') : undefined,
     authorEquippedBadges,
   };
 

@@ -2882,6 +2882,8 @@ export default function App() {
       username: currentUser.username,
       authorAvatarUrl: currentUser.avatarUrl,
       authorRole: currentUser.role,
+      authorModeratorStatus:
+        currentUser.role === 'moderator' ? (currentUser.moderatorStatus ?? 'active') : undefined,
       authorEquippedBadges: currentUser.equippedBadges,
       type: payload.kind === 'poll' ? 'poll' : 'text',
       content,
@@ -3777,7 +3779,13 @@ export default function App() {
   };
 
   const startChat = (user: UserType | ChatRecipient, opts?: { prefillText?: string; seedPreview?: LinkPreview | null }) => {
-    const recipient: ChatRecipient = { id: user.id, username: user.username, role: user.role, avatarUrl: user.avatarUrl };
+    const recipient: ChatRecipient = {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      moderatorStatus: 'moderatorStatus' in user ? user.moderatorStatus : undefined,
+      avatarUrl: user.avatarUrl,
+    };
     setShowNotifications(false);
     showMessagesDropdownRef.current = true;
     setShowMessagesDropdown(true);

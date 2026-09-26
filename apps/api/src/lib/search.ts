@@ -174,6 +174,7 @@ export async function searchPosts(
       username: schema.users.username,
       authorAvatarUrl: schema.users.avatarUrl,
       authorRole: schema.users.role,
+      authorModeratorStatus: schema.users.moderatorStatus,
     })
     .from(schema.posts)
     .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
@@ -279,6 +280,7 @@ export async function searchMentions(
       username: schema.users.username,
       authorAvatarUrl: schema.users.avatarUrl,
       authorRole: schema.users.role,
+      authorModeratorStatus: schema.users.moderatorStatus,
     })
     .from(schema.posts)
     .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))

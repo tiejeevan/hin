@@ -3,6 +3,7 @@ import { Search, X, ChevronRight, Hash, MessageSquare, Users, BookOpen, Loader2 
 import { Post, User, SearchResults, Comment } from '@hin/types';
 import { API_URL } from '../../config';
 import { UserAvatar } from '../profile/UserAvatar';
+import { UserRoleBadge } from '../profile/UserRoleBadge';
 import { PostCard, getPostEngagementId } from './PostCard';
 import { CommentNode } from '../../types/ui';
 
@@ -423,8 +424,9 @@ export function SearchOverlay({
                           >
                             <UserAvatar username={user.username} avatarUrl={user.avatarUrl} size="md" />
                             <div className="min-w-0 flex-grow">
-                              <p className="text-sm font-semibold text-text-primary leading-tight">
+                              <p className="text-sm font-semibold text-text-primary leading-tight inline-flex items-center gap-1">
                                 {user.username}
+                                <UserRoleBadge role={user.role} moderatorStatus={user.moderatorStatus} size="md" />
                               </p>
                               {user.bio ? (
                                 <p className="text-xs text-text-muted truncate mt-1">{user.bio}</p>
@@ -538,8 +540,9 @@ export function SearchOverlay({
                         >
                           <UserAvatar username={user.username} avatarUrl={user.avatarUrl} size="md" />
                           <div className="min-w-0 flex-grow">
-                            <p className="text-sm font-semibold text-text-primary leading-tight">
+                            <p className="text-sm font-semibold text-text-primary leading-tight inline-flex items-center gap-1">
                               {user.username}
+                              <UserRoleBadge role={user.role} moderatorStatus={user.moderatorStatus} size="md" />
                             </p>
                             {user.bio ? (
                               <p className="text-xs text-text-muted truncate mt-1">{user.bio}</p>

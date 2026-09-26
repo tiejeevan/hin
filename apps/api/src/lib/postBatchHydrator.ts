@@ -40,6 +40,7 @@ export type PostHydrationRow = {
   username: string;
   authorAvatarUrl?: string | null;
   authorRole?: string;
+  authorModeratorStatus?: string | null;
 };
 
 export type BuildPostsOptions = {
@@ -72,6 +73,7 @@ const postSelectFields = {
   username: schema.users.username,
   authorAvatarUrl: schema.users.avatarUrl,
   authorRole: schema.users.role,
+  authorModeratorStatus: schema.users.moderatorStatus,
 };
 
 /**
@@ -390,6 +392,10 @@ export async function buildPostsResponseBatch(
       username: post.username,
       authorAvatarUrl: post.authorAvatarUrl,
       authorRole: post.authorRole,
+      authorModeratorStatus:
+        post.authorRole === 'moderator'
+          ? ((post.authorModeratorStatus as Post['authorModeratorStatus']) ?? 'active')
+          : undefined,
       authorEquippedBadges: badgesByUser.get(post.userId) ?? [],
       type: postType,
       content: post.content,

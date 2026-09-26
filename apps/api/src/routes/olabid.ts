@@ -508,6 +508,8 @@ olabid.get('/items/:id/comments', async (c) => {
       createdAt: schema.itemComments.createdAt,
       deletedAt: schema.itemComments.deletedAt,
       username: schema.users.username,
+      authorRole: schema.users.role,
+      authorModeratorStatus: schema.users.moderatorStatus,
     })
     .from(schema.itemComments)
     .innerJoin(schema.users, eq(schema.itemComments.userId, schema.users.id))
@@ -554,7 +556,15 @@ olabid.get('/items/:id/comments', async (c) => {
     if (row.deletedAt) {
       return { ...row, content: '[Comment deleted]', username: 'deleted', likesCount, hasLiked };
     }
-    return { ...row, likesCount, hasLiked, authorEquippedBadges: equippedBadgesByUser.get(row.userId) ?? [] };
+    return {
+      ...row,
+      likesCount,
+      hasLiked,
+      authorRole: row.authorRole,
+      authorModeratorStatus:
+        row.authorRole === 'moderator' ? (row.authorModeratorStatus ?? 'active') : undefined,
+      authorEquippedBadges: equippedBadgesByUser.get(row.userId) ?? [],
+    };
   });
 
   return noStoreJson(c, comments);
@@ -603,6 +613,9 @@ olabid.post('/items/:id/comments', async (c) => {
     deletedAt: inserted.deletedAt,
     likesCount: 0,
     hasLiked: false,
+    authorRole: authUser.role,
+    authorModeratorStatus:
+      authUser.role === 'moderator' ? (authUser.moderatorStatus ?? 'active') : undefined,
     authorEquippedBadges,
   };
 

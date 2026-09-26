@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Heart, MessageSquare, Shield, Trash2, Send, X, MoreVertical, Pencil, Link2, Bookmark, Repeat2, Flag, Pin } from 'lucide-react';
+import { UserRoleBadge } from '../profile/UserRoleBadge';
 import { Post, Comment, User as UserType, DEFAULT_SYSTEM_SETTINGS, isUnavailableRepostedPost } from '@hin/types';
 import { CommentNode } from '../../types/ui';
 import { buildCommentTree } from '../../utils/comments';
@@ -400,9 +401,14 @@ export function PostCard({
                   <button
                     type="button"
                     onClick={() => onViewProfile(embedded.username)}
-                    className="text-xs font-semibold text-text-primary hover:underline cursor-pointer"
+                    className="text-xs font-semibold text-text-primary hover:underline cursor-pointer inline-flex items-center gap-1"
                   >
                     @{embedded.username}
+                    <UserRoleBadge
+                      role={embedded.authorRole}
+                      moderatorStatus={embedded.authorModeratorStatus}
+                      size="sm"
+                    />
                   </button>
                   <PostContentText
                     content={embedded.content}
@@ -586,9 +592,15 @@ export function PostCard({
           <button
             type="button"
             onClick={() => onViewProfile(post.username)}
-            className="hover:text-indigo-400 transition-colors cursor-pointer"
+            className="hover:text-indigo-400 transition-colors cursor-pointer inline-flex items-center gap-1"
           >
-            @{post.username} reposted
+            @{post.username}
+            <UserRoleBadge
+              role={post.authorRole}
+              moderatorStatus={post.authorModeratorStatus}
+              size="sm"
+            />
+            <span>reposted</span>
           </button>
         </div>
       )}
@@ -618,7 +630,11 @@ export function PostCard({
                 {gamificationEnabled && headerPost.authorEquippedBadges && headerPost.authorEquippedBadges.length > 0 && (
                   <EquippedBadgesInline badges={headerPost.authorEquippedBadges} size="sm" />
                 )}
-                {headerPost.authorRole === 'admin' && <Shield className="h-3 w-3 text-amber-500" />}
+                <UserRoleBadge
+                  role={headerPost.authorRole}
+                  moderatorStatus={headerPost.authorModeratorStatus}
+                  size="sm"
+                />
               </button>
               <span className="text-[9px] text-text-muted flex items-center gap-1">
                 <button

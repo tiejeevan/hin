@@ -194,6 +194,7 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
         id: schema.users.id,
         username: schema.users.username,
         role: schema.users.role,
+        moderatorStatus: schema.users.moderatorStatus,
         avatarUrl: schema.users.avatarUrl,
         lastSeenAt: schema.users.lastSeenAt,
       })
@@ -240,6 +241,8 @@ export async function listMessageThreads(db: Db, userId: number): Promise<ChatTh
       id: u.id,
       username: u.username,
       role: u.role,
+      moderatorStatus:
+        u.role === 'moderator' ? ((u.moderatorStatus as ChatThread['moderatorStatus']) ?? 'active') : undefined,
       avatarUrl: u.avatarUrl,
       equippedBadges: equippedBadgesByUser.get(u.id) ?? [],
       lastSeenAt: u.lastSeenAt ?? null,

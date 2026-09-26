@@ -6,6 +6,7 @@ import { PostContentText } from '../feed/PostContentText';
 import { useMentionAutocomplete } from '../../hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '../ui/MentionSuggestions';
 import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
+import { UserRoleBadge } from '../profile/UserRoleBadge';
 import { UserAvatar } from '../profile/UserAvatar';
 
 interface ItemCommentItemProps {
@@ -115,9 +116,14 @@ export function ItemCommentItem({
                   <button
                     type="button"
                     onClick={() => onViewProfile(comment.username)}
-                    className="font-semibold text-text-primary hover:text-indigo-400 transition-colors cursor-pointer"
+                    className="font-semibold text-text-primary hover:text-indigo-400 transition-colors cursor-pointer inline-flex items-center gap-1"
                   >
                     {comment.username}
+                    <UserRoleBadge
+                      role={comment.authorRole}
+                      moderatorStatus={comment.authorModeratorStatus}
+                      size="sm"
+                    />
                   </button>
                 )}
                 {!isDeleted && gamificationEnabled && comment.authorEquippedBadges && comment.authorEquippedBadges.length > 0 && (

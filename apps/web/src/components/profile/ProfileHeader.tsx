@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Shield, MessageCircle, Pencil, UserPlus, UserCheck, Clock, Settings, MoreHorizontal, VolumeX, Volume2, Ban, UserX, Link2, Flag, MapPin, CheckCircle2, Mail } from 'lucide-react';
+import { MessageCircle, Pencil, UserPlus, UserCheck, Clock, Settings, MoreHorizontal, VolumeX, Volume2, Ban, UserX, Link2, Flag, MapPin, CheckCircle2, Mail } from 'lucide-react';
 import { BlockStatus, FollowStatus, MuteStatus, User as UserType, type GamificationPublic } from '@hin/types';
 import { UserAvatar } from './UserAvatar';
 import { ProfileEditForm } from './ProfileEditForm';
@@ -7,6 +7,7 @@ import { LevelBadge } from '../gamification/LevelBadge';
 import { PointsDisplay } from '../gamification/PointsDisplay';
 import { BadgeGrid } from '../gamification/BadgeGrid';
 import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
+import { UserRoleBadge } from './UserRoleBadge';
 
 const getCountryName = (code: string | null | undefined): string | null => {
   if (!code) return null;
@@ -331,7 +332,7 @@ export function ProfileHeader({
             {showGamification && gamification && gamification.totalPoints != null && (
               <PointsDisplay totalPoints={gamification.totalPoints} compact />
             )}
-            {user.role === 'admin' && <Shield className="h-4 w-4 text-amber-500" />}
+            <UserRoleBadge role={user.role} moderatorStatus={user.moderatorStatus} size="md" animated />
             {followStatus === 'follows_you' && !isOwnProfile && canInteract && (
               <span className="text-[10px] font-semibold text-text-muted bg-bg-tertiary px-2 py-0.5 rounded-md">
                 Follows you

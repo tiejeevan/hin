@@ -166,6 +166,7 @@ posts.get('/', async (c) => {
     username: schema.users.username,
     authorAvatarUrl: schema.users.avatarUrl,
     authorRole: schema.users.role,
+    authorModeratorStatus: schema.users.moderatorStatus,
   })
   .from(schema.posts)
   .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
@@ -246,6 +247,7 @@ posts.get('/bookmarks', async (c) => {
       username: schema.users.username,
       authorAvatarUrl: schema.users.avatarUrl,
       authorRole: schema.users.role,
+      authorModeratorStatus: schema.users.moderatorStatus,
       bookmarkCreatedAt: schema.postBookmarks.createdAt,
     })
     .from(schema.postBookmarks)
@@ -391,6 +393,8 @@ posts.post('/', async (c) => {
     username: authUser.username,
     authorAvatarUrl: authUser.avatarUrl,
     authorRole: authUser.role,
+    authorModeratorStatus:
+      authUser.role === 'moderator' ? (authUser.moderatorStatus ?? 'active') : undefined,
   }, authUser.id);
 
   await notifyMentions(db, c.env, {
@@ -502,6 +506,7 @@ posts.put('/:id', async (c) => {
     username: schema.users.username,
     avatarUrl: schema.users.avatarUrl,
     role: schema.users.role,
+    moderatorStatus: schema.users.moderatorStatus,
   }).from(schema.users).where(eq(schema.users.id, updated.userId)).get();
 
   const responsePost = await buildPostResponse(db, {
@@ -516,6 +521,8 @@ posts.put('/:id', async (c) => {
     username: author?.username || 'Unknown',
     authorAvatarUrl: author?.avatarUrl,
     authorRole: author?.role,
+    authorModeratorStatus:
+      author?.role === 'moderator' ? (author.moderatorStatus ?? 'active') : undefined,
   }, authUser.id);
 
   deferBroadcast(c.executionCtx, broadcastEvent(c.env, { type: 'post_updated', payload: { post: responsePost } }));
@@ -770,6 +777,8 @@ posts.get('/:id/comments', async (c) => {
       createdAt: schema.comments.createdAt,
       deletedAt: schema.comments.deletedAt,
       username: schema.users.username,
+      authorRole: schema.users.role,
+      authorModeratorStatus: schema.users.moderatorStatus,
     })
     .from(schema.comments)
     .innerJoin(schema.users, eq(schema.comments.userId, schema.users.id))
@@ -829,6 +838,11 @@ posts.get('/:id/comments', async (c) => {
       ...comment,
       likesCount,
       hasLiked,
+      authorRole: comment.authorRole,
+      authorModeratorStatus:
+        comment.authorRole === 'moderator'
+          ? (comment.authorModeratorStatus ?? 'active')
+          : undefined,
       authorEquippedBadges: equippedBadgesByUser.get(comment.userId) ?? [],
     };
   });
@@ -856,6 +870,7 @@ posts.post('/:id/pin', async (c) => {
     username: schema.users.username,
     avatarUrl: schema.users.avatarUrl,
     role: schema.users.role,
+    moderatorStatus: schema.users.moderatorStatus,
   }).from(schema.users).where(eq(schema.users.id, post.userId)).get();
 
   const responsePost = await buildPostResponse(db, {
@@ -872,6 +887,8 @@ posts.post('/:id/pin', async (c) => {
     username: author?.username || 'Unknown',
     authorAvatarUrl: author?.avatarUrl,
     authorRole: author?.role,
+    authorModeratorStatus:
+      author?.role === 'moderator' ? (author.moderatorStatus ?? 'active') : undefined,
   }, authUser.id);
 
   return c.json(responsePost);
@@ -897,6 +914,7 @@ posts.delete('/:id/pin', async (c) => {
     username: schema.users.username,
     avatarUrl: schema.users.avatarUrl,
     role: schema.users.role,
+    moderatorStatus: schema.users.moderatorStatus,
   }).from(schema.users).where(eq(schema.users.id, post.userId)).get();
 
   const responsePost = await buildPostResponse(db, {
@@ -913,6 +931,8 @@ posts.delete('/:id/pin', async (c) => {
     username: author?.username || 'Unknown',
     authorAvatarUrl: author?.avatarUrl,
     authorRole: author?.role,
+    authorModeratorStatus:
+      author?.role === 'moderator' ? (author.moderatorStatus ?? 'active') : undefined,
   }, authUser.id);
 
   return c.json(responsePost);
@@ -990,6 +1010,10 @@ posts.post('/:id/repost', async (c) => {
     username: author?.username || authUser.username,
     authorAvatarUrl: author?.avatarUrl ?? authUser.avatarUrl,
     authorRole: author?.role ?? authUser.role,
+    authorModeratorStatus:
+      (author?.role ?? authUser.role) === 'moderator'
+        ? (author?.moderatorStatus ?? authUser.moderatorStatus ?? 'active')
+        : undefined,
   }, authUser.id);
 
   const repostsCount = await countSilentReposts(db, rootId);
@@ -1107,6 +1131,7 @@ posts.get('/:id', async (c) => {
       username: schema.users.username,
       authorAvatarUrl: schema.users.avatarUrl,
       authorRole: schema.users.role,
+      authorModeratorStatus: schema.users.moderatorStatus,
     })
     .from(schema.posts)
     .innerJoin(schema.users, eq(schema.posts.userId, schema.users.id))
@@ -1182,6 +1207,9 @@ posts.post('/:id/comments', async (c) => {
     deletedAt: inserted.deletedAt,
     likesCount: 0,
     hasLiked: false,
+    authorRole: authUser.role,
+    authorModeratorStatus:
+      authUser.role === 'moderator' ? (authUser.moderatorStatus ?? 'active') : undefined,
     authorEquippedBadges,
   };
 

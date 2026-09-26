@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { X, Shield, SquarePen, ChevronLeft, Maximize2, Minimize2, Send, MessageCircle, ImagePlus, Camera, Loader2, Video, Phone } from 'lucide-react';
+import { X, SquarePen, ChevronLeft, Maximize2, Minimize2, Send, MessageCircle, ImagePlus, Camera, Loader2, Video, Phone } from 'lucide-react';
 import { CallType, ChatThread, LinkPreview, Message, User as UserType } from '@hin/types';
 import { prefetchActiveCallRoom } from '../calls/ActiveCallPanel';
 import { CallControlButton } from '../calls/CallControlButton';
 import { ChatRecipient } from '../../types/ui';
 import { UserAvatar } from '../profile/UserAvatar';
 import { EquippedBadgesInline } from '../gamification/EquippedBadgesInline';
+import { UserRoleBadge } from '../profile/UserRoleBadge';
 import { useOverscrollBounce } from '../../hooks/useOverscrollBounce';
 import { LinkPreviewCard } from '../feed/LinkPreviewCard';
 import { prefersReducedMotion, sortThreads } from '../../lib/chatWasmBridge';
@@ -739,6 +740,7 @@ export function MessagesPanel({
                         id: t.id,
                         username: t.username,
                         role: t.role,
+                        moderatorStatus: t.moderatorStatus,
                         avatarUrl: t.avatarUrl,
                       })
                     }
@@ -784,9 +786,12 @@ export function MessagesPanel({
                               className="ml-0.5 align-text-bottom"
                             />
                           )}
-                          {t.role === 'admin' && (
-                            <Shield className="h-3 w-3 text-amber-500 inline ml-0.5 align-text-bottom" />
-                          )}
+                          <UserRoleBadge
+                            role={t.role}
+                            moderatorStatus={t.moderatorStatus}
+                            size="sm"
+                            className="ml-0.5"
+                          />
                         </p>
                         {t.lastMessage && threadTime ? (
                           <span
@@ -896,8 +901,13 @@ function PanelHeader({
                 )}
               </div>
               <div className="min-w-0 leading-tight">
-                <span className="text-[11px] font-semibold text-text-primary truncate block hover:text-indigo-400 transition-colors">
-                  {chatRecipient.username}
+                <span className="text-[11px] font-semibold text-text-primary truncate block hover:text-indigo-400 transition-colors inline-flex items-center gap-1 max-w-full">
+                  <span className="truncate">{chatRecipient.username}</span>
+                  <UserRoleBadge
+                    role={chatRecipient.role}
+                    moderatorStatus={chatRecipient.moderatorStatus}
+                    size="sm"
+                  />
                 </span>
                 {isTyping ? (
                   <span className="text-[10px] font-medium text-indigo-400">{chatStrings.typing}</span>

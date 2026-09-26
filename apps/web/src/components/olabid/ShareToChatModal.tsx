@@ -5,6 +5,7 @@ import { ChatRecipient } from '../../types/ui';
 import { API_URL } from '../../config';
 import { SILENT_LOADING_HEADER, SILENT_LOADING_VALUE } from '../../lib/globalLoading';
 import { UserAvatar } from '../profile/UserAvatar';
+import { UserRoleBadge } from '../profile/UserRoleBadge';
 import { sortThreads } from '../../lib/chatWasmBridge';
 
 interface ShareToChatModalProps {
@@ -65,9 +66,21 @@ export function ShareToChatModal({
     return () => clearTimeout(timer);
   }, [query, token]);
 
-  const pick = (user: { id: number; username: string; role: string; avatarUrl?: string | null }) => {
+  const pick = (user: {
+    id: number;
+    username: string;
+    role: string;
+    moderatorStatus?: import('@hin/types').ModeratorStatus | null;
+    avatarUrl?: string | null;
+  }) => {
     onSelect(
-      { id: user.id, username: user.username, role: user.role, avatarUrl: user.avatarUrl },
+      {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        moderatorStatus: user.moderatorStatus,
+        avatarUrl: user.avatarUrl,
+      },
       permalinkUrl,
     );
   };
@@ -125,7 +138,10 @@ export function ShareToChatModal({
                   className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-bg-tertiary transition-colors cursor-pointer min-h-[52px]"
                 >
                   <UserAvatar username={user.username} avatarUrl={user.avatarUrl} size="sm" className="h-8 w-8 text-xs" />
-                  <span className="text-sm font-medium text-text-primary">@{user.username}</span>
+                  <span className="text-sm font-medium text-text-primary inline-flex items-center gap-1">
+                    @{user.username}
+                    <UserRoleBadge role={user.role} moderatorStatus={user.moderatorStatus} size="sm" />
+                  </span>
                 </button>
               ))
             )
@@ -144,7 +160,10 @@ export function ShareToChatModal({
               >
                 <UserAvatar username={t.username} avatarUrl={t.avatarUrl} size="sm" className="h-8 w-8 text-xs" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-text-primary truncate">@{t.username}</p>
+                  <p className="text-sm font-medium text-text-primary truncate inline-flex items-center gap-1 max-w-full">
+                    <span className="truncate">@{t.username}</span>
+                    <UserRoleBadge role={t.role} moderatorStatus={t.moderatorStatus} size="sm" />
+                  </p>
                   {t.lastMessage && (
                     <p className="text-[11px] text-text-muted truncate">{t.lastMessage.content}</p>
                   )}

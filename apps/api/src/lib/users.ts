@@ -20,6 +20,7 @@ export function toPublicUser(
     id: number;
     username: string;
     role: string;
+    moderatorStatus?: string | null;
     bio?: string | null;
     avatarUrl?: string | null;
     coverUrl?: string | null;
@@ -66,6 +67,11 @@ export function toPublicUser(
     ...(extras?.blockStatus !== undefined ? { blockStatus: extras.blockStatus } : {}),
     ...(extras?.muteStatus !== undefined ? { muteStatus: extras.muteStatus } : {}),
     ...(extras?.equippedBadges !== undefined ? { equippedBadges: extras.equippedBadges } : {}),
+    ...(user.role === 'moderator'
+      ? {
+          moderatorStatus: (user.moderatorStatus as User['moderatorStatus']) ?? 'active',
+        }
+      : {}),
   };
 }
 
@@ -75,6 +81,7 @@ export function toSelfUser(
     id: number;
     username: string;
     role: string;
+    moderatorStatus?: string | null;
     bio?: string | null;
     avatarUrl?: string | null;
     coverUrl?: string | null;
@@ -119,6 +126,7 @@ export const USER_PUBLIC_FIELDS = {
   id: schema.users.id,
   username: schema.users.username,
   role: schema.users.role,
+  moderatorStatus: schema.users.moderatorStatus,
   bio: schema.users.bio,
   avatarUrl: schema.users.avatarUrl,
   coverUrl: schema.users.coverUrl,
@@ -142,6 +150,7 @@ type UserRow = {
   id: number;
   username: string;
   role: string;
+  moderatorStatus?: string | null;
   bio?: string | null;
   avatarUrl?: string | null;
   coverUrl?: string | null;

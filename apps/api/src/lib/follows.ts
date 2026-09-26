@@ -577,6 +577,8 @@ export async function listPendingRequests(db: Db, targetId: number): Promise<Fol
       createdAt: schema.followRequests.createdAt,
       username: schema.users.username,
       avatarUrl: schema.users.avatarUrl,
+      role: schema.users.role,
+      moderatorStatus: schema.users.moderatorStatus,
     })
     .from(schema.followRequests)
     .innerJoin(schema.users, eq(schema.followRequests.requesterId, schema.users.id))
@@ -594,6 +596,9 @@ export async function listPendingRequests(db: Db, targetId: number): Promise<Fol
     requesterId: r.requesterId,
     requesterUsername: r.username,
     requesterAvatarUrl: r.avatarUrl ?? null,
+    requesterRole: r.role,
+    requesterModeratorStatus:
+      r.role === 'moderator' ? ((r.moderatorStatus as FollowRequest['requesterModeratorStatus']) ?? 'active') : undefined,
     createdAt: r.createdAt,
   }));
 }
@@ -617,13 +622,15 @@ const LIST_PAGE_SIZE = 20;
 async function enrichFollowListUsers(
   db: Db,
   userIds: number[],
-): Promise<Map<number, { username: string; avatarUrl: string | null }>> {
+): Promise<Map<number, { username: string; avatarUrl: string | null; role: string; moderatorStatus: string | null }>> {
   if (userIds.length === 0) return new Map();
   const rows = await db
     .select({
       id: schema.users.id,
       username: schema.users.username,
       avatarUrl: schema.users.avatarUrl,
+      role: schema.users.role,
+      moderatorStatus: schema.users.moderatorStatus,
     })
     .from(schema.users)
     .where(
@@ -633,7 +640,17 @@ async function enrichFollowListUsers(
       ),
     )
     .all();
-  return new Map(rows.map(r => [r.id, { username: r.username, avatarUrl: r.avatarUrl ?? null }]));
+  return new Map(
+    rows.map(r => [
+      r.id,
+      {
+        username: r.username,
+        avatarUrl: r.avatarUrl ?? null,
+        role: r.role,
+        moderatorStatus: r.moderatorStatus,
+      },
+    ]),
+  );
 }
 
 export async function listFollowers(
@@ -673,12 +690,18 @@ export async function listFollowers(
     ? await batchFollowStatuses(db, viewerId, ids)
     : new Map<number, FollowStatus>();
 
-  const users: FollowListUser[] = pageRows.map((r, i) => ({
-    id: r.followerId,
-    username: infoMap.get(r.followerId)?.username || 'unknown',
-    avatarUrl: infoMap.get(r.followerId)?.avatarUrl ?? null,
-    followStatus: statusMap.get(r.followerId) ?? 'none',
-  }));
+  const users: FollowListUser[] = pageRows.map((r) => {
+    const info = infoMap.get(r.followerId);
+    return {
+      id: r.followerId,
+      username: info?.username || 'unknown',
+      avatarUrl: info?.avatarUrl ?? null,
+      role: info?.role,
+      moderatorStatus:
+        info?.role === 'moderator' ? ((info.moderatorStatus as FollowListUser['moderatorStatus']) ?? 'active') : undefined,
+      followStatus: statusMap.get(r.followerId) ?? 'none',
+    };
+  });
 
   return { users, nextCursor };
 }
@@ -720,12 +743,18 @@ export async function listFollowing(
     ? await batchFollowStatuses(db, viewerId, ids)
     : new Map<number, FollowStatus>();
 
-  const users: FollowListUser[] = pageRows.map((r) => ({
-    id: r.followingId,
-    username: infoMap.get(r.followingId)?.username || 'unknown',
-    avatarUrl: infoMap.get(r.followingId)?.avatarUrl ?? null,
-    followStatus: statusMap.get(r.followingId) ?? 'none',
-  }));
+  const users: FollowListUser[] = pageRows.map((r) => {
+    const info = infoMap.get(r.followingId);
+    return {
+      id: r.followingId,
+      username: info?.username || 'unknown',
+      avatarUrl: info?.avatarUrl ?? null,
+      role: info?.role,
+      moderatorStatus:
+        info?.role === 'moderator' ? ((info.moderatorStatus as FollowListUser['moderatorStatus']) ?? 'active') : undefined,
+      followStatus: statusMap.get(r.followingId) ?? 'none',
+    };
+  });
 
   return { users, nextCursor };
 }

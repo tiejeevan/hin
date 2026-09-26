@@ -4,6 +4,7 @@ import type { Post } from '@hin/types';
 import { isUnavailableRepostedPost } from '@hin/types';
 import { PostContentText } from './PostContentText';
 import { UserAvatar } from '../profile/UserAvatar';
+import { UserRoleBadge } from '../profile/UserRoleBadge';
 
 interface QuoteComposerProps {
   original: Post;
@@ -95,9 +96,14 @@ export function QuoteComposer({
                   <button
                     type="button"
                     onClick={() => onViewProfile(original.username)}
-                    className="text-xs font-semibold text-text-primary hover:underline cursor-pointer"
+                    className="text-xs font-semibold text-text-primary hover:underline cursor-pointer inline-flex items-center gap-1"
                   >
                     @{original.username}
+                    <UserRoleBadge
+                      role={original.authorRole}
+                      moderatorStatus={original.authorModeratorStatus}
+                      size="sm"
+                    />
                   </button>
                 </div>
                 <PostContentText

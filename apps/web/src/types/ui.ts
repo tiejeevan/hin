@@ -39,5 +39,6 @@ export interface ChatRecipient {
   id: number;
   username: string;
   role: string;
+  moderatorStatus?: import('@hin/types').ModeratorStatus | null;
   avatarUrl?: string | null;
 }

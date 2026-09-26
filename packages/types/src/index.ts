@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export * from './permissions';
+export * from './roles';
 
 export type FollowStatus = 'none' | 'following' | 'requested' | 'follows_you';
 
@@ -46,7 +47,7 @@ export interface User {
   needsEmailVerification?: boolean;
   /** Self-only — admin allowlist grants permission to start video calls. */
   canInitiateVideoCalls?: boolean;
-  /** Self-only — moderator account status. */
+  /** Present on public profiles when role is moderator; self-only otherwise. */
   moderatorStatus?: import('./permissions').ModeratorStatus | null;
   /** Self-only — account moderation enforcement status. */
   accountModerationStatus?: import('./permissions').AccountModerationStatus;
@@ -85,6 +86,8 @@ export interface FollowRequest {
   requesterId: number;
   requesterUsername: string;
   requesterAvatarUrl?: string | null;
+  requesterRole?: string;
+  requesterModeratorStatus?: import('./permissions').ModeratorStatus | null;
   createdAt: string;
 }
 
@@ -92,6 +95,8 @@ export interface FollowListUser {
   id: number;
   username: string;
   avatarUrl?: string | null;
+  role?: string;
+  moderatorStatus?: import('./permissions').ModeratorStatus | null;
   followStatus?: FollowStatus;
 }
 
@@ -209,6 +214,7 @@ export interface Post {
   username: string;
   authorAvatarUrl?: string | null;
   authorRole?: string;
+  authorModeratorStatus?: import('./permissions').ModeratorStatus | null;
   authorEquippedBadges?: EquippedBadgePublic[];
   type: PostType;
   content: string;
@@ -405,6 +411,8 @@ export interface Comment {
   deletedAt?: string | null;
   likesCount: number;
   hasLiked?: boolean;
+  authorRole?: string;
+  authorModeratorStatus?: import('./permissions').ModeratorStatus | null;
   authorEquippedBadges?: EquippedBadgePublic[];
   /** Gamification delta from this action (comment create). */
   g?: GamificationActionBlock;
@@ -458,6 +466,8 @@ export interface ItemComment {
   deletedAt?: string | null;
   likesCount: number;
   hasLiked?: boolean;
+  authorRole?: string;
+  authorModeratorStatus?: import('./permissions').ModeratorStatus | null;
   authorEquippedBadges?: EquippedBadgePublic[];
   /** Gamification delta from this action (comment create). */
   g?: GamificationActionBlock;
@@ -479,6 +489,7 @@ export interface ChatThread {
   id: number;
   username: string;
   role: string;
+  moderatorStatus?: import('./permissions').ModeratorStatus | null;
   avatarUrl?: string | null;
   equippedBadges?: EquippedBadgePublic[];
   /** Partner's last WebSocket disconnect time (presence). */

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Check, X } from 'lucide-react';
 import { FollowRequest } from '@hin/types';
 import { UserAvatar } from './UserAvatar';
+import { UserRoleBadge } from './UserRoleBadge';
 
 interface FollowRequestsPanelProps {
   requests: FollowRequest[];
@@ -49,7 +50,14 @@ export function FollowRequestsPanel({
                 avatarUrl={req.requesterAvatarUrl}
                 size="sm"
               />
-              <span className="text-sm font-medium text-text-primary truncate">{req.requesterUsername}</span>
+              <span className="text-sm font-medium text-text-primary truncate inline-flex items-center gap-1 min-w-0">
+                <span className="truncate">{req.requesterUsername}</span>
+                <UserRoleBadge
+                  role={req.requesterRole}
+                  moderatorStatus={req.requesterModeratorStatus}
+                  size="sm"
+                />
+              </span>
             </button>
             <div className="flex items-center gap-1.5 shrink-0">
               <button

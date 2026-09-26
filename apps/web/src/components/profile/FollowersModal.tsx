@@ -3,6 +3,7 @@ import { Loader2, X } from 'lucide-react';
 import { FollowListPage } from '@hin/types';
 import { API_URL } from '../../config';
 import { UserAvatar } from './UserAvatar';
+import { UserRoleBadge } from './UserRoleBadge';
 
 interface FollowersModalProps {
   userId: number;
@@ -83,7 +84,10 @@ export function FollowersModal({ userId, mode, token, onClose, onViewProfile }: 
                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-bg-tertiary/60 text-left cursor-pointer"
                   >
                     <UserAvatar username={u.username} avatarUrl={u.avatarUrl} size="sm" />
-                    <span className="text-sm font-medium text-text-primary">{u.username}</span>
+                    <span className="text-sm font-medium text-text-primary inline-flex items-center gap-1 min-w-0">
+                      <span className="truncate">{u.username}</span>
+                      <UserRoleBadge role={u.role} moderatorStatus={u.moderatorStatus} size="sm" />
+                    </span>
                   </button>
                 </li>
               ))}
